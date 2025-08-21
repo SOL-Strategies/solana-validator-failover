@@ -92,7 +92,7 @@ validator:
     # golang template to identify the tower file within tower.dir
     # available to the template is an .Identities object
     # default: "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
-    file_name_template: "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
+    file_name_template: "tower-1_9-{{ .Identities.Active.Pubkey }}.bin"
 
   # failover configuration
   failover:
