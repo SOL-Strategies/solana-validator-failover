@@ -399,7 +399,7 @@ func (s *Stream) PullActiveIdentityVoteCreditsSample(solanaRPCClient solana.Clie
 }
 
 // PullActiveIdentityVoteCreditsSamples pulls a sample of the vote credits for the active identity
-func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.ClientInterface, nSamples int) (err error) {
+func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.ClientInterface, nSamples int, interval time.Duration) (err error) {
 	if nSamples == 0 {
 		return nil
 	}
@@ -409,7 +409,6 @@ func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.Cli
 
 	// multiple samples may take some time so show a spinner to keep you patient
 	var sp *spinner.Spinner
-	interval := 5 * time.Second
 	sp = spinner.New().Title(fmt.Sprintf("Pulling %d vote credit samples %s apart...", nSamples, interval))
 
 	sampleCount := 0

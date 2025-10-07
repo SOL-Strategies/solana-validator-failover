@@ -51,6 +51,7 @@ type Validator struct {
 	Bin                            string
 	BinMetadata                    BinMetadata
 	FailoverServerConfig           ServerConfig
+	MonitorConfig                  MonitorConfig
 	GossipNode                     *solana.Node
 	Hooks                          hooks.FailoverHooks
 	Hostname                       string
@@ -166,7 +167,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	}
 
 	// get server
-	err = v.configureServer(cfg.Failover.Server)
+	err = v.configureServer(cfg.Failover.Server, cfg.Failover.Monitor)
 	if err != nil {
 		return err
 	}
@@ -508,11 +509,33 @@ func (v *Validator) configureHostname(hostname string) (err error) {
 }
 
 // configureServer ensures the server is valid and sets it
-func (v *Validator) configureServer(cfg ServerConfig) (err error) {
+func (v *Validator) configureServer(cfg ServerConfig, monitorCfg MonitorConfig) (err error) {
 	v.FailoverServerConfig = cfg
+
+	// validate monitor configuration early
+	if monitorCfg.CreditSamples.Count < 1 {
+		return fmt.Errorf("credit samples count must be >= 1, got %d", monitorCfg.CreditSamples.Count)
+	}
+
+	if monitorCfg.CreditSamples.Interval == "" {
+		return fmt.Errorf("credit samples interval cannot be empty")
+	}
+
+	// validate that the interval can be parsed and store the parsed duration
+	duration, err := time.ParseDuration(monitorCfg.CreditSamples.Interval)
+	if err != nil {
+		return fmt.Errorf("invalid credit samples interval %q: %v", monitorCfg.CreditSamples.Interval, err)
+	}
+
+	// store the monitor config with parsed duration
+	monitorCfg.CreditSamples.IntervalDuration = duration
+	v.MonitorConfig = monitorCfg
+
 	v.logger.Debug().
 		Int("port", v.FailoverServerConfig.Port).
-		Msg("server set")
+		Int("credit_samples_count", v.MonitorConfig.CreditSamples.Count).
+		Str("credit_samples_interval", v.MonitorConfig.CreditSamples.Interval).
+		Msg("server and monitor config set")
 	return nil
 }
 
@@ -589,6 +612,13 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		SolanaRPCClient:  v.solanaRPCClient,
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
+		MonitorConfig: failover.MonitorConfig{
+			CreditSamples: failover.CreditSamplesConfig{
+				Count:            v.MonitorConfig.CreditSamples.Count,
+				Interval:         v.MonitorConfig.CreditSamples.Interval,
+				IntervalDuration: v.MonitorConfig.CreditSamples.IntervalDuration,
+			},
+		},
 	})
 	if err != nil {
 		return err

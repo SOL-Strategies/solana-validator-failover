@@ -1,6 +1,8 @@
 package validator
 
 import (
+	"time"
+
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/identities"
 )
@@ -49,8 +51,9 @@ type MonitorConfig struct {
 
 // CreditSamplesConfig holds the configuration for a failover monitor credit samples
 type CreditSamplesConfig struct {
-	Count    int    `mapstructure:"count"`
-	Interval string `mapstructure:"interval"`
+	Count            int           `mapstructure:"count"`
+	Interval         string        `mapstructure:"interval"`
+	IntervalDuration time.Duration // parsed duration, set during configuration
 }
 
 // ServerConfig holds the configuration for a failover server

@@ -21,6 +21,18 @@ import (
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
 )
 
+// MonitorConfig holds the configuration for a failover monitor
+type MonitorConfig struct {
+	CreditSamples CreditSamplesConfig
+}
+
+// CreditSamplesConfig holds the configuration for a failover monitor credit samples
+type CreditSamplesConfig struct {
+	Count            int
+	Interval         string
+	IntervalDuration time.Duration
+}
+
 // ServerConfig is the configuration for the failover server
 type ServerConfig struct {
 	Port              int
@@ -30,6 +42,7 @@ type ServerConfig struct {
 	SolanaRPCClient   solana.ClientInterface
 	IsDryRunFailover  bool
 	Hooks             hooks.FailoverHooks
+	MonitorConfig     MonitorConfig
 }
 
 // Server is the failover server - run by the passive node
@@ -49,6 +62,7 @@ type Server struct {
 	isDryRunFailover  bool
 	activeConn        quic.Connection
 	hooks             hooks.FailoverHooks
+	monitorConfig     MonitorConfig
 }
 
 // NewServerFromConfig creates a new failover server from a configuration
@@ -76,6 +90,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		solanaRPCClient:  config.SolanaRPCClient,
 		isDryRunFailover: config.IsDryRunFailover,
 		hooks:            config.Hooks,
+		monitorConfig:    config.MonitorConfig,
 	}
 
 	if s.port == 0 {
@@ -259,9 +274,9 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		os.Exit(1)
 	}
 
-	// take a sample of vote credits and rank for the active key - use it to compare later
+	// take initial sample of vote credits and rank for the active key - use it to compare later
 	s.logger.Debug().Msg("Pulling pre-failover vote credits sample...")
-	err = s.failoverStream.PullActiveIdentityVoteCreditsSamples(s.solanaRPCClient, 1)
+	err = s.failoverStream.PullActiveIdentityVoteCreditsSample(s.solanaRPCClient)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("failed to pull active identity vote credits sample")
 		s.failoverStream.SetErrorMessagef("server failed to pull active identity vote credits sample: %v", err)
@@ -414,9 +429,9 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		s.confirmGossipNodesPostFailover()
 	}
 
-	// monitor the credits by pulling 5 samples
+	// monitor the credits by pulling configured samples
 	s.logger.Info().Msg("🩺 Monitoring vote credits post-failover...")
-	err = s.failoverStream.PullActiveIdentityVoteCreditsSamples(s.solanaRPCClient, 5)
+	err = s.failoverStream.PullActiveIdentityVoteCreditsSamples(s.solanaRPCClient, s.monitorConfig.CreditSamples.Count, s.monitorConfig.CreditSamples.IntervalDuration)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("failed to pull active identity vote credits samples")
 		return
