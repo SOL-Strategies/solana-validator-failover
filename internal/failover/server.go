@@ -47,7 +47,7 @@ type Server struct {
 	solanaRPCClient   solana.ClientInterface
 	failoverStream    *Stream
 	isDryRunFailover  bool
-	activeConn        quic.Connection
+	activeConn        *quic.Conn
 	hooks             hooks.FailoverHooks
 }
 
@@ -141,7 +141,7 @@ func (s *Server) Start() error {
 }
 
 // handleConnection handles a new failover connection
-func (s *Server) handleConnection(conn quic.Connection) {
+func (s *Server) handleConnection(conn *quic.Conn) {
 	defer conn.CloseWithError(0, "connection closed")
 
 	s.logger.Debug().Str("remote_addr", conn.RemoteAddr().String()).Msg("Accepted new connection")
@@ -161,12 +161,12 @@ func (s *Server) handleConnection(conn quic.Connection) {
 }
 
 // handleStream handles a new failover stream
-func (s *Server) handleStream(stream quic.Stream) {
+func (s *Server) handleStream(stream *quic.Stream) {
 	defer stream.Close()
 
 	// Read the message type
 	msgType := make([]byte, 1)
-	if _, err := io.ReadFull(stream, msgType); err != nil {
+	if _, err := stream.Read(msgType); err != nil {
 		if err == io.EOF {
 			s.logger.Debug().Msg("Stream closed by peer")
 			return
@@ -184,7 +184,7 @@ func (s *Server) handleStream(stream quic.Stream) {
 	}
 }
 
-func (s *Server) handleFailoverStream(stream quic.Stream) {
+func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	// read the message and parse it into a Stream struct
 	s.failoverStream = NewFailoverStream(stream)
 	if s.failoverStream.Decode() != nil {

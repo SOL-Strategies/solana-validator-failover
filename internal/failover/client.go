@@ -34,7 +34,7 @@ type ClientConfig struct {
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
 type Client struct {
-	Conn                           quic.Connection
+	Conn                           *quic.Conn
 	ctx                            context.Context
 	cancel                         context.CancelFunc
 	logger                         zerolog.Logger
