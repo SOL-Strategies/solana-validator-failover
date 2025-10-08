@@ -49,6 +49,11 @@ func (m *MockRPCClient) GetHealth(ctx context.Context) (string, error) {
 	return args.Get(0).(string), args.Error(1)
 }
 
+func (m *MockRPCClient) GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
+	args := m.Called(ctx, commitment)
+	return args.Get(0).(*rpc.GetEpochInfoResult), args.Error(1)
+}
+
 // createTestClient creates a test client with mock RPC clients
 func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 	localMock := &MockRPCClient{}
@@ -879,19 +884,22 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_Success(t *testing.T) {
 
 	// Setup mock expectations
 	currentSlot := uint64(1000)
-	nextLeaderSlot := uint64(1050)
-	// Use a future timestamp (1 hour from now)
-	futureTime := time.Now().UTC().Add(1 * time.Hour)
-	expectedBlockTime := solanago.UnixTimeSeconds(uint64(futureTime.Unix()))
+	relativeSlot := uint64(50) // relative slot in leader schedule
 	pubkey := createTestPublicKey(1)
 
-	leaderSchedule := rpc.GetLeaderScheduleResult{
-		pubkey: []uint64{950, 1050, 1150}, // past, future, future slots
+	// Mock epoch info
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100, // current slot index within epoch
+		AbsoluteSlot: currentSlot,
 	}
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
+	leaderSchedule := rpc.GetLeaderScheduleResult{
+		pubkey: []uint64{relativeSlot, 150, 250}, // relative slots in leader schedule
+	}
+
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 	networkMock.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
-	networkMock.On("GetBlockTime", mock.Anything, nextLeaderSlot).Return(&expectedBlockTime, nil)
 
 	// Test the function
 	isOnSchedule, timeToNext, err := client.GetTimeToNextLeaderSlotForPubkey(pubkey)
@@ -900,8 +908,9 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, isOnSchedule)
 	assert.Greater(t, timeToNext, time.Duration(0))
-	// Should be approximately 1 hour (with some tolerance for test execution time)
-	assert.True(t, timeToNext > 55*time.Minute && timeToNext < 65*time.Minute)
+	// Should be approximately 50 slots * 400ms = 20 seconds
+	expectedTime := time.Duration(50) * 400 * time.Millisecond
+	assert.Equal(t, expectedTime, timeToNext)
 
 	networkMock.AssertExpectations(t)
 }
@@ -914,11 +923,18 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_NotOnSchedule(t *testing.
 	currentSlot := uint64(1000)
 	pubkey := createTestPublicKey(1)
 
+	// Mock epoch info
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: currentSlot,
+	}
+
 	leaderSchedule := rpc.GetLeaderScheduleResult{
 		// pubkey not in schedule
 	}
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 	networkMock.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
 
 	// Test the function
@@ -940,11 +956,18 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_NoFutureSlots(t *testing.
 	currentSlot := uint64(1000)
 	pubkey := createTestPublicKey(1)
 
-	leaderSchedule := rpc.GetLeaderScheduleResult{
-		pubkey: []uint64{950, 980, 990}, // all past slots
+	// Mock epoch info
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: currentSlot,
 	}
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
+	leaderSchedule := rpc.GetLeaderScheduleResult{
+		pubkey: []uint64{50, 80, 90}, // all past slots (relative to current slot 1000)
+	}
+
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 	networkMock.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
 
 	// Test the function
@@ -958,14 +981,14 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_NoFutureSlots(t *testing.
 	networkMock.AssertExpectations(t)
 }
 
-func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetSlotError(t *testing.T) {
+func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetEpochInfoError(t *testing.T) {
 	// Create test client with mocks
 	client, _, networkMock := createTestClient()
 
 	// Setup mock expectations
 	pubkey := createTestPublicKey(1)
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("RPC connection failed"))
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return((*rpc.GetEpochInfoResult)(nil), errors.New("RPC connection failed"))
 
 	// Test the function
 	isOnSchedule, timeToNext, err := client.GetTimeToNextLeaderSlotForPubkey(pubkey)
@@ -974,7 +997,7 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetSlotError(t *testing.T
 	assert.Error(t, err)
 	assert.False(t, isOnSchedule)
 	assert.Equal(t, time.Duration(0), timeToNext)
-	assert.Contains(t, err.Error(), "failed to get current slot")
+	assert.Contains(t, err.Error(), "failed to get epoch info")
 
 	networkMock.AssertExpectations(t)
 }
@@ -987,7 +1010,14 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetLeaderScheduleError(t 
 	currentSlot := uint64(1000)
 	pubkey := createTestPublicKey(1)
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
+	// Mock epoch info
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: currentSlot,
+	}
+
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 	networkMock.On("GetLeaderSchedule", mock.Anything).Return(rpc.GetLeaderScheduleResult{}, errors.New("leader schedule not available"))
 
 	// Test the function
@@ -998,35 +1028,6 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetLeaderScheduleError(t 
 	assert.False(t, isOnSchedule)
 	assert.Equal(t, time.Duration(0), timeToNext)
 	assert.Contains(t, err.Error(), "failed to get leader schedule")
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_GetBlockTimeError(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	currentSlot := uint64(1000)
-	nextLeaderSlot := uint64(1050)
-	pubkey := createTestPublicKey(1)
-
-	leaderSchedule := rpc.GetLeaderScheduleResult{
-		pubkey: []uint64{950, 1050, 1150},
-	}
-
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
-	networkMock.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
-	networkMock.On("GetBlockTime", mock.Anything, nextLeaderSlot).Return((*solanago.UnixTimeSeconds)(nil), errors.New("block time not available"))
-
-	// Test the function
-	isOnSchedule, timeToNext, err := client.GetTimeToNextLeaderSlotForPubkey(pubkey)
-
-	// Assertions
-	assert.Error(t, err)
-	assert.False(t, isOnSchedule)
-	assert.Equal(t, time.Duration(0), timeToNext)
-	assert.Contains(t, err.Error(), "failed to get block time for next leader slot")
 
 	networkMock.AssertExpectations(t)
 }
@@ -1067,19 +1068,22 @@ func BenchmarkGossipClient_GetCurrentSlotEndTime(b *testing.B) {
 func BenchmarkGossipClient_GetTimeToNextLeaderSlotForPubkey(b *testing.B) {
 	mockClient := &MockRPCClient{}
 	currentSlot := uint64(1000)
-	nextLeaderSlot := uint64(1050)
-	// Use a future timestamp (1 hour from now)
-	futureTime := time.Now().UTC().Add(1 * time.Hour)
-	expectedBlockTime := solanago.UnixTimeSeconds(uint64(futureTime.Unix()))
+	relativeSlot := uint64(50)
 	pubkey := createTestPublicKey(1)
 
-	leaderSchedule := rpc.GetLeaderScheduleResult{
-		pubkey: []uint64{950, 1050, 1150},
+	// Mock epoch info
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: currentSlot,
 	}
 
-	mockClient.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(currentSlot, nil)
+	leaderSchedule := rpc.GetLeaderScheduleResult{
+		pubkey: []uint64{relativeSlot, 150, 250},
+	}
+
+	mockClient.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 	mockClient.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
-	mockClient.On("GetBlockTime", mock.Anything, nextLeaderSlot).Return(&expectedBlockTime, nil)
 
 	gossipClient := NewRPCClient(NewClientParams{
 		LocalRPCURL:   "http://localhost:8899",
