@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gagliardetto/solana-go"
-	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -37,11 +36,6 @@ func (m *MockRPCClient) GetSlot(ctx context.Context, commitment rpc.CommitmentTy
 func (m *MockRPCClient) GetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error) {
 	args := m.Called(ctx)
 	return args.Get(0).(rpc.GetLeaderScheduleResult), args.Error(1)
-}
-
-func (m *MockRPCClient) GetBlockTime(ctx context.Context, slot uint64) (*solanago.UnixTimeSeconds, error) {
-	args := m.Called(ctx, slot)
-	return args.Get(0).(*solanago.UnixTimeSeconds), args.Error(1)
 }
 
 func (m *MockRPCClient) GetHealth(ctx context.Context) (string, error) {
@@ -799,30 +793,36 @@ func TestGossipClient_GetCurrentSlotEndTime_Success(t *testing.T) {
 	client, _, networkMock := createTestClient()
 
 	// Setup mock expectations
-	expectedSlot := uint64(123456789)
-	// Use a future timestamp for testing
-	futureTime := time.Now().UTC().Add(1 * time.Hour)
-	expectedBlockTime := solanago.UnixTimeSeconds(uint64(futureTime.Unix()))
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,  // current slot index within epoch
+		AbsoluteSlot: 1000, // current absolute slot
+	}
 
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(expectedSlot, nil)
-	networkMock.On("GetBlockTime", mock.Anything, expectedSlot).Return(&expectedBlockTime, nil)
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 
 	// Test the function
 	endTime, err := client.GetCurrentSlotEndTime()
 
 	// Assertions
 	require.NoError(t, err)
-	assert.Equal(t, time.Unix(int64(expectedBlockTime), 0).UTC(), endTime)
+	// The function now estimates based on current time, so we just verify it's reasonable
+	// Should be approximately current time + 400ms (since we're at slot index 100)
+	expectedMinTime := time.Now().UTC().Add(390 * time.Millisecond)
+	expectedMaxTime := time.Now().UTC().Add(410 * time.Millisecond)
+
+	assert.True(t, endTime.After(expectedMinTime))
+	assert.True(t, endTime.Before(expectedMaxTime))
 
 	networkMock.AssertExpectations(t)
 }
 
-func TestGossipClient_GetCurrentSlotEndTime_GetSlotError(t *testing.T) {
+func TestGossipClient_GetCurrentSlotEndTime_GetEpochInfoError(t *testing.T) {
 	// Create test client with mocks
 	client, _, networkMock := createTestClient()
 
 	// Setup mock expectations
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("RPC connection failed"))
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return((*rpc.GetEpochInfoResult)(nil), errors.New("RPC connection failed"))
 
 	// Test the function
 	endTime, err := client.GetCurrentSlotEndTime()
@@ -830,50 +830,7 @@ func TestGossipClient_GetCurrentSlotEndTime_GetSlotError(t *testing.T) {
 	// Assertions
 	assert.Error(t, err)
 	assert.Equal(t, time.Time{}, endTime)
-	assert.Contains(t, err.Error(), "failed to get current slot")
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCurrentSlotEndTime_GetBlockTimeError(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	expectedSlot := uint64(123456789)
-
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(expectedSlot, nil)
-	networkMock.On("GetBlockTime", mock.Anything, expectedSlot).Return((*solanago.UnixTimeSeconds)(nil), errors.New("block time not available"))
-
-	// Test the function
-	endTime, err := client.GetCurrentSlotEndTime()
-
-	// Assertions
-	assert.Error(t, err)
-	assert.Equal(t, time.Time{}, endTime)
-	assert.Contains(t, err.Error(), "failed to get block time for current slot")
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCurrentSlotEndTime_NilBlockTime(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	expectedSlot := uint64(123456789)
-
-	networkMock.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(expectedSlot, nil)
-	networkMock.On("GetBlockTime", mock.Anything, expectedSlot).Return((*solanago.UnixTimeSeconds)(nil), nil)
-
-	// Test the function
-	endTime, err := client.GetCurrentSlotEndTime()
-
-	// Assertions
-	require.NoError(t, err)
-	// Should return time ~400ms from now when block time is nil
-	assert.True(t, endTime.After(time.Now().UTC().Add(300*time.Millisecond)))
-	assert.True(t, endTime.Before(time.Now().UTC().Add(500*time.Millisecond)))
+	assert.Contains(t, err.Error(), "failed to get epoch info")
 
 	networkMock.AssertExpectations(t)
 }
@@ -1046,13 +1003,13 @@ func BenchmarkGossipClient_GetLocalNodeHealth(b *testing.B) {
 
 func BenchmarkGossipClient_GetCurrentSlotEndTime(b *testing.B) {
 	mockClient := &MockRPCClient{}
-	expectedSlot := uint64(123456789)
-	// Use a future timestamp for testing
-	futureTime := time.Now().UTC().Add(1 * time.Hour)
-	expectedBlockTime := solanago.UnixTimeSeconds(uint64(futureTime.Unix()))
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: 1000,
+	}
 
-	mockClient.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(expectedSlot, nil)
-	mockClient.On("GetBlockTime", mock.Anything, expectedSlot).Return(&expectedBlockTime, nil)
+	mockClient.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
 
 	gossipClient := NewRPCClient(NewClientParams{
 		LocalRPCURL:   "http://localhost:8899",
