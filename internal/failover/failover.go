@@ -11,7 +11,7 @@ const (
 	DefaultHeartbeatIntervalDurationStr = "5s"
 
 	// DefaultStreamTimeoutDurationStr is the default stream timeout duration string
-	DefaultStreamTimeoutDurationStr = "1m"
+	DefaultStreamTimeoutDurationStr = "10m"
 
 	// MessageTypeFailoverInitiateRequest is the message type for initiating a failover
 	MessageTypeFailoverInitiateRequest byte = 1
