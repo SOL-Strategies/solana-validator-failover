@@ -9,6 +9,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,6 +21,7 @@ type RPCClientInterface interface {
 	GetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error)
 	GetBlockTime(ctx context.Context, slot uint64) (*solanago.UnixTimeSeconds, error)
 	GetHealth(ctx context.Context) (string, error)
+	GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error)
 }
 
 // ClientInterface defines the interface for solana rpc operations - just simple wrappers around the rpc client
@@ -47,6 +49,8 @@ type ClientInterface interface {
 type Client struct {
 	localRPCClient   RPCClientInterface
 	networkRPCClient RPCClientInterface
+	loggerLocal      zerolog.Logger
+	loggerNetwork    zerolog.Logger
 }
 
 // NewClientParams is the parameters for creating a new client
@@ -60,6 +64,8 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 	return &Client{
 		localRPCClient:   rpc.New(params.LocalRPCURL),
 		networkRPCClient: rpc.New(params.NetworkRPCURL),
+		loggerLocal:      log.Logger.With().Str("rpc_client", "local").Logger(),
+		loggerNetwork:    log.Logger.With().Str("rpc_client", "network").Logger(),
 	}
 }
 
@@ -76,12 +82,12 @@ func (c *Client) GetLocalNodeHealth() (string, error) {
 func (c *Client) IsLocalNodeHealthy() bool {
 	result, err := c.GetLocalNodeHealth()
 	if err != nil {
-		log.Debug().Err(err).Msg("failed to get local node health")
+		c.loggerLocal.Debug().Err(err).Msg("failed to get local node health")
 		return false
 	}
 	isHealthy := result == rpc.HealthOk
 	if !isHealthy {
-		log.Debug().Str("result", result).Msg("local node health")
+		c.loggerLocal.Debug().Str("result", result).Msg("local node health")
 	}
 	return isHealthy
 }
@@ -215,49 +221,72 @@ func (c *Client) GetCurrentSlotEndTime() (time.Time, error) {
 
 // GetTimeToNextLeaderSlotForPubkey returns the time to the next leader slot for the given pubkey
 func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (isOnLeaderSchedule bool, timeToNextLeaderSlot time.Duration, err error) {
-	// get the current slot
-	currentSlot, err := c.GetCurrentSlot()
+	// get epoch information, includes the current slot (absolute slot) and its offset from the first slot of the epoch
+	epochInfo, err := c.networkRPCClient.GetEpochInfo(context.Background(), rpc.CommitmentConfirmed)
 	if err != nil {
-		return false, time.Duration(0), fmt.Errorf("failed to get current slot: %w", err)
+		return false, time.Duration(0), fmt.Errorf("failed to get epoch info: %w", err)
 	}
 
-	// get the leader schedule
+	c.loggerNetwork.Debug().
+		Uint64("epoch", epochInfo.Epoch).
+		Uint64("slotIndex", epochInfo.SlotIndex).
+		Uint64("absoluteSlot", epochInfo.AbsoluteSlot).
+		Msg("Epoch info retrieved")
+
+	// get the leader schedule - returns a map of pubkey:[]uint64 - where values are a slice of slot indexes
+	// relaative to the first slot of epochInfo result
 	leaderSchedule, err := c.networkRPCClient.GetLeaderSchedule(context.Background())
 	if err != nil {
 		return false, time.Duration(0), fmt.Errorf("failed to get leader schedule: %w", err)
 	}
 
-	// get upcoming slots fo the pubkey
-	slots, ok := leaderSchedule[pubkey]
+	// get current epoch leader slot indexes for the pubkey
+	leaderSlotIndexes, ok := leaderSchedule[pubkey]
 
 	// pubkey not in leader schedule
 	if !ok {
+		c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Msg("Pubkey not found in leader schedule")
 		return false, time.Duration(0), nil
 	}
 
+	c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Int("slotsCount", len(leaderSlotIndexes)).Msg("Found slots in leader schedule")
+
+	// calculate the first slot of the epoch (zero-based indexing)
+	// epochInfo.AbsoluteSlot is the "current" slot for when we fetched the epoch info
+	firstSlotOfEpoch := epochInfo.AbsoluteSlot - epochInfo.SlotIndex
 	var nextLeaderSlot uint64
 
-	for _, s := range slots {
-		if s > currentSlot {
-			nextLeaderSlot = s
+	// Find the next future leader schedule slot for pubkey - leaderSlotIndex is relative to the first slot of the epoch
+	for _, leaderSlotIndex := range leaderSlotIndexes {
+		leaderSlot := firstSlotOfEpoch + leaderSlotIndex
+
+		c.loggerNetwork.Debug().
+			Uint64("leaderSlotIndex", leaderSlotIndex).
+			Uint64("leaderSlot", leaderSlot).
+			Uint64("currentSlot", epochInfo.AbsoluteSlot).
+			Str("pubkey", pubkey.String()).
+			Msg("Checking slot")
+
+		if leaderSlot >= epochInfo.AbsoluteSlot {
+			nextLeaderSlot = leaderSlot
 			break
 		}
 	}
 
 	// didn't find future slots for the pubkey
 	if nextLeaderSlot == 0 {
-		// return indefinite time
+		c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Msg("No future leader slots found for pubkey")
 		return false, time.Duration(0), nil
 	}
 
-	// get the block time for the next leader slot
-	nextLeaderSlotBlockTime, err := c.networkRPCClient.GetBlockTime(context.Background(), nextLeaderSlot)
-	if err != nil {
-		return false, time.Duration(0), fmt.Errorf("failed to get block time for next leader slot: %w", err)
-	}
+	// Calculate time to next leader slot using slot difference and average slot time (400ms)
+	slotDifference := nextLeaderSlot - epochInfo.AbsoluteSlot
+	timeToNextLeaderSlot = time.Duration(slotDifference) * 400 * time.Millisecond
 
-	// calculate time to next leader slot
-	timeToNextLeaderSlot = time.Until(time.Unix(int64(*nextLeaderSlotBlockTime), 0))
+	c.loggerNetwork.Info().
+		Uint64("nextLeaderSlot", nextLeaderSlot).
+		Uint64("currentSlot", epochInfo.AbsoluteSlot).
+		Msgf("Next leader slot in %s", timeToNextLeaderSlot.String())
 
 	return true, timeToNextLeaderSlot, nil
 }
