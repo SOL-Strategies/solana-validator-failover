@@ -25,10 +25,9 @@ import (
 
 // FailoverParams are the parameters for running a failover
 type FailoverParams struct {
-	NotADrill             bool
-	NoWaitForHealthy      bool
-	NoMinTimeToLeaderSlot bool
-	MinTimeToLeaderSlot   time.Duration
+	NotADrill                    bool
+	NoWaitForHealthy             bool
+	NoWaitForMinTimeToLeaderSlot bool
 }
 
 // Peers is a map of peers
@@ -194,7 +193,7 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 
 	// wait until healthy unless told otherwise
 	if params.NoWaitForHealthy {
-		log.Debug().Msg("--no-wait-for-healthy flag is set, skipping wait for healthy")
+		log.Warn().Msg("--no-wait-for-healthy flag is set, skipping wait for healthy")
 	} else {
 		err = v.waitUntilHealthy()
 		if err != nil {
@@ -202,7 +201,16 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 		}
 	}
 
-	params.MinTimeToLeaderSlot = v.MinimumTimeToLeaderSlot
+	// wait for minimum time to leader slot unless told otherwise
+	if params.NoWaitForMinTimeToLeaderSlot {
+		log.Warn().Msg("--no-min-time-to-leader-slot flag is set, skipping wait for minimum time to leader slot")
+	} else {
+		// wait for the minimum time to leader slot
+		err = v.waitForMinTimeToLeaderSlot()
+		if err != nil {
+			return fmt.Errorf("failed to wait for minimum time to leader slot: %w", err)
+		}
+	}
 
 	if v.IsActive() {
 		return v.makePassive(params)
@@ -659,11 +667,9 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 
 	// connect to the passive peer and follow its lead to handover as active
 	failoverClient, err := failover.NewClientFromConfig(failover.ClientConfig{
-		ServerName:                     selectedPassivePeer.Name,
-		ServerAddress:                  selectedPassivePeer.Address,
-		MinTimeToLeaderSlot:            params.MinTimeToLeaderSlot,
-		WaitMinTimeToLeaderSlotEnabled: !params.NoMinTimeToLeaderSlot,
-		SolanaRPCClient:                v.solanaRPCClient,
+		ServerName:      selectedPassivePeer.Name,
+		ServerAddress:   selectedPassivePeer.Address,
+		SolanaRPCClient: v.solanaRPCClient,
 		ActiveNodeInfo: &failover.NodeInfo{
 			Hostname:                       v.Hostname,
 			PublicIP:                       v.PublicIP,
@@ -709,6 +715,65 @@ func (v *Validator) waitUntilHealthy() (err error) {
 					time.Since(startTime).String(),
 				),
 			)
+			return nil
+		}
+	})
+
+	return sp.Run()
+}
+
+// waitForMinTimeToLeaderSlot waits until the next leader slot is at least the minimum time to leader slot
+func (v *Validator) waitForMinTimeToLeaderSlot() (err error) {
+	v.logger.Debug().Msgf("Ensuring next leader slot is at least %s in the future", v.MinimumTimeToLeaderSlot.String())
+	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title("Checking next leader slot...")
+	maxRetries := 10
+	sp.ActionWithErr(func(ctx context.Context) error {
+		sleepDuration := 2 * time.Second
+		pubkey := v.Identities.Active.Key.PublicKey()
+		remainingRetries := maxRetries
+
+		for {
+			isOnLeaderSchedule, timeToNextLeaderSlot, err := v.solanaRPCClient.GetTimeToNextLeaderSlotForPubkey(pubkey)
+			if err != nil {
+				if remainingRetries == 0 {
+					return fmt.Errorf("failed to get time to next leader slot: %w", err)
+				}
+				log.Debug().Err(err).Msgf("failed to get time to next leader slot")
+				sp.Title(style.RenderErrorStringf(
+					"Failed to get time to next leader slot, retrying in %s (%d retries left): %s",
+					sleepDuration.String(),
+					remainingRetries,
+					err.Error(),
+				))
+				remainingRetries--
+				time.Sleep(sleepDuration)
+				continue
+			}
+
+			if !isOnLeaderSchedule {
+				sp.Title(style.RenderActiveString("This validator is not on the leader schedule, skipping wait for next leader slot to pass", false))
+				return nil
+			}
+
+			if timeToNextLeaderSlot < v.MinimumTimeToLeaderSlot {
+				// show duration as human readable time until leader slot
+				sp.Title(style.RenderActiveString(
+					fmt.Sprintf("Next leader slot in %s, waiting for it before proceeding...",
+						timeToNextLeaderSlot.Round(time.Second).String()),
+					false,
+				))
+				time.Sleep(sleepDuration)
+				continue
+			}
+
+			sp.Title(style.RenderActiveString(
+				fmt.Sprintf("Next leader slot in %s > %s, proceeding...",
+					timeToNextLeaderSlot.Round(time.Second).String(),
+					v.MinimumTimeToLeaderSlot.String(),
+				),
+				false,
+			))
+			time.Sleep(sleepDuration)
 			return nil
 		}
 	})

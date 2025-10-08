@@ -758,22 +758,19 @@ func TestFailoverParams_DefaultValues(t *testing.T) {
 
 	assert.False(t, params.NotADrill)
 	assert.False(t, params.NoWaitForHealthy)
-	assert.False(t, params.NoMinTimeToLeaderSlot)
-	assert.Equal(t, time.Duration(0), params.MinTimeToLeaderSlot)
+	assert.False(t, params.NoWaitForMinTimeToLeaderSlot)
 }
 
 func TestFailoverParams_WithValues(t *testing.T) {
 	params := FailoverParams{
-		NotADrill:             true,
-		NoWaitForHealthy:      true,
-		NoMinTimeToLeaderSlot: true,
-		MinTimeToLeaderSlot:   10 * time.Minute,
+		NotADrill:                    true,
+		NoWaitForHealthy:             true,
+		NoWaitForMinTimeToLeaderSlot: true,
 	}
 
 	assert.True(t, params.NotADrill)
 	assert.True(t, params.NoWaitForHealthy)
-	assert.True(t, params.NoMinTimeToLeaderSlot)
-	assert.Equal(t, 10*time.Minute, params.MinTimeToLeaderSlot)
+	assert.True(t, params.NoWaitForMinTimeToLeaderSlot)
 }
 
 func TestPeer_StringRepresentation(t *testing.T) {

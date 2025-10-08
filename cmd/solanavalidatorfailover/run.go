@@ -28,9 +28,9 @@ var (
 			}
 
 			err = v.Failover(validator.FailoverParams{
-				NotADrill:             notADrill, // ignored when run on active node
-				NoWaitForHealthy:      noWaitForHealthy,
-				NoMinTimeToLeaderSlot: noMinTimeToLeaderSlot, // ignored when run on passive node
+				NotADrill:                    notADrill, // ignored when run on active node
+				NoWaitForHealthy:             noWaitForHealthy,
+				NoWaitForMinTimeToLeaderSlot: noMinTimeToLeaderSlot,
 			})
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to failover")
