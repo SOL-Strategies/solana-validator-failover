@@ -474,11 +474,11 @@ func (s *Server) confirmGossipNodesPostFailover() {
 
 	sp := spinner.New().Title("confirming gossip nodes switched roles...")
 	sp.ActionWithErr(func(ctx context.Context) error {
-		maxRetries := 4
+		maxRetries := 5
 		retryCount := 0
-		retryDelay := 2 * time.Second
 		// it can take a few seconds for gossip to update so try to refresh gossip identities a few times before claiming error
-		for retryCount < maxRetries {
+		for retryCount <= maxRetries {
+			retryDelay := time.Duration(1<<retryCount) * time.Second
 			retryCount++
 			hasRetriesLeft := retryCount < maxRetries
 
