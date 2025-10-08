@@ -25,7 +25,7 @@ const (
 	DefaultFailoverServerHeartbeatInterval = "5s"
 
 	// DefaultFailoverServerStreamTimeout is the default stream timeout for the failover server
-	DefaultFailoverServerStreamTimeout = "5m"
+	DefaultFailoverServerStreamTimeout = "10m"
 
 	// DefaultFailoverMinimumTimeToLeaderSlot is the default minimum time to leader slot for the failover server
 	DefaultFailoverMinimumTimeToLeaderSlot = "5m"
