@@ -19,7 +19,6 @@ type RPCClientInterface interface {
 	GetVoteAccounts(ctx context.Context, opts *rpc.GetVoteAccountsOpts) (*rpc.GetVoteAccountsResult, error)
 	GetSlot(ctx context.Context, commitment rpc.CommitmentType) (uint64, error)
 	GetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error)
-	GetBlockTime(ctx context.Context, slot uint64) (*solanago.UnixTimeSeconds, error)
 	GetHealth(ctx context.Context) (string, error)
 	GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error)
 }
@@ -199,24 +198,26 @@ func (c *Client) GetCurrentSlot() (slot uint64, err error) {
 }
 
 // GetCurrentSlotEndTime returns the end time of the current slot
-func (c *Client) GetCurrentSlotEndTime() (time.Time, error) {
-	slot, err := c.GetCurrentSlot()
+func (c *Client) GetCurrentSlotEndTime() (estimatedCurrentSlotEndTime time.Time, err error) {
+	// estimate the first and end of current slot time from epoch info to avoid further potentiallyl lengthy RPC calls
+	averageSlotDuration := 400 * time.Millisecond
+	epochInfo, err := c.networkRPCClient.GetEpochInfo(context.Background(), rpc.CommitmentConfirmed)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to get current slot: %w", err)
+		return time.Time{}, fmt.Errorf("failed to get epoch info: %w", err)
 	}
 
-	expectedCurrentSlotEndTime, err := c.networkRPCClient.GetBlockTime(context.Background(), slot)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to get block time for current slot: %w", err)
-	}
+	timePassedInEpoch := time.Duration(epochInfo.SlotIndex) * averageSlotDuration
+	estimatedFirstSlotTime := time.Now().UTC().Add(-timePassedInEpoch)
 
-	// if no estimate availabe, assume 400ms from now
-	if expectedCurrentSlotEndTime == nil {
-		return time.Now().UTC().Add(400 * time.Millisecond), nil
-	}
+	// estimate the end time of the current slot
+	slotDuration := time.Duration(epochInfo.SlotIndex+1) * averageSlotDuration
+	estimatedCurrentSlotEndTime = estimatedFirstSlotTime.Add(slotDuration)
 
-	// return the time in utc
-	return time.Unix(int64(*expectedCurrentSlotEndTime), 0).UTC(), nil
+	c.loggerNetwork.Debug().
+		Str("estimatedFirstSlotTime", estimatedFirstSlotTime.UTC().Format(time.RFC3339Nano)).
+		Msgf("Estimated current slot end time %s", estimatedCurrentSlotEndTime.UTC().Format(time.RFC3339Nano))
+
+	return estimatedCurrentSlotEndTime, nil
 }
 
 // GetTimeToNextLeaderSlotForPubkey returns the time to the next leader slot for the given pubkey
