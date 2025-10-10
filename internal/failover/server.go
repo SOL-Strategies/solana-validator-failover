@@ -477,8 +477,8 @@ func (s *Server) confirmGossipNodesPostFailover() {
 		maxRetries := 5
 		retryCount := 0
 		// it can take a few seconds for gossip to update so try to refresh gossip identities a few times before claiming error
-		for retryCount <= maxRetries {
-			retryDelay := time.Duration(1<<retryCount) * time.Second
+		for retryCount < maxRetries {
+			retryDelay := time.Duration(1<<(retryCount+1)) * time.Second
 			retryCount++
 			hasRetriesLeft := retryCount < maxRetries
 
