@@ -284,7 +284,7 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 	slotDifference := nextLeaderSlot - epochInfo.AbsoluteSlot
 	timeToNextLeaderSlot = time.Duration(slotDifference) * 400 * time.Millisecond
 
-	c.loggerNetwork.Info().
+	c.loggerNetwork.Debug().
 		Uint64("nextLeaderSlot", nextLeaderSlot).
 		Uint64("currentSlot", epochInfo.AbsoluteSlot).
 		Msgf("Next leader slot in %s", timeToNextLeaderSlot.String())
