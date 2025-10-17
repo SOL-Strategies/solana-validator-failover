@@ -3,13 +3,11 @@ package hooks
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 )
@@ -100,11 +98,26 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 	// Stream stdout and stderr in real-time using hookLogger
 	go func() {
 		defer wg.Done()
-		streamOutput(hookLogger, stdout, "stdout", h.Name, hookType, hookIndex, totalHooks)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				styledOutput := styledStreamOutputString("stdout", line, h.Name, hookType, hookIndex, totalHooks)
+				hookLogger.Info().Msg(styledOutput)
+			}
+		}
 	}()
+
 	go func() {
 		defer wg.Done()
-		streamOutput(hookLogger, stderr, "stderr", h.Name, hookType, hookIndex, totalHooks)
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				styledOutput := styledStreamOutputString("stderr", line, h.Name, hookType, hookIndex, totalHooks)
+				hookLogger.Info().Msg(styledOutput)
+			}
+		}
 	}()
 
 	// Wait for the command to complete
@@ -119,29 +132,6 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 
 	hookLogger.Info().Msgf("🪝  Hook %s completed successfully", h.Name)
 	return nil
-}
-
-// streamOutput streams output from a pipe to the logger in real-time
-func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string, hookName string, hookType string, hookIndex int, totalHooks int) {
-	defer pipe.Close()
-
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			// Use styled output with the requested format
-			styledOutput := styledStreamOutputString(streamType, line, hookName, hookType, hookIndex, totalHooks)
-			// Log without adding hook name as a structured field
-			logger.Info().Msg(styledOutput)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		// Only log if it's not a "file already closed" error, which is expected
-		if !strings.Contains(err.Error(), "file already closed") {
-			logger.Error().Err(err).Msg("error reading hook output")
-		}
-	}
 }
 
 // Define styles using lipgloss - matching the reference repository colors
