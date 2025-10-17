@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
@@ -53,8 +54,8 @@ func (h FailoverHooks) HasPreHooksWhenPassive() bool {
 }
 
 // Run runs the hook
-func (h Hook) Run(envMap map[string]string) error {
-	hookLogger := log.With().Str("hook", h.Name).Logger()
+func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, totalHooks int) error {
+	hookLogger := log.With().Logger()
 	// run the command passing in custom env variables about the state using os.exec
 	cmd := exec.Command(h.Command, h.Args...)
 	for k, v := range utils.SortStringMap(envMap) {
@@ -83,7 +84,7 @@ func (h Hook) Run(envMap map[string]string) error {
 	hookLogger.Info().
 		Str("command", h.Command).
 		Str("args", fmt.Sprintf("[%s]", strings.Join(h.Args, ", "))).
-		Msg("🪝  Running hook")
+		Msgf("🪝  Running hook %s", h.Name)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("Hook %s failed to start: %v", h.Name, err)
 	}
@@ -99,11 +100,11 @@ func (h Hook) Run(envMap map[string]string) error {
 	// Stream stdout and stderr in real-time using hookLogger
 	go func() {
 		defer wg.Done()
-		streamOutput(hookLogger, stdout, "stdout")
+		streamOutput(hookLogger, stdout, "stdout", h.Name, hookType, hookIndex, totalHooks)
 	}()
 	go func() {
 		defer wg.Done()
-		streamOutput(hookLogger, stderr, "stderr")
+		streamOutput(hookLogger, stderr, "stderr", h.Name, hookType, hookIndex, totalHooks)
 	}()
 
 	// Wait for the command to complete
@@ -116,20 +117,21 @@ func (h Hook) Run(envMap map[string]string) error {
 		return fmt.Errorf("🪝 🔴 Hook %s failed: %v", h.Name, err)
 	}
 
-	hookLogger.Info().Msg("🪝  Hook completed successfully")
+	hookLogger.Info().Msgf("🪝  Hook %s completed successfully", h.Name)
 	return nil
 }
 
 // streamOutput streams output from a pipe to the logger in real-time
-func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string) {
+func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string, hookName string, hookType string, hookIndex int, totalHooks int) {
 	defer pipe.Close()
 
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			// Use styled output similar to the reference repository
-			styledOutput := styledStreamOutputString(streamType, line)
+			// Use styled output with the requested format
+			styledOutput := styledStreamOutputString(streamType, line, hookName, hookType, hookIndex, totalHooks)
+			// Log without adding hook name as a structured field
 			logger.Info().Msg(styledOutput)
 		}
 	}
@@ -142,19 +144,36 @@ func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string) 
 	}
 }
 
-// styledStreamOutputString creates styled output for stream content similar to the reference repository
-func styledStreamOutputString(stream string, text string) string {
-	// Use different prefixes and styling for stdout vs stderr
+// Define styles using lipgloss - matching the reference repository colors
+var (
+	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("124"))
+	stdoutStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("28"))
+	prefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Grey for prefix
+)
+
+// styledStreamOutputString creates styled output for stream content with the requested format
+func styledStreamOutputString(stream string, text string, hookName string, hookType string, hookIndex int, totalHooks int) string {
+	// Format: 🪝 hooks:<pre|post>:[1/1 <hook-name>]: <script output>
+	prefix := fmt.Sprintf("🪝  hooks:%s:[%d/%d %s]:", hookType, hookIndex, totalHooks, hookName)
+	styledPrefix := prefixStyle.Render(prefix)
+
+	// Apply color to the script output based on stream type
+	var outputStyle lipgloss.Style
 	if stream == "stderr" {
-		return fmt.Sprintf("🪝  > %s", text)
+		outputStyle = stderrStyle
+	} else {
+		outputStyle = stdoutStyle
 	}
-	return fmt.Sprintf("🪝  > %s", text)
+
+	styledOutput := outputStyle.Render(text)
+
+	return fmt.Sprintf("%s %s", styledPrefix, styledOutput)
 }
 
 // RunPreWhenPassive runs the pre hooks when the validator is passive
 func (h FailoverHooks) RunPreWhenPassive(envMap map[string]string) error {
-	for _, hook := range h.Pre.WhenPassive {
-		err := hook.Run(envMap)
+	for i, hook := range h.Pre.WhenPassive {
+		err := hook.Run(envMap, "pre", i+1, len(h.Pre.WhenPassive))
 		if err != nil && hook.MustSucceed {
 			return err
 		}
@@ -167,8 +186,8 @@ func (h FailoverHooks) RunPreWhenPassive(envMap map[string]string) error {
 
 // RunPreWhenActive runs the pre hooks when the validator is active
 func (h FailoverHooks) RunPreWhenActive(envMap map[string]string) error {
-	for _, hook := range h.Pre.WhenActive {
-		err := hook.Run(envMap)
+	for i, hook := range h.Pre.WhenActive {
+		err := hook.Run(envMap, "pre", i+1, len(h.Pre.WhenActive))
 		if err != nil && hook.MustSucceed {
 			return err
 		}
@@ -182,8 +201,8 @@ func (h FailoverHooks) RunPreWhenActive(envMap map[string]string) error {
 
 // RunPostWhenPassive runs the post hooks when the validator is passive
 func (h FailoverHooks) RunPostWhenPassive(envMap map[string]string) {
-	for _, hook := range h.Post.WhenPassive {
-		err := hook.Run(envMap)
+	for i, hook := range h.Post.WhenPassive {
+		err := hook.Run(envMap, "post", i+1, len(h.Post.WhenPassive))
 		if err != nil {
 			log.Error().Err(err).Msgf("post hook %s failed", hook.Name)
 		}
@@ -192,8 +211,8 @@ func (h FailoverHooks) RunPostWhenPassive(envMap map[string]string) {
 
 // RunPostWhenActive runs the post hooks when the validator is active
 func (h FailoverHooks) RunPostWhenActive(envMap map[string]string) {
-	for _, hook := range h.Post.WhenActive {
-		err := hook.Run(envMap)
+	for i, hook := range h.Post.WhenActive {
+		err := hook.Run(envMap, "post", i+1, len(h.Post.WhenActive))
 		if err != nil {
 			log.Error().Err(err).Msgf("post hook %s failed", hook.Name)
 		}
