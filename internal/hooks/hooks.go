@@ -88,6 +88,10 @@ func (h Hook) Run(envMap map[string]string) error {
 		return fmt.Errorf("Hook %s failed to start: %v", h.Name, err)
 	}
 
+	// get the command pid (only after successful start)
+	pid := cmd.Process.Pid
+	hookLogger.Debug().Int("pid", pid).Msg("hook process started")
+
 	// Use WaitGroup to ensure goroutines complete before we return
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -121,16 +125,12 @@ func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string) 
 	defer pipe.Close()
 
 	scanner := bufio.NewScanner(pipe)
-	baseLogger := logger.With().Str("stream", streamType).Logger()
-
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			if streamType == "stdout" {
-				baseLogger.Info().Msgf("🪝  %s", line)
-			} else {
-				baseLogger.Error().Msgf("🪝  %s", line)
-			}
+			// Use styled output similar to the reference repository
+			styledOutput := styledStreamOutputString(streamType, line)
+			logger.Info().Msg(styledOutput)
 		}
 	}
 
@@ -140,6 +140,15 @@ func streamOutput(logger zerolog.Logger, pipe io.ReadCloser, streamType string) 
 			logger.Error().Err(err).Msg("error reading hook output")
 		}
 	}
+}
+
+// styledStreamOutputString creates styled output for stream content similar to the reference repository
+func styledStreamOutputString(stream string, text string) string {
+	// Use different prefixes and styling for stdout vs stderr
+	if stream == "stderr" {
+		return fmt.Sprintf("🪝  > %s", text)
+	}
+	return fmt.Sprintf("🪝  > %s", text)
 }
 
 // RunPreWhenPassive runs the pre hooks when the validator is passive
