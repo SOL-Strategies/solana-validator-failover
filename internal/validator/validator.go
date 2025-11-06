@@ -587,12 +587,22 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		}
 	}
 
-	// if the tower file exists and auto empty when passive is false, return an error
+	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
 	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
-		return fmt.Errorf(
-			"tower file exists and validator.tower.auto_empty_when_passive is false - delete it and re-run: %s",
-			v.TowerFile,
-		)
+		log.Warn().
+			Str("tower_file", v.TowerFile).
+			Msg("tower file exists and config validator.tower.auto_empty_when_passive=false")
+		confirm, err := confirm("delete tower file and proceed?")
+		if err != nil {
+			return err
+		}
+		if !confirm {
+			return fmt.Errorf("cancelled")
+		}
+		// delete the tower file
+		if err = utils.RemoveFile(v.TowerFile); err != nil {
+			return err
+		}
 	}
 
 	// create a QUIC server that listens for the active node to connect and decide what to do
@@ -746,4 +756,26 @@ func (v *Validator) selectPassivePeer() (selectedPeer Peer, err error) {
 	log.Debug().Msgf("selected peer: %s address: %s", selectedPeerName, v.Peers[selectedPeerName].Address)
 
 	return v.Peers[selectedPeerName], nil
+}
+
+func confirm(title string) (confirm bool, err error) {
+	// ask to proceed
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(title).
+				Value(&confirm),
+		),
+	)
+
+	err = form.Run()
+	if err != nil {
+		return false, err
+	}
+
+	if !confirm {
+		return false, fmt.Errorf("cancelled")
+	}
+
+	return true, nil
 }
