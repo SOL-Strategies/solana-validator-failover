@@ -10,7 +10,6 @@ validator:
   ledger_dir: ./local-test/validator-1/ledger
   tower:
     dir: ./local-test/validator-1/tower
-    auto_empty_when_passive: true
   failover:
     peers:
       validator-2:

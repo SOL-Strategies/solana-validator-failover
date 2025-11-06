@@ -589,10 +589,8 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 
 	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
 	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
-		log.Warn().
-			Str("tower_file", v.TowerFile).
-			Msg("tower file exists and config validator.tower.auto_empty_when_passive=false")
-		confirm, err := confirm("delete tower file and proceed?")
+		log.Warn().Msgf("Tower file exists %s", v.TowerFile)
+		confirm, err := confirm("Delete tower file and proceed?")
 		if err != nil {
 			return err
 		}

@@ -10,7 +10,6 @@ validator:
   rpc_address: http://localhost:8899
   tower:
     dir: ./local-test/validator-2/tower
-    auto_empty_when_passive: true
   failover:
     # firedancer set identity commands
     set_identity_active_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml --force {{ .Identities.Active.KeyFile }}"
@@ -23,19 +22,19 @@ validator:
         when_passive:
           - name: pre_hook_x_when_passive
             command: ./scripts/hook-mock.sh
-            args: [ "arg1", "arg2"]
+            args: ["arg1", "arg2"]
             must_succeed: true
         when_active:
           - name: pre_hook_y_when_active
             command: ./scripts/hook-mock.sh
-            args: [ "arg1", "arg2"]
+            args: ["arg1", "arg2"]
             must_succeed: true
       post:
         when_passive:
           - name: post_hook_y_when_passive
             command: ./scripts/hook-mock.sh
-            args: [ "arg1", "arg2"]
+            args: ["arg1", "arg2"]
         when_active:
           - name: post_hook_z_when_active
             command: ./scripts/hook-mock.sh
-            args: [ "arg1", "arg2"]
+            args: ["arg1", "arg2"]
