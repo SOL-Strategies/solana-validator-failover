@@ -263,16 +263,19 @@ func (c *Client) waitUntilStartOfNextSlot() (err error) {
 // waitMinTimeToLeaderSlot waits until the next leader slot is at least the minimum time to leader slot
 func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 	if !c.waitMinTimeToLeaderSlotEnabled {
-		return
+		c.logger.Debug().Msg("Waiting for min time to leader slot is disabled, skipping")
+		return nil
 	}
 
 	c.logger.Debug().Msgf("Ensuring next leader slot is at least %s in the future", c.minTimeToLeaderSlot.String())
 	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title("Checking next leader slot...")
 	maxRetries := 10
+	var calculatedTimeToNextLeaderSlot time.Duration
 	sp.ActionWithErr(func(ctx context.Context) error {
 		sleepDuration := 2 * time.Second
 		pubkey := c.activeNodeInfo.Identities.Active.Key.PublicKey()
 		remainingRetries := maxRetries
+		stringMinTimeToLeaderSlot := c.minTimeToLeaderSlot.Round(time.Second).String()
 
 		for {
 			isOnLeaderSchedule, timeToNextLeaderSlot, err := c.solanaRPCClient.GetTimeToNextLeaderSlotForPubkey(pubkey)
@@ -297,21 +300,24 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 				return nil
 			}
 
+			stringTimeToNextLeaderSlot := timeToNextLeaderSlot.Round(time.Second).String()
+
 			if timeToNextLeaderSlot < c.minTimeToLeaderSlot {
 				// show duration as human readable time until leader slot
 				sp.Title(style.RenderActiveString(
 					fmt.Sprintf("Next leader slot in %s, waiting for it before proceeding...",
-						timeToNextLeaderSlot.Round(time.Second).String()),
+						stringTimeToNextLeaderSlot),
 					false,
 				))
 				time.Sleep(sleepDuration)
 				continue
 			}
 
+			calculatedTimeToNextLeaderSlot = timeToNextLeaderSlot
 			sp.Title(style.RenderActiveString(
 				fmt.Sprintf("Next leader slot in %s > %s, proceeding...",
-					timeToNextLeaderSlot.Round(time.Second).String(),
-					c.minTimeToLeaderSlot.String(),
+					stringTimeToNextLeaderSlot,
+					stringMinTimeToLeaderSlot,
 				),
 				false,
 			))
@@ -320,7 +326,18 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 		}
 	})
 
-	return sp.Run()
+	err = sp.Run()
+	if err != nil {
+		return fmt.Errorf("failed to wait for next leader slot: %w", err)
+	}
+
+	if calculatedTimeToNextLeaderSlot > 0 {
+		c.logger.Info().Msgf("Time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
+	} else {
+		c.logger.Info().Msg("No upcoming leader slots found")
+	}
+
+	return nil
 }
 
 // getEnvMap returns a map of environment variables to pass to the hooks
