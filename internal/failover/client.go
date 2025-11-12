@@ -161,22 +161,16 @@ func (c *Client) Start() {
 
 	c.logger.Info().Msg("🟢 Failover started")
 
-	// get the current slot and set it as the failover start slot
-	slot, err := c.solanaRPCClient.GetCurrentSlot()
-	if err != nil {
-		c.logger.Fatal().Err(err).Msg("failed to get current slot")
-		return
-	}
-
-	// set the failover start slot to the next slot
-	c.failoverStream.SetFailoverStartSlot(slot + 1)
-
 	// wait until the next slot starts so we switch right at the beginning of the next slot
-	err = c.waitUntilStartOfNextSlot()
+	// this ensures we're early in the slot when we start the switch
+	slot, err := c.waitUntilStartOfNextSlot()
 	if err != nil {
 		c.logger.Fatal().Err(err).Msgf("failed to wait for next slot to start")
 		return
 	}
+
+	// set the failover start slot to the current slot (we're now early in this slot)
+	c.failoverStream.SetFailoverStartSlot(slot)
 
 	// set identity to passive
 	dryRunPrefix := " "
@@ -250,24 +244,41 @@ func (c *Client) Start() {
 
 // waitUntilStartOfNextSlot waits until the start of the next slot
 // this is important to try to start a failover early in the slot to avoid missing it
-func (c *Client) waitUntilStartOfNextSlot() (err error) {
+// It polls getSlot() to detect when the slot changes and returns the new slot number,
+// which naturally gets us well within the first half of the new slot
+// should get us in within the first 50-100ms of the next slot
+func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 	c.logger.Debug().Msg("Waiting until start of next slot")
-	// this is likely to be a very short wait, so don't show a spinner
-	sleepDuration := 10 * time.Microsecond
 
-	// get the expected current slot end time
-	expectedCurrentSlotEndTime, err := c.solanaRPCClient.GetCurrentSlotEndTime()
+	// Get the current slot number
+	currentSlot, err := c.solanaRPCClient.GetCurrentSlot()
 	if err != nil {
-		return fmt.Errorf("failed to get current slot end time: %w", err)
+		return 0, fmt.Errorf("failed to get current slot: %w", err)
 	}
 
-	// wait until the current slot is over
+	// Poll getSlot() to detect when the slot changes
+	// This is fast and accurate - getSlot() is a lightweight RPC call
+	pollInterval := 50 * time.Millisecond // poll every 50ms
 	for {
-		timeUntilCurrentSlotEnd := time.Until(expectedCurrentSlotEndTime)
-		if timeUntilCurrentSlotEnd <= 0 {
-			return nil
+		slot, err := c.solanaRPCClient.GetCurrentSlot()
+		if err != nil {
+			// If RPC fails, retry after a short delay
+			c.logger.Debug().Err(err).Msg("Failed to get slot, retrying")
+			time.Sleep(pollInterval)
+			continue
 		}
-		time.Sleep(sleepDuration)
+
+		// Slot has changed, we're now in the next slot
+		if slot > currentSlot {
+			c.logger.Debug().
+				Uint64("old_slot", currentSlot).
+				Uint64("new_slot", slot).
+				Msg("Slot transition detected, proceeding")
+			return slot, nil
+		}
+
+		// Still in the same slot, continue polling
+		time.Sleep(pollInterval)
 	}
 }
 

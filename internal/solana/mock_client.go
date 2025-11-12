@@ -24,8 +24,7 @@ type MockClient struct {
 	getCreditRankedVoteAccountFromPubkey func(pubkey string) (*rpc.VoteAccountsResult, int, error)
 
 	// Slot methods
-	getCurrentSlot        func() (uint64, error)
-	getCurrentSlotEndTime func() (time.Time, error)
+	getCurrentSlot func() (uint64, error)
 
 	// Leader schedule methods
 	getTimeToNextLeaderSlotForPubkey func(pubkey solana.PublicKey) (bool, time.Duration, error)
@@ -87,11 +86,6 @@ func (m *MockClient) WithGetCurrentSlot(fn func() (uint64, error)) *MockClient {
 	return m
 }
 
-// WithGetCurrentSlotEndTime sets a custom GetCurrentSlotEndTime function
-func (m *MockClient) WithGetCurrentSlotEndTime(fn func() (time.Time, error)) *MockClient {
-	m.getCurrentSlotEndTime = fn
-	return m
-}
 
 // WithGetTimeToNextLeaderSlotForPubkey sets a custom GetTimeToNextLeaderSlotForPubkey function
 func (m *MockClient) WithGetTimeToNextLeaderSlotForPubkey(fn func(pubkey solana.PublicKey) (bool, time.Duration, error)) *MockClient {
@@ -137,13 +131,6 @@ func (m *MockClient) GetCurrentSlot() (uint64, error) {
 	return 0, nil
 }
 
-// GetCurrentSlotEndTime implements ClientInterface.GetCurrentSlotEndTime
-func (m *MockClient) GetCurrentSlotEndTime() (time.Time, error) {
-	if m.getCurrentSlotEndTime != nil {
-		return m.getCurrentSlotEndTime()
-	}
-	return time.Time{}, nil
-}
 
 // GetTimeToNextLeaderSlotForPubkey implements ClientInterface.GetTimeToNextLeaderSlotForPubkey
 func (m *MockClient) GetTimeToNextLeaderSlotForPubkey(pubkey solana.PublicKey) (bool, time.Duration, error) {
@@ -262,13 +249,6 @@ func (b *MockClientBuilder) WithCurrentSlot(slot uint64) *MockClientBuilder {
 	return b
 }
 
-// WithSlotEndTime configures the mock to return a specific slot end time
-func (b *MockClientBuilder) WithSlotEndTime(endTime time.Time) *MockClientBuilder {
-	b.client.getCurrentSlotEndTime = func() (time.Time, error) {
-		return endTime, nil
-	}
-	return b
-}
 
 // Build returns the configured mock client
 func (b *MockClientBuilder) Build() *MockClient {
