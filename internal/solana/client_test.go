@@ -788,53 +788,6 @@ func BenchmarkGossipClient_GetCurrentSlot(b *testing.B) {
 	}
 }
 
-func TestGossipClient_GetCurrentSlotEndTime_Success(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	epochInfo := &rpc.GetEpochInfoResult{
-		Epoch:        1,
-		SlotIndex:    100,  // current slot index within epoch
-		AbsoluteSlot: 1000, // current absolute slot
-	}
-
-	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
-
-	// Test the function
-	endTime, err := client.GetCurrentSlotEndTime()
-
-	// Assertions
-	require.NoError(t, err)
-	// The function now estimates based on current time, so we just verify it's reasonable
-	// Should be approximately current time + 400ms (since we're at slot index 100)
-	expectedMinTime := time.Now().UTC().Add(390 * time.Millisecond)
-	expectedMaxTime := time.Now().UTC().Add(410 * time.Millisecond)
-
-	assert.True(t, endTime.After(expectedMinTime))
-	assert.True(t, endTime.Before(expectedMaxTime))
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCurrentSlotEndTime_GetEpochInfoError(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return((*rpc.GetEpochInfoResult)(nil), errors.New("RPC connection failed"))
-
-	// Test the function
-	endTime, err := client.GetCurrentSlotEndTime()
-
-	// Assertions
-	assert.Error(t, err)
-	assert.Equal(t, time.Time{}, endTime)
-	assert.Contains(t, err.Error(), "failed to get epoch info")
-
-	networkMock.AssertExpectations(t)
-}
-
 func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_Success(t *testing.T) {
 	// Create test client with mocks
 	client, _, networkMock := createTestClient()
@@ -998,27 +951,6 @@ func BenchmarkGossipClient_GetLocalNodeHealth(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = client.GetLocalNodeHealth()
-	}
-}
-
-func BenchmarkGossipClient_GetCurrentSlotEndTime(b *testing.B) {
-	mockClient := &MockRPCClient{}
-	epochInfo := &rpc.GetEpochInfoResult{
-		Epoch:        1,
-		SlotIndex:    100,
-		AbsoluteSlot: 1000,
-	}
-
-	mockClient.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
-
-	gossipClient := NewRPCClient(NewClientParams{
-		LocalRPCURL:   "http://localhost:8899",
-		NetworkRPCURL: "https://api.mainnet-beta.solana.com",
-	})
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = gossipClient.GetCurrentSlotEndTime()
 	}
 }
 

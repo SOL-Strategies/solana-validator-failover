@@ -34,8 +34,6 @@ type ClientInterface interface {
 	GetCreditRankedVoteAccountFromPubkey(pubkey string) (*rpc.VoteAccountsResult, int, error)
 	// GetCurrentSlot returns the current slot
 	GetCurrentSlot() (slot uint64, err error)
-	// GetCurrentSlotEndTime returns the end time of the current slot
-	GetCurrentSlotEndTime() (time.Time, error)
 	// GetTimeToNextLeaderSlotForPubkey returns the time to the next leader slot for the given pubkey
 	GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (isOnLeaderSchedule bool, timeToNextLeaderSlot time.Duration, err error)
 	// GetLocalNodeHealth returns the health of the local node
@@ -195,29 +193,6 @@ func (c *Client) GetCurrentSlot() (slot uint64, err error) {
 		return 0, fmt.Errorf("failed to get slot: %w", err)
 	}
 	return slot, nil
-}
-
-// GetCurrentSlotEndTime returns the end time of the current slot
-func (c *Client) GetCurrentSlotEndTime() (estimatedCurrentSlotEndTime time.Time, err error) {
-	// estimate the first and end of current slot time from epoch info to avoid further potentiallyl lengthy RPC calls
-	averageSlotDuration := 400 * time.Millisecond
-	epochInfo, err := c.networkRPCClient.GetEpochInfo(context.Background(), rpc.CommitmentConfirmed)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to get epoch info: %w", err)
-	}
-
-	timePassedInEpoch := time.Duration(epochInfo.SlotIndex) * averageSlotDuration
-	estimatedFirstSlotTime := time.Now().UTC().Add(-timePassedInEpoch)
-
-	// estimate the end time of the current slot
-	slotDuration := time.Duration(epochInfo.SlotIndex+1) * averageSlotDuration
-	estimatedCurrentSlotEndTime = estimatedFirstSlotTime.Add(slotDuration)
-
-	c.loggerNetwork.Debug().
-		Str("estimatedFirstSlotTime", estimatedFirstSlotTime.UTC().Format(time.RFC3339Nano)).
-		Msgf("Estimated current slot end time %s", estimatedCurrentSlotEndTime.UTC().Format(time.RFC3339Nano))
-
-	return estimatedCurrentSlotEndTime, nil
 }
 
 // GetTimeToNextLeaderSlotForPubkey returns the time to the next leader slot for the given pubkey
