@@ -43,6 +43,7 @@ type ServerConfig struct {
 	IsDryRunFailover  bool
 	Hooks             hooks.FailoverHooks
 	MonitorConfig     MonitorConfig
+	SkipTowerSync     bool
 }
 
 // Server is the failover server - run by the passive node
@@ -63,6 +64,7 @@ type Server struct {
 	activeConn        quic.Connection
 	hooks             hooks.FailoverHooks
 	monitorConfig     MonitorConfig
+	skipTowerSync     bool
 }
 
 // NewServerFromConfig creates a new failover server from a configuration
@@ -91,6 +93,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		isDryRunFailover: config.IsDryRunFailover,
 		hooks:            config.Hooks,
 		monitorConfig:    config.MonitorConfig,
+		skipTowerSync:    config.SkipTowerSync,
 	}
 
 	if s.port == 0 {
@@ -209,6 +212,9 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 	// set the is dry run failover flag
 	s.failoverStream.SetIsDryRunFailover(s.isDryRunFailover)
 
+	// set the skip tower sync flag
+	s.failoverStream.SetSkipTowerSync(s.skipTowerSync)
+
 	// set this node's info so subsequent responses can be sent to the client with it
 	s.failoverStream.SetPassiveNodeInfo(s.passiveNodeInfo)
 
@@ -288,21 +294,38 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 
 	// this is where the actual failover starts
 
-	// Open tower file handle early to speed up failover
-	towerFile, err := os.OpenFile(
-		s.failoverStream.GetPassiveNodeInfo().TowerFile,
-		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
-		os.FileMode(0644), // User and group can read/write, others can read
-	)
-	if err != nil {
-		s.logger.Error().Err(err).Msgf("failed to open tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
-		s.failoverStream.SetErrorMessagef("server failed to open its tower file %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
-		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
-			s.logger.Error().Err(encodeErr).Msg("Failed to send error message to client")
+	var towerFile *os.File
+	// if skip tower sync is enabled, remove tower file if it exists
+	if s.skipTowerSync {
+		if utils.FileExists(s.failoverStream.GetPassiveNodeInfo().TowerFile) {
+			s.logger.Info().Msgf("removing existing tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+			if err := utils.RemoveFile(s.failoverStream.GetPassiveNodeInfo().TowerFile); err != nil {
+				s.failoverStream.SetErrorMessagef("failed to remove tower file at %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
+				if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+					s.logger.Error().Err(encodeErr).Msg("Failed to send error message to client")
+				}
+				s.logger.Fatal().Err(err).Msgf("failed to remove tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+				return
+			}
 		}
-		return
+	} else {
+		// Open tower file handle early to speed up failover
+		var err error
+		towerFile, err = os.OpenFile(
+			s.failoverStream.GetPassiveNodeInfo().TowerFile,
+			os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+			os.FileMode(0644), // User and group can read/write, others can read
+		)
+		if err != nil {
+			s.logger.Error().Err(err).Msgf("failed to open tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+			s.failoverStream.SetErrorMessagef("server failed to open its tower file %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
+			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+				s.logger.Error().Err(encodeErr).Msg("Failed to send error message to client")
+			}
+			return
+		}
+		defer utils.SafeCloseFile(towerFile)
 	}
-	defer utils.SafeCloseFile(towerFile)
 
 	// run pre hooks when passive
 	err = s.hooks.RunPreWhenPassive(s.getHookEnvMap(hookEnvMapParams{
@@ -324,50 +347,54 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		return
 	}
 
-	s.logger.Info().Msgf("🟤 Failover started - waiting for tower file from %s", s.failoverStream.GetActiveNodeInfo().Hostname)
+	if s.skipTowerSync {
+		s.logger.Info().Msgf("🟤 Failover started - skipping tower file sync")
+	} else {
+		s.logger.Info().Msgf("🟤 Failover started - waiting for tower file from %s", s.failoverStream.GetActiveNodeInfo().Hostname)
 
-	// Wait for the updated node info with tower file bytes
-	if err := s.failoverStream.Decode(); err != nil {
-		s.logger.Error().Err(err).Msg("failed to decode updated node info")
-		return
+		// Wait for the updated node info with tower file bytes
+		if err := s.failoverStream.Decode(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to decode updated node info")
+			return
+		}
+
+		// check that the TowerFileBytes sent are the same as the hash of the tower file
+		computedTowerFileHash := s.failoverStream.GetActiveNodeInfo().ComputeTowerFileHashFromBytes(s.failoverStream.GetActiveNodeInfo().TowerFileBytes)
+		expectedTowerFileHash := s.failoverStream.GetActiveNodeInfo().TowerFileHash
+
+		s.logger.Debug().Msgf("Checking tower file hash - received: %s expected: %s", computedTowerFileHash, expectedTowerFileHash)
+
+		if computedTowerFileHash != expectedTowerFileHash {
+			s.logger.Error().Msgf("tower file hash mismatch: (got: %s) != (expected: %s)", computedTowerFileHash, expectedTowerFileHash)
+			s.logger.Error().Msg("aborting failover - save it by running:")
+			fmt.Printf(
+				"  rsync -avz --no-perms --no-i-r --no-progress --no-motd --no-times -e ssh -i <YOUR-SSH-KEY> -o PubkeyAcceptedKeyTypes=+ssh-ed25519 -o HostKeyAlgorithms=+ssh-ed25519 -o BatchMode=yes -o StrictHostKeyChecking=no %s@%s:%s %s \n",
+				os.Getenv("USER"),
+				s.failoverStream.GetActiveNodeInfo().Hostname,
+				s.failoverStream.GetActiveNodeInfo().TowerFile,
+				s.failoverStream.GetPassiveNodeInfo().TowerFile,
+			)
+			s.logger.Error().Msg("then run:")
+			fmt.Printf("  %s \n", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
+			s.logger.Fatal().Msg("something has turned to 💩")
+			return
+		}
+
+		// Write bytes and close immediately
+		if _, err := towerFile.Write(s.failoverStream.GetActiveNodeInfo().TowerFileBytes); err != nil {
+			s.logger.Error().Err(err).Msgf("failed to write tower file to %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+			return
+		}
+
+		// close the file handle - defer utils.SafeCloseFile() above won't conflict
+		if err := towerFile.Close(); err != nil {
+			s.logger.Error().Err(err).Msgf("failed to close tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+			return
+		}
+
+		s.failoverStream.SetPassiveNodeSyncTowerFileEndTime()
+		s.logger.Info().Msg("👉 Received tower file")
 	}
-
-	// check that the TowerFileBytes sent are the same as the hash of the tower file
-	computedTowerFileHash := s.failoverStream.GetActiveNodeInfo().ComputeTowerFileHashFromBytes(s.failoverStream.GetActiveNodeInfo().TowerFileBytes)
-	expectedTowerFileHash := s.failoverStream.GetActiveNodeInfo().TowerFileHash
-
-	s.logger.Debug().Msgf("Checking tower file hash - received: %s expected: %s", computedTowerFileHash, expectedTowerFileHash)
-
-	if computedTowerFileHash != expectedTowerFileHash {
-		s.logger.Error().Msgf("tower file hash mismatch: (got: %s) != (expected: %s)", computedTowerFileHash, expectedTowerFileHash)
-		s.logger.Error().Msg("aborting failover - save it by running:")
-		fmt.Printf(
-			"  rsync -avz --no-perms --no-i-r --no-progress --no-motd --no-times -e ssh -i <YOUR-SSH-KEY> -o PubkeyAcceptedKeyTypes=+ssh-ed25519 -o HostKeyAlgorithms=+ssh-ed25519 -o BatchMode=yes -o StrictHostKeyChecking=no %s@%s:%s %s \n",
-			os.Getenv("USER"),
-			s.failoverStream.GetActiveNodeInfo().Hostname,
-			s.failoverStream.GetActiveNodeInfo().TowerFile,
-			s.failoverStream.GetPassiveNodeInfo().TowerFile,
-		)
-		s.logger.Error().Msg("then run:")
-		fmt.Printf("  %s \n", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
-		s.logger.Fatal().Msg("something has turned to 💩")
-		return
-	}
-
-	// Write bytes and close immediately
-	if _, err := towerFile.Write(s.failoverStream.GetActiveNodeInfo().TowerFileBytes); err != nil {
-		s.logger.Error().Err(err).Msgf("failed to write tower file to %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
-		return
-	}
-
-	// close the file handle - defer utils.SafeCloseFile() above won't conflict
-	if err := towerFile.Close(); err != nil {
-		s.logger.Error().Err(err).Msgf("failed to close tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
-		return
-	}
-
-	s.failoverStream.SetPassiveNodeSyncTowerFileEndTime()
-	s.logger.Info().Msg("👉 Received tower file")
 
 	// set identity to active
 	dryRunPrefix := " "
