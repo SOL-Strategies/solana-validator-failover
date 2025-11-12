@@ -126,6 +126,16 @@ func (s Stream) GetIsDryRunFailover() bool {
 	return s.message.IsDryRunFailover
 }
 
+// SetSkipTowerSync sets the skip tower sync flag
+func (s *Stream) SetSkipTowerSync(skipTowerSync bool) {
+	s.message.SkipTowerSync = skipTowerSync
+}
+
+// GetSkipTowerSync returns the skip tower sync flag
+func (s Stream) GetSkipTowerSync() bool {
+	return s.message.SkipTowerSync
+}
+
 // SetIsSuccessfullyCompleted sets the is successfully completed
 func (s *Stream) SetIsSuccessfullyCompleted(isSuccessfullyCompleted bool) {
 	s.message.IsSuccessfullyCompleted = isSuccessfullyCompleted
@@ -196,15 +206,19 @@ Failing over will:
 
     {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 
+{{- if not .SkipTowerSync }}
+
 2. Sync tower file from {{ Active "(them)" false }} {{ Active .ActiveNodeInfo.Hostname false }} to {{ Passive "(us)" false }} {{ Passive .PassiveNodeInfo.Hostname false }} at:
 
     {{ LightGrey .PassiveNodeInfo.TowerFile }}
 
-3. {{ if .IsDryRun }}{{ Blue "(dry-run)" }} {{ end }}Set {{ Passive "(us)" false }} {{ Passive .PassiveNodeInfo.Hostname false }} to {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} with command:
+{{- end }}
+
+{{ if .SkipTowerSync }}2{{ else }}3{{ end }}. {{ if .IsDryRun }}{{ Blue "(dry-run)" }} {{ end }}Set {{ Passive "(us)" false }} {{ Passive .PassiveNodeInfo.Hostname false }} to {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} with command:
 
     {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
 
-4. Exit
+{{ if .SkipTowerSync }}3{{ else }}4{{ end }}. Exit
 `)
 
 	if err != nil {
@@ -214,6 +228,7 @@ Failing over will:
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
 		"IsDryRun":        s.message.IsDryRunFailover,
+		"SkipTowerSync":   s.message.SkipTowerSync,
 		"PassiveNodeInfo": s.message.PassiveNodeInfo,
 		"ActiveNodeInfo":  s.message.ActiveNodeInfo,
 		"SummaryTable":    s.message.currentStateTableString(),
@@ -264,56 +279,68 @@ func (s *Stream) GetStateTable() string {
 
 // GetFailoverDurationTableString returns the failover duration table string
 func (s *Stream) GetFailoverDurationTableString() string {
-	stageColumnRows := formatStageColumnRows(
-		[]string{
-			style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
-			style.RenderGreyString("--set-identity-->", false),
-			style.RenderPassiveString(s.message.ActiveNodeInfo.Identities.Passive.PubKey(), false),
+	rows := [][]string{
+		{
+			formatStageColumnRows(
+				[]string{
+					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderGreyString("--set-identity-->", false),
+					style.RenderPassiveString(s.message.ActiveNodeInfo.Identities.Passive.PubKey(), false),
+				},
+			)[0],
+			s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime).String(),
+			humanize.Comma(int64(s.GetFailoverStartSlot())),
 		},
-		[]string{
-			style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
-			style.RenderGreyString("---tower-file--->", false),
-			style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
-		},
-		[]string{
-			style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
-			style.RenderGreyString("--set-identity-->", false),
-			style.RenderActiveString(s.message.PassiveNodeInfo.Identities.Active.PubKey(), false),
-		},
-	)
+	}
+
+	// Only add tower file sync row if not skipping
+	if !s.message.SkipTowerSync {
+		rows = append(rows, []string{
+			formatStageColumnRows(
+				[]string{
+					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderGreyString("---tower-file--->", false),
+					style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+				},
+			)[0],
+			fmt.Sprintf("%s (%s)",
+				s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime).String(),
+				humanize.Bytes(uint64(len(s.message.ActiveNodeInfo.TowerFileBytes))),
+			),
+			" ",
+		})
+	}
+
+	// Add passive node set identity row
+	rows = append(rows, []string{
+		formatStageColumnRows(
+			[]string{
+				style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+				style.RenderGreyString("--set-identity-->", false),
+				style.RenderActiveString(s.message.PassiveNodeInfo.Identities.Active.PubKey(), false),
+			},
+		)[0],
+		s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime).String(),
+		humanize.Comma(int64(s.GetFailoverEndSlot())),
+	})
+
+	// Add total row
+	totalRowIndex := len(rows)
+	rows = append(rows, []string{
+		style.RenderBoldMessage("Total"),
+		fmt.Sprintf("%s (wall clock)", style.RenderBoldMessage(s.GetFailoverDuration().String())),
+		style.RenderBoldMessage(fmt.Sprintf("%s slots", humanize.Comma(int64(s.GetFailoverSlotsDuration())))),
+	})
+
 	return style.RenderTable(
 		[]string{"Stage", "Duration", "Slot"},
-		[][]string{
-			{
-				stageColumnRows[0],
-				s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime).String(),
-				humanize.Comma(int64(s.GetFailoverStartSlot())),
-			},
-			{
-				stageColumnRows[1],
-				fmt.Sprintf("%s (%s)",
-					s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime).String(),
-					humanize.Bytes(uint64(len(s.message.ActiveNodeInfo.TowerFileBytes))),
-				),
-				" ",
-			},
-			{
-				stageColumnRows[2],
-				s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime).String(),
-				humanize.Comma(int64(s.GetFailoverEndSlot())),
-			},
-			{
-				style.RenderBoldMessage("Total"),
-				fmt.Sprintf("%s (wall clock)", style.RenderBoldMessage(s.GetFailoverDuration().String())),
-				style.RenderBoldMessage(fmt.Sprintf("%s slots", humanize.Comma(int64(s.GetFailoverSlotsDuration())))),
-			},
-		},
+		rows,
 		func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return style.TableHeaderStyle
 			}
 			// total stage title
-			if row == 3 && col == 0 {
+			if row == totalRowIndex && col == 0 {
 				return style.TableCellStyle.Align(lipgloss.Right)
 			}
 			return style.TableCellStyle.Align(lipgloss.Left)
@@ -482,19 +509,10 @@ func formatStageColumnRows(rows ...[]string) (formattedRows []string) {
 		col1Value := row[0]
 		col2Value := row[1]
 		col3Value := row[2]
-		// // totals column just create first two colmns at max length
-		// if rowIndex == 3 {
-		// 	col1Value = strings.Repeat(" ", maxColumnLengths[0])
-		// 	col2Value = strings.Repeat(" ", maxColumnLengths[1])
-		// }
 
 		col1Style := lipgloss.NewStyle().PaddingRight(maxColumnLengths[0] - len(col1Value))
 		col2Style := lipgloss.NewStyle().PaddingRight(maxColumnLengths[1] - len(col2Value))
 		col3Style := lipgloss.NewStyle().PaddingRight(maxColumnLengths[2] - len(col3Value))
-
-		// if rowIndex == 3 {
-		// 	col3Style = col3Style.PaddingRight(0).PaddingLeft(maxColumnLengths[2] - len(col3Value))
-		// }
 
 		formattedRows[rowIndex] = fmt.Sprintf("%s %s %s",
 			col1Style.Render(col1Value),

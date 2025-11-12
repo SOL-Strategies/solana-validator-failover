@@ -29,6 +29,7 @@ type FailoverParams struct {
 	NoWaitForHealthy      bool
 	NoMinTimeToLeaderSlot bool
 	MinTimeToLeaderSlot   time.Duration
+	SkipTowerSync         bool
 }
 
 // Peers is a map of peers
@@ -620,6 +621,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		SolanaRPCClient:  v.solanaRPCClient,
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
+		SkipTowerSync:    params.SkipTowerSync,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -672,6 +674,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 		MinTimeToLeaderSlot:            params.MinTimeToLeaderSlot,
 		WaitMinTimeToLeaderSlotEnabled: !params.NoMinTimeToLeaderSlot,
 		SolanaRPCClient:                v.solanaRPCClient,
+		SkipTowerSync:                  params.SkipTowerSync,
 		ActiveNodeInfo: &failover.NodeInfo{
 			Hostname:                       v.Hostname,
 			PublicIP:                       v.PublicIP,

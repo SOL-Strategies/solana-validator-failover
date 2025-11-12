@@ -204,12 +204,6 @@ make build-compose
 
 ## Laundry/wish list:
 
-- [ ] Support forcing a failover for when active node is properly dead or similar situation
-- [ ] Optionally skip tower file syncing (yolo)
-- [ ] Set required user to run as and fail
-- [ ] Automatic node discovery
 - [ ] TLS config
 - [ ] Refactor to make e2e testing easier - current setup not optimal
-- [ ] Optionally run as long-running service to support (almost) automatic failovers
 - [ ] Rollbacks (to the extent it's possible)
-- [ ] Log process to a file for those who want/need it for audit trails and such

@@ -16,6 +16,7 @@ type Message struct {
 	PassiveNodeInfo                  NodeInfo
 	IsDryRunFailover                 bool
 	IsSuccessfullyCompleted          bool
+	SkipTowerSync                    bool
 	ActiveNodeSetIdentityStartTime   time.Time
 	ActiveNodeSetIdentityEndTime     time.Time
 	ActiveNodeSyncTowerFileStartTime time.Time

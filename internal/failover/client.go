@@ -30,6 +30,7 @@ type ClientConfig struct {
 	Hooks                          hooks.FailoverHooks
 	LocalRPCClient                 *rpc.Client
 	SolanaRPCClient                solana.ClientInterface
+	SkipTowerSync                  bool
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
@@ -46,6 +47,7 @@ type Client struct {
 	localRPCClient                 *rpc.Client
 	solanaRPCClient                solana.ClientInterface
 	serverName                     string
+	skipTowerSync                  bool
 }
 
 // NewClientFromConfig creates a new QUIC client from a configuration
@@ -63,6 +65,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		localRPCClient:                 config.LocalRPCClient,
 		solanaRPCClient:                config.SolanaRPCClient,
 		serverName:                     config.ServerName,
+		skipTowerSync:                  config.SkipTowerSync,
 	}
 
 	// dial the server
@@ -136,6 +139,9 @@ func (c *Client) Start() {
 		return
 	}
 
+	// Get skipTowerSync from the server's message (server is the authority on this)
+	skipTowerSync := c.failoverStream.GetSkipTowerSync()
+
 	// wait until the next leader slot is at least the minimum time to leader slot
 	err = c.waitMinTimeToLeaderSlot()
 	if err != nil {
@@ -198,21 +204,26 @@ func (c *Client) Start() {
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 
-	c.logger.Info().Msgf("👉 Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
+	if skipTowerSync {
+		c.logger.Info().Msgf("⏭️  Skipping tower file sync")
+		// Don't send anything - server won't wait for tower file when skipTowerSync is true
+	} else {
+		c.logger.Info().Msgf("👉 Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
 
-	// Read the tower file into TowerFileBytes
-	c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-	err = c.failoverStream.GetActiveNodeInfo().SetTowerFileBytes()
-	if err != nil {
-		c.logger.Error().Err(err).Msgf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
-		return
-	}
-	c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
+		// Read the tower file into TowerFileBytes
+		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
+		err = c.failoverStream.GetActiveNodeInfo().SetTowerFileBytes()
+		if err != nil {
+			c.logger.Error().Err(err).Msgf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
+			return
+		}
+		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
 
-	// Send the updated node info with tower file bytes
-	if err := c.failoverStream.Encode(); err != nil {
-		c.logger.Error().Err(err).Msgf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
-		return
+		// Send the updated node info with tower file bytes
+		if err := c.failoverStream.Encode(); err != nil {
+			c.logger.Error().Err(err).Msgf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
+			return
+		}
 	}
 
 	// wait for confirmation from server that failover is complete
