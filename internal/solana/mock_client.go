@@ -86,7 +86,6 @@ func (m *MockClient) WithGetCurrentSlot(fn func() (uint64, error)) *MockClient {
 	return m
 }
 
-
 // WithGetTimeToNextLeaderSlotForPubkey sets a custom GetTimeToNextLeaderSlotForPubkey function
 func (m *MockClient) WithGetTimeToNextLeaderSlotForPubkey(fn func(pubkey solana.PublicKey) (bool, time.Duration, error)) *MockClient {
 	m.getTimeToNextLeaderSlotForPubkey = fn
@@ -130,7 +129,6 @@ func (m *MockClient) GetCurrentSlot() (uint64, error) {
 	}
 	return 0, nil
 }
-
 
 // GetTimeToNextLeaderSlotForPubkey implements ClientInterface.GetTimeToNextLeaderSlotForPubkey
 func (m *MockClient) GetTimeToNextLeaderSlotForPubkey(pubkey solana.PublicKey) (bool, time.Duration, error) {
@@ -248,7 +246,6 @@ func (b *MockClientBuilder) WithCurrentSlot(slot uint64) *MockClientBuilder {
 	}
 	return b
 }
-
 
 // Build returns the configured mock client
 func (b *MockClientBuilder) Build() *MockClient {
