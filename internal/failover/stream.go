@@ -192,33 +192,31 @@ func (s *Stream) ConfirmFailover() (err error) {
 
 {{ .SummaryTable }}
 
+Failover plan:
+
 {{/* Clear warning when not a drill i.e not a dry run */}}
 {{- if .IsDryRun -}}
-{{ Blue "INFO: This is a dry run - no identities will be changed on either node" }}
-{{ Blue "INFO: To run a real failover, re-run with --not-a-drill" }}
+{{ Blue "This is a dry run - no identities will be changed on either node." }}
+{{ Blue "To run a real failover, re-run with: --not-a-drill" }}
 {{- else -}}
-{{ Warning "WARNING: This is a real failover - identities will be changed on both nodes" }}
+{{ Warning "WARNING: This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
 
-Failing over will:
-
-1. {{ if .IsDryRun }}{{ Blue "(dry-run)" }} {{ end }}Set {{ Active "(them)" false }} {{ Active .ActiveNodeInfo.Hostname false }} to {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }} with command:
-
-    {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
-
+🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+🔹
+🔹   {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }}
-
-2. Sync tower file from {{ Active "(them)" false }} {{ Active .ActiveNodeInfo.Hostname false }} to {{ Passive "(us)" false }} {{ Passive .PassiveNodeInfo.Hostname false }} at:
-
-    {{ LightGrey .PassiveNodeInfo.TowerFile }}
-
+🔹
+⚫ {{ Active .ActiveNodeInfo.Hostname false }} → tower file → {{ Passive .PassiveNodeInfo.Hostname false }}
+🔹
+🔹   {{ LightGrey .PassiveNodeInfo.TowerFile }}
 {{- end }}
-
-{{ if .SkipTowerSync }}2{{ else }}3{{ end }}. {{ if .IsDryRun }}{{ Blue "(dry-run)" }} {{ end }}Set {{ Passive "(us)" false }} {{ Passive .PassiveNodeInfo.Hostname false }} to {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} with command:
-
-    {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
-
-{{ if .SkipTowerSync }}3{{ else }}4{{ end }}. Exit
+🔹
+🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }}
+🔹
+🔹   {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+🔹
+💰 Profit
 `)
 
 	if err != nil {
