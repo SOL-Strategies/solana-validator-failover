@@ -47,6 +47,7 @@ type Client struct {
 	localRPCClient                 *rpc.Client
 	solanaRPCClient                solana.ClientInterface
 	serverName                     string
+	serverAddress                  string
 	skipTowerSync                  bool
 }
 
@@ -65,17 +66,14 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		localRPCClient:                 config.LocalRPCClient,
 		solanaRPCClient:                config.SolanaRPCClient,
 		serverName:                     config.ServerName,
+		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
 	}
 
-	// dial the server
-	client.Conn, err = quic.DialAddr(ctx, config.ServerAddress, &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{ProtocolName},
-	}, nil)
+	err = client.connectToServer()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to connect to server: %v", err)
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
 	client.logger.Debug().Msgf("Connected to %s", style.RenderPassiveString(config.ServerName, false))
@@ -115,7 +113,7 @@ func (c *Client) Start() {
 	c.logger.Debug().Msg("Sent message type")
 
 	// wait for failover signal from server before proceeding
-	sp := spinner.New().Title(fmt.Sprintf("Waiting for failover signal from %s...", style.RenderPassiveString(c.serverName, false)))
+	sp := spinner.New().Title(fmt.Sprintf("Connected to %s, waiting for failover signal...", style.RenderPassiveString(c.serverName, false)))
 	sp.ActionWithErr(func(ctx context.Context) error {
 		return c.failoverStream.Decode()
 	})
@@ -397,4 +395,59 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_CLIENT_VERSION"] = c.failoverStream.GetPassiveNodeInfo().ClientVersion
 
 	return envMap
+}
+
+// connectToServer waits until a QUIC server is listening on the given address
+// It shows a spinner and attempts the actual QUIC connection, retrying on error until successful
+// This allows the client to start independet of the server being ready to accept connections and latches
+// onto the server as soon as it is ready
+func (c *Client) connectToServer() error {
+	sp := spinner.New().Title(fmt.Sprintf("Waiting for %s at %s...",
+		style.RenderPassiveString(c.serverName, false),
+		style.RenderGreyString(c.serverAddress, false),
+	))
+	sp.ActionWithErr(func(spinnerCtx context.Context) error {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		// Check immediately first, but give spinner a moment to render
+		select {
+		case <-spinnerCtx.Done():
+			return spinnerCtx.Err()
+		case <-time.After(100 * time.Millisecond):
+			// Small delay to let spinner render
+			if err := c.tryQUICConnection(); err == nil {
+				return nil
+			}
+		}
+
+		for {
+			select {
+			case <-spinnerCtx.Done():
+				return spinnerCtx.Err()
+			case <-ticker.C:
+				// Try the actual QUIC connection
+				if err := c.tryQUICConnection(); err == nil {
+					return nil
+				}
+				// Server not ready yet, continue waiting
+			}
+		}
+	})
+	return sp.Run()
+}
+
+// tryQUICConnection attempts the actual QUIC connection that will be used
+func (c *Client) tryQUICConnection() error {
+	conn, err := quic.DialAddr(c.ctx, c.serverAddress, &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{ProtocolName},
+	}, nil)
+	if err != nil {
+		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
+		return err
+	}
+	// Connection successful, store it
+	c.Conn = conn
+	return nil
 }
