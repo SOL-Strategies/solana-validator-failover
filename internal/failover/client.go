@@ -47,6 +47,7 @@ type Client struct {
 	localRPCClient                 *rpc.Client
 	solanaRPCClient                solana.ClientInterface
 	serverName                     string
+	serverAddress                  string
 	skipTowerSync                  bool
 }
 
@@ -65,25 +66,14 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		localRPCClient:                 config.LocalRPCClient,
 		solanaRPCClient:                config.SolanaRPCClient,
 		serverName:                     config.ServerName,
+		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
 	}
 
-	// before dialing the server, wait for the server to be listening on udp port
-	// from server address, this makes sure we can start the server and client at different times
-	// and the client will latch onto the server when it is ready
-	err = client.waitUntilServerIsListening(config.ServerAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for server to be listening on UDP port: %w", err)
-	}
-
-	// dial the server
-	client.Conn, err = quic.DialAddr(ctx, config.ServerAddress, &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{ProtocolName},
-	}, nil)
+	err = client.connectToServer()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to connect to server: %v", err)
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
 	client.logger.Debug().Msgf("Connected to %s", style.RenderPassiveString(config.ServerName, false))
@@ -123,7 +113,7 @@ func (c *Client) Start() {
 	c.logger.Debug().Msg("Sent message type")
 
 	// wait for failover signal from server before proceeding
-	sp := spinner.New().Title(fmt.Sprintf("Waiting for failover signal from %s...", style.RenderPassiveString(c.serverName, false)))
+	sp := spinner.New().Title(fmt.Sprintf("Connected to %s, waiting for failover signal...", style.RenderPassiveString(c.serverName, false)))
 	sp.ActionWithErr(func(ctx context.Context) error {
 		return c.failoverStream.Decode()
 	})
@@ -407,49 +397,57 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	return envMap
 }
 
-// waitUntilServerIsListening waits until a QUIC server is listening on the given address
-// It shows a spinner and attempts to dial the server with a short timeout, retrying until successful
-func (c *Client) waitUntilServerIsListening(serverAddress string) error {
-	sp := spinner.New().Title(fmt.Sprintf("Waiting for server %s to be listening on UDP port...", c.serverName))
-	sp.ActionWithErr(func(ctx context.Context) error {
+// connectToServer waits until a QUIC server is listening on the given address
+// It shows a spinner and attempts the actual QUIC connection, retrying on error until successful
+// This allows the client to start independet of the server being ready to accept connections and latches
+// onto the server as soon as it is ready
+func (c *Client) connectToServer() error {
+	sp := spinner.New().Title(fmt.Sprintf("Waiting for %s at %s...",
+		style.RenderPassiveString(c.serverName, false),
+		style.RenderGreyString(c.serverAddress, false),
+	))
+	sp.ActionWithErr(func(spinnerCtx context.Context) error {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
-		// Try immediately first
-		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		conn, err := quic.DialAddr(dialCtx, serverAddress, &tls.Config{
-			InsecureSkipVerify: true,
-		}, &quic.Config{
-			HandshakeIdleTimeout: 2 * time.Second,
-		})
-		cancel()
-		if err == nil {
-			conn.CloseWithError(0, "test connection")
-			return nil
+		// Check immediately first, but give spinner a moment to render
+		select {
+		case <-spinnerCtx.Done():
+			return spinnerCtx.Err()
+		case <-time.After(100 * time.Millisecond):
+			// Small delay to let spinner render
+			if err := c.tryQUICConnection(); err == nil {
+				return nil
+			}
 		}
 
 		for {
 			select {
-			case <-ctx.Done():
-				return ctx.Err()
+			case <-spinnerCtx.Done():
+				return spinnerCtx.Err()
 			case <-ticker.C:
-				// Try to dial the QUIC server with a short timeout
-				dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				conn, err := quic.DialAddr(dialCtx, serverAddress, &tls.Config{
-					InsecureSkipVerify: true,
-				}, &quic.Config{
-					HandshakeIdleTimeout: 2 * time.Second,
-				})
-				cancel()
-				if err == nil {
-					// Server is listening, close the test connection
-					conn.CloseWithError(0, "test connection")
+				// Try the actual QUIC connection
+				if err := c.tryQUICConnection(); err == nil {
 					return nil
 				}
 				// Server not ready yet, continue waiting
-				c.logger.Debug().Err(err).Str("address", serverAddress).Msg("server not ready, retrying...")
 			}
 		}
 	})
 	return sp.Run()
+}
+
+// tryQUICConnection attempts the actual QUIC connection that will be used
+func (c *Client) tryQUICConnection() error {
+	conn, err := quic.DialAddr(c.ctx, c.serverAddress, &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{ProtocolName},
+	}, nil)
+	if err != nil {
+		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
+		return err
+	}
+	// Connection successful, store it
+	c.Conn = conn
+	return nil
 }
