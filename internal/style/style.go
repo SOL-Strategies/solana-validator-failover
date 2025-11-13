@@ -28,9 +28,9 @@ var (
 	// ColorInfo is the color for info
 	ColorInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	// ColorWarn is the color for warn
-	ColorWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("192"))
+	ColorWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("184"))
 	// ColorWarning is the color for warning
-	ColorWarning = lipgloss.Color("192")
+	ColorWarning = lipgloss.Color("184")
 	// ColorErrorValue is the color value for error
 	ColorErrorValue = lipgloss.Color("204")
 	// ColorError is the style for error
@@ -52,8 +52,6 @@ var (
 	// MessageStyle is the style for messages
 	MessageStyle = lipgloss.NewStyle().
 			Align(lipgloss.Left).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("205")).
 			Width(150).
 			Padding(1)
 
@@ -78,6 +76,7 @@ func TemplateFuncMap() template.FuncMap {
 		"Orange":    RenderOrangeString,
 		"Purple":    RenderPurpleString,
 		"Message":   RenderMessageString,
+		"Grey":      RenderGreyString,
 		"LightGrey": RenderLightGreyString,
 		"Join":      strings.Join,
 	}
