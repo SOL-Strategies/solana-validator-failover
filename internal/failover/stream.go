@@ -190,33 +190,34 @@ func (s *Stream) ConfirmFailover() (err error) {
 	tpl := template.New("confirmFailoverTpl").Funcs(funcMap)
 	tpl, err = tpl.Parse(`{{ Purple "solana-validator-failover v" }}{{ Purple .AppVersion }}
 
+{{ Purple "Current state:" }}
+
 {{ .SummaryTable }}
 
-Failover plan:
+{{ Purple "Failover plan:" }}
 
 {{/* Clear warning when not a drill i.e not a dry run */}}
 {{- if .IsDryRun -}}
-{{ Blue "This is a dry run - no identities will be changed on either node." }}
-{{ Blue "To run a real failover, re-run with: --not-a-drill" }}
+{{ Blue "This is a dry run. Re-run with '--not-a-drill' for a real failover." }}
 {{- else -}}
-{{ Warning "WARNING: This is a real failover - identities will be changed on both nodes." }}
+{{ Warning "⚠️  This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
 
-🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
-🔹
-🔹   {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
-{{- if not .SkipTowerSync }}
-🔹
-⚫ {{ Active .ActiveNodeInfo.Hostname false }} → tower file → {{ Passive .PassiveNodeInfo.Hostname false }}
-🔹
-🔹   {{ LightGrey .PassiveNodeInfo.TowerFile }}
+🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ LightGrey "set-identity" }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+▪️
+▪️   {{ if .IsDryRun }}{{ LightGrey "(dry run) " }}{{ end }}{{ Purple "cmd ❯" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
+{{- if not .SkipTowerSync }} 
+▪️
+⚫ {{ Active .ActiveNodeInfo.Hostname false }} → {{ LightGrey "tower file" }} → {{ Passive .PassiveNodeInfo.Hostname false }} 
+▪️
+▪️   {{ Purple "destination:" }} {{ LightGrey .PassiveNodeInfo.TowerFile }}
 {{- end }}
-🔹
-🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }}
-🔹
-🔹   {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
-🔹
-💰 Profit
+▪️
+🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ LightGrey "set-identity" }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
+▪️
+▪️   {{ if .IsDryRun }}{{ LightGrey "(dry run) " }}{{ end }}{{ Purple "cmd ❯" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+▪️
+💰 {{ LightGrey "Profit" }}
 `)
 
 	if err != nil {
