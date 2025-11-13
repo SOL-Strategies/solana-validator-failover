@@ -68,6 +68,14 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		skipTowerSync:                  config.SkipTowerSync,
 	}
 
+	// before dialing the server, wait for the server to be listening on udp port
+	// from server address, this makes sure we can start the server and client at different times
+	// and the client will latch onto the server when it is ready
+	err = client.waitUntilServerIsListening(config.ServerAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for server to be listening on UDP port: %w", err)
+	}
+
 	// dial the server
 	client.Conn, err = quic.DialAddr(ctx, config.ServerAddress, &tls.Config{
 		InsecureSkipVerify: true,
@@ -397,4 +405,51 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_CLIENT_VERSION"] = c.failoverStream.GetPassiveNodeInfo().ClientVersion
 
 	return envMap
+}
+
+// waitUntilServerIsListening waits until a QUIC server is listening on the given address
+// It shows a spinner and attempts to dial the server with a short timeout, retrying until successful
+func (c *Client) waitUntilServerIsListening(serverAddress string) error {
+	sp := spinner.New().Title(fmt.Sprintf("Waiting for server %s to be listening on UDP port...", c.serverName))
+	sp.ActionWithErr(func(ctx context.Context) error {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		// Try immediately first
+		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		conn, err := quic.DialAddr(dialCtx, serverAddress, &tls.Config{
+			InsecureSkipVerify: true,
+		}, &quic.Config{
+			HandshakeIdleTimeout: 2 * time.Second,
+		})
+		cancel()
+		if err == nil {
+			conn.CloseWithError(0, "test connection")
+			return nil
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				// Try to dial the QUIC server with a short timeout
+				dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				conn, err := quic.DialAddr(dialCtx, serverAddress, &tls.Config{
+					InsecureSkipVerify: true,
+				}, &quic.Config{
+					HandshakeIdleTimeout: 2 * time.Second,
+				})
+				cancel()
+				if err == nil {
+					// Server is listening, close the test connection
+					conn.CloseWithError(0, "test connection")
+					return nil
+				}
+				// Server not ready yet, continue waiting
+				c.logger.Debug().Err(err).Str("address", serverAddress).Msg("server not ready, retrying...")
+			}
+		}
+	})
+	return sp.Run()
 }
