@@ -13,6 +13,8 @@ import (
 var (
 	// ColorPurple is the color for purple
 	ColorPurple = lipgloss.Color("99")
+	// ColorDarkPurple is the color for dark purple
+	ColorDarkPurple = lipgloss.Color("55")
 	// ColorBlue is the color for blue
 	ColorBlue = lipgloss.Color("#00BFFF")
 	// ColorActive is the color for active
@@ -69,16 +71,17 @@ var (
 // TemplateFuncMap returns a template.FuncMap with the style functions
 func TemplateFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"Active":    RenderActiveString,
-		"Passive":   RenderPassiveString,
-		"Warning":   RenderWarningString,
-		"Blue":      RenderBlueString,
-		"Orange":    RenderOrangeString,
-		"Purple":    RenderPurpleString,
-		"Message":   RenderMessageString,
-		"Grey":      RenderGreyString,
-		"LightGrey": RenderLightGreyString,
-		"Join":      strings.Join,
+		"Active":     RenderActiveString,
+		"Passive":    RenderPassiveString,
+		"Warning":    RenderWarningString,
+		"Blue":       RenderBlueString,
+		"Orange":     RenderOrangeString,
+		"Purple":     RenderPurpleString,
+		"DarkPurple": RenderDarkPurpleString,
+		"Message":    RenderMessageString,
+		"Grey":       RenderGreyString,
+		"LightGrey":  RenderLightGreyString,
+		"Join":       strings.Join,
 	}
 }
 
@@ -148,6 +151,15 @@ func RenderPurpleString(message string) string {
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(ColorPurple).
+		Render(message)
+}
+
+// RenderDarkPurpleString renders a string in the dark purple color
+func RenderDarkPurpleString(message string) string {
+	return lipgloss.NewStyle().
+		Bold(false).
+		Foreground(ColorPurple).
+		Faint(true).
 		Render(message)
 }
 

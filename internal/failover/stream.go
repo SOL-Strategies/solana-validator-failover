@@ -198,24 +198,24 @@ func (s *Stream) ConfirmFailover() (err error) {
 
 {{/* Clear warning when not a drill i.e not a dry run */}}
 {{- if .IsDryRun -}}
-{{ Blue "This is a dry run. Re-run with '--not-a-drill' for a real failover." }}
+{{ Blue "This is a dry run - re-run with '--not-a-drill' for a real failover." }}
 {{- else -}}
 {{ Warning "⚠️  This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
 
-🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ LightGrey "set-identity" }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
 ▪️
-▪️   {{ if .IsDryRun }}{{ LightGrey "(dry run) " }}{{ end }}{{ Purple "cmd ❯" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
+▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }} 
 ▪️
-⚫ {{ Active .ActiveNodeInfo.Hostname false }} → {{ LightGrey "tower file" }} → {{ Passive .PassiveNodeInfo.Hostname false }} 
+⚫ {{ Grey .ActiveNodeInfo.Hostname false }} → {{ LightGrey "tower-file" }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
 ▪️
-▪️   {{ Purple "destination:" }} {{ LightGrey .PassiveNodeInfo.TowerFile }}
+▪️  {{ DarkPurple "→" }} {{ LightGrey .PassiveNodeInfo.TowerFile }}
 {{- end }}
 ▪️
-🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ LightGrey "set-identity" }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
+🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
 ▪️
-▪️   {{ if .IsDryRun }}{{ LightGrey "(dry run) " }}{{ end }}{{ Purple "cmd ❯" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
 ▪️
 💰 {{ LightGrey "Profit" }}
 `)
