@@ -10,6 +10,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/lipgloss"
@@ -171,6 +172,43 @@ func (s Stream) GetFailoverEndSlot() uint64 {
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
 func (s *Stream) ConfirmFailover() (err error) {
+	// Template function to render code blocks with glamour
+	renderCodeBlock := func(isDryRun bool, prmptChar, code string) string {
+		// Wrap in markdown code block and render with glamour
+		markdown := fmt.Sprintf("`%s`", strings.TrimSpace(code))
+		theme := "dark"
+		if isDryRun {
+			theme = "pink"
+		}
+		// Create renderer with wider word wrap (default is 80)
+		renderer, err := glamour.NewTermRenderer(
+			glamour.WithStandardStyle(theme),
+			glamour.WithWordWrap(150), // Match MessageStyle width
+		)
+		if err != nil {
+			// Fallback to simple Render if renderer creation fails
+			rendered, renderErr := glamour.Render(markdown, theme)
+			if renderErr != nil {
+				return style.RenderLightGreyString(markdown)
+			}
+			return strings.TrimSpace(strings.Trim(rendered, "\n"))
+		}
+		rendered, err := renderer.Render(markdown)
+		if err != nil {
+			// Fallback to plain text if rendering fails
+			return style.RenderLightGreyString(markdown)
+		}
+		// strip leading and trailing newlines
+
+		renderedPromptChar := strings.TrimSpace(style.RenderPurpleString(prmptChar))
+		renderedDryRun := strings.TrimSpace(style.RenderLightGreyString("(dry run) "))
+		rendered = fmt.Sprintf("%s", strings.TrimSpace(strings.Trim(rendered, "\n")))
+		if isDryRun {
+			return renderedDryRun + renderedPromptChar + rendered
+		}
+		return "" + renderedPromptChar + strings.TrimSpace(rendered)
+	}
+
 	// Add custom function to split commands
 	funcMap := template.FuncMap{
 		"splitCommand": func(cmd string) string {
@@ -182,6 +220,7 @@ func (s *Stream) ConfirmFailover() (err error) {
 			// Join with newlines and proper indentation
 			return parts[0] + " \\\n      " + strings.Join(parts[1:], " \\\n      ")
 		},
+		"CodeBlock": renderCodeBlock, // Use glamour for code blocks
 	}
 
 	// Merge with existing style functions
@@ -203,19 +242,19 @@ func (s *Stream) ConfirmFailover() (err error) {
 {{ Warning "⚠️  This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
 
-🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+🔴 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
 ▪️
-▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
+▪️   {{ CodeBlock .IsDryRun "❯" .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }} 
 ▪️
-⚫ {{ Grey .ActiveNodeInfo.Hostname false }} → {{ LightGrey "tower-file" }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
+🟠 tower-file {{ Grey .ActiveNodeInfo.Hostname false }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
 ▪️
-▪️  {{ DarkPurple "→" }} {{ LightGrey .PassiveNodeInfo.TowerFile }}
+▪️   {{ CodeBlock .IsDryRun "❯" .PassiveNodeInfo.TowerFile }}
 {{- end }}
 ▪️
 🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
 ▪️
-▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+▪️   {{ CodeBlock .IsDryRun "❯" .PassiveNodeInfo.SetIdentityCommand }}
 ▪️
 💰 {{ LightGrey "Profit" }}
 `)
