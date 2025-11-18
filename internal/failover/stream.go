@@ -10,7 +10,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/lipgloss"
@@ -172,41 +171,51 @@ func (s Stream) GetFailoverEndSlot() uint64 {
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
 func (s *Stream) ConfirmFailover() (err error) {
-	// Template function to render code blocks with glamour
+	// Template function to render code blocks with lipgloss styling
+	// Chevron in light faded purple, command name and arguments in light brown
 	renderCodeBlock := func(isDryRun bool, prmptChar, code string) string {
-		// Wrap in markdown code block and render with glamour
-		markdown := fmt.Sprintf("`%s`", strings.TrimSpace(code))
-		theme := "dark"
-		if isDryRun {
-			theme = "pink"
-		}
-		// Create renderer with wider word wrap (default is 80)
-		renderer, err := glamour.NewTermRenderer(
-			glamour.WithStandardStyle(theme),
-			glamour.WithWordWrap(150), // Match MessageStyle width
-		)
-		if err != nil {
-			// Fallback to simple Render if renderer creation fails
-			rendered, renderErr := glamour.Render(markdown, theme)
-			if renderErr != nil {
-				return style.RenderLightGreyString(markdown)
-			}
-			return strings.TrimSpace(strings.Trim(rendered, "\n"))
-		}
-		rendered, err := renderer.Render(markdown)
-		if err != nil {
-			// Fallback to plain text if rendering fails
-			return style.RenderLightGreyString(markdown)
-		}
-		// strip leading and trailing newlines
+		code = strings.TrimSpace(code)
 
-		renderedPromptChar := strings.TrimSpace(style.RenderPurpleString(prmptChar))
-		renderedDryRun := strings.TrimSpace(style.RenderLightGreyString("(dry run) "))
-		rendered = fmt.Sprintf("%s", strings.TrimSpace(strings.Trim(rendered, "\n")))
-		if isDryRun {
-			return renderedDryRun + renderedPromptChar + rendered
+		// Light faded purple for chevron
+		lightPurpleStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B19CD9")) // Light faded purple
+
+		// Light brown for command name
+		commandStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#D291BC")).
+			Bold(false) // light brown
+
+		// Render prompt character in light faded purple
+		renderedPromptChar := lightPurpleStyle.Render(prmptChar)
+
+		// Parse command: split by first space to separate command from arguments
+		parts := strings.SplitN(code, " ", 2)
+		commandName := parts[0]
+		arguments := ""
+		if len(parts) > 1 {
+			arguments = parts[1]
 		}
-		return "" + renderedPromptChar + strings.TrimSpace(rendered)
+
+		// Render command name in light brown
+		renderedCommand := commandStyle.Render(commandName)
+
+		// Render arguments in light brown (same style, not bold)
+		var renderedArgs string
+		if arguments != "" {
+			renderedArgs = " " + commandStyle.Bold(false).Render(arguments)
+		}
+
+		// Combine: chevron + space + command + arguments
+		result := renderedPromptChar + " " + renderedCommand + renderedArgs
+
+		// Add dry run prefix if needed
+		if isDryRun {
+			dryRunStyle := lipgloss.NewStyle().
+				Foreground(style.ColorLightGrey)
+			return dryRunStyle.Render("(dry run) ") + result
+		}
+
+		return result
 	}
 
 	// Add custom function to split commands
@@ -249,7 +258,7 @@ func (s *Stream) ConfirmFailover() (err error) {
 ▪️
 🟠 tower-file {{ Grey .ActiveNodeInfo.Hostname false }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
 ▪️
-▪️   {{ CodeBlock .IsDryRun "❯" .PassiveNodeInfo.TowerFile }}
+▪️   {{ CodeBlock false "❯" .PassiveNodeInfo.TowerFile }}
 {{- end }}
 ▪️
 🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
@@ -321,7 +330,7 @@ func (s *Stream) GetFailoverDurationTableString() string {
 		{
 			formatStageColumnRows(
 				[]string{
-					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderActiveString(s.message.ActiveNodeInfo.Hostname, false),
 					style.RenderGreyString("--set-identity-->", false),
 					style.RenderPassiveString(s.message.ActiveNodeInfo.Identities.Passive.PubKey(), false),
 				},
@@ -336,9 +345,9 @@ func (s *Stream) GetFailoverDurationTableString() string {
 		rows = append(rows, []string{
 			formatStageColumnRows(
 				[]string{
-					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderGreyString(s.message.ActiveNodeInfo.Hostname, false),
 					style.RenderGreyString("---tower-file--->", false),
-					style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+					style.RenderGreyString(s.message.PassiveNodeInfo.Hostname, false),
 				},
 			)[0],
 			fmt.Sprintf("%s (%s)",
@@ -353,7 +362,7 @@ func (s *Stream) GetFailoverDurationTableString() string {
 	rows = append(rows, []string{
 		formatStageColumnRows(
 			[]string{
-				style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+				style.RenderPassiveString(s.message.PassiveNodeInfo.Hostname, false),
 				style.RenderGreyString("--set-identity-->", false),
 				style.RenderActiveString(s.message.PassiveNodeInfo.Identities.Active.PubKey(), false),
 			},
