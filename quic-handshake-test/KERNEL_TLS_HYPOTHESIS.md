@@ -23,15 +23,33 @@ Kernel TLS is a feature that offloads TLS operations to the kernel for performan
 3. **Local works** - No kTLS modules loaded, so no conflict
 4. **Servers fail** - kTLS modules loaded, causing conflict
 
-## Testing
+## Testing Results
 
-### Option 1: Disable Kernel TLS on servers
+**Local (works):**
+- No kernel TLS modules loaded
+- No TLS sysctl settings
+
+**Servers (fail):**
+- Kernel TLS module `tls` is loaded (155648 bytes)
+- `net.ipv4.tcp_available_ulp = espintcp mptcp tls` (TLS available as TCP ULP)
+- TLS hardware offload: off (so it's software-based kernel TLS)
+
+**Conclusion**: The loaded `tls` kernel module is likely interfering with quic-go 0.44.0+.
+
+### Test: Unload Kernel TLS Module
+
 ```bash
-# Check if kTLS is being used
-sudo ethtool -k <interface> | grep tls
+# Check current status
+lsmod | grep tls
 
-# Disable kernel TLS (if possible)
-# This might require kernel recompile or module unloading
+# Unload the module
+sudo modprobe -r tls
+
+# Test QUIC connection again
+# If it works, we've confirmed the issue!
+
+# To reload later (if needed)
+sudo modprobe tls
 ```
 
 ### Option 2: Check if quic-go can disable kTLS
@@ -42,10 +60,17 @@ sudo ethtool -k <interface> | grep tls
 - Local: 6.16.3 (newer, might have different kTLS behavior)
 - Servers: 6.8.0 (older, might have kTLS enabled by default)
 
-## Next Steps
+## Test Result: ❌ NOT THE ISSUE
 
-1. Check if kernel TLS can be disabled on servers
-2. Check quic-go 0.44.0+ release notes for TLS/kTLS changes
-3. Test with kernel TLS disabled
-4. File issue with quic-go about kTLS compatibility
+**Tested**: Unloaded kernel TLS module (`modprobe -r tls`) on servers
+**Result**: QUIC handshake still fails with quic-go 0.57.1
+
+So kernel TLS module is **NOT** the cause. Back to investigating other differences.
+
+## Remaining Differences to Investigate
+
+1. **Kernel version**: 6.16.3 (local) vs 6.8.0 (servers)
+2. **Network interfaces**: Servers have `doublezero0` interface
+3. **iptables rules**: More complex ruleset on servers
+4. **Something else in quic-go 0.44.0+** that interacts poorly with server environment
 
