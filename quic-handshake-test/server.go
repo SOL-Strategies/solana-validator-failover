@@ -68,10 +68,11 @@ func main() {
 	// Set InitialPacketSize to work with Tailscale MTU (1280 bytes)
 	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
 	quicConfig := &quic.Config{
-		HandshakeIdleTimeout: 30 * time.Second,
-		MaxIdleTimeout:        60 * time.Second,
-		KeepAlivePeriod:       5 * time.Second,
-		InitialPacketSize:     1200, // Reduced to fit in Tailscale MTU (1280 bytes)
+		HandshakeIdleTimeout:     30 * time.Second,
+		MaxIdleTimeout:           60 * time.Second,
+		KeepAlivePeriod:          5 * time.Second,
+		InitialPacketSize:        1200, // Reduced to fit in Tailscale MTU (1280 bytes)
+		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
 	listener, err := quic.ListenAddr(
@@ -85,23 +86,28 @@ func main() {
 	defer listener.Close()
 
 	fmt.Printf("QUIC server listening on port %d\n", Port)
+	fmt.Printf("Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
 	fmt.Println("Waiting for client connection...")
 
 	ctx := context.Background()
+	fmt.Println("[SERVER] Waiting for Accept()...")
 	conn, err := listener.Accept(ctx)
 	if err != nil {
+		fmt.Printf("[SERVER] Accept() failed: %v\n", err)
 		panic(fmt.Sprintf("Failed to accept connection: %v", err))
 	}
-
-	fmt.Printf("Accepted connection from %s\n", conn.RemoteAddr())
+	fmt.Printf("[SERVER] Accept() succeeded! Connection from %s\n", conn.RemoteAddr())
 
 	// Accept a stream
+	fmt.Println("[SERVER] Waiting for AcceptStream()...")
 	stream, err := conn.AcceptStream(ctx)
 	if err != nil {
+		fmt.Printf("[SERVER] AcceptStream() failed: %v\n", err)
 		panic(fmt.Sprintf("Failed to accept stream: %v", err))
 	}
+	fmt.Printf("[SERVER] AcceptStream() succeeded!\n")
 
-	fmt.Println("Accepted stream, reading data...")
+	fmt.Println("[SERVER] Reading data from stream...")
 
 	// Read data from stream
 	buf := make([]byte, 1024)

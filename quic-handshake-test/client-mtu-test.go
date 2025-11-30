@@ -34,9 +34,10 @@ func main() {
 	// QUIC requires ~1350 bytes, but Tailscale tunnels are often 1280 bytes
 	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
 	quicConfig := &quic.Config{
-		HandshakeIdleTimeout: 30 * time.Second,
-		MaxIdleTimeout:        60 * time.Second,
-		InitialPacketSize:     1200, // Reduced to fit in Tailscale MTU (1280 bytes)
+		HandshakeIdleTimeout:    30 * time.Second,
+		MaxIdleTimeout:          60 * time.Second,
+		InitialPacketSize:       1200, // Reduced to fit in Tailscale MTU (1280 bytes)
+		DisablePathMTUDiscovery: true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
 	tlsConfig := &tls.Config{
@@ -44,7 +45,8 @@ func main() {
 		NextProtos:         []string{ProtocolName},
 	}
 
-	fmt.Printf("[MTU TEST] Calling quic.DialAddr with InitialPacketSize=%d...\n", quicConfig.InitialPacketSize)
+	fmt.Printf("[MTU TEST] Calling quic.DialAddr with InitialPacketSize=%d, DisablePathMTUDiscovery=%v...\n", 
+		quicConfig.InitialPacketSize, quicConfig.DisablePathMTUDiscovery)
 	fmt.Printf("[MTU TEST] Starting dial at %s\n", time.Now().Format("15:04:05.000"))
 
 	conn, err := quic.DialAddr(ctx, serverAddr, tlsConfig, quicConfig)
