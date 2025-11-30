@@ -10,22 +10,36 @@ Test whether quic-go 0.57.1 can establish QUIC connections on Ubuntu 24 servers,
 
 ### On Server 1 (Passive/Server):
 ```bash
-cd test/quic-handshake-test
+cd quic-handshake-test
 go mod tidy
 go run server.go
 ```
 
 ### On Server 2 (Active/Client):
+
+**Standard client (DialAddr):**
 ```bash
-cd test/quic-handshake-test
+cd quic-handshake-test
 go mod tidy
 go run client.go <server1-address>:9898
+```
+
+**Alternative client (explicit UDP connection):**
+```bash
+go run client-alt.go <server1-address>:9898
 ```
 
 Example:
 ```bash
 go run client.go solana-testnet-pengu-london-latitude.tailbd8d12.ts.net:9898
 ```
+
+## Alternative Test Methods
+
+If the standard `client.go` fails, try the alternative version:
+- `client-alt.go` - Uses explicit UDP connection with `Dial()` instead of `DialAddr()`. This gives more control over the UDP socket and might work around Ubuntu 24 network stack issues.
+
+These test different connection methods to see if any work around the Ubuntu 24 issue.
 
 ## What it tests
 
