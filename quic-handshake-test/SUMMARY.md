@@ -29,7 +29,23 @@
 3. **Test kernel 6.16.x on servers** - Match local kernel version
 4. **File issue with quic-go** - With all findings
 
+## Critical Finding: No Packets Sent
+
+**Debug output shows:**
+- Address resolution: ✅ Works
+- Context creation: ✅ Works  
+- Config creation: ✅ Works
+- **quic.DialAddr()**: ❌ Hangs for 30s, then times out
+- **No UDP packets sent** (tcpdump shows nothing)
+
+This means quic-go 0.44.0+ is **failing during internal initialization** before it even creates the UDP socket. Something in quic-go's initialization is blocking/hanging on the server environment.
+
 ## Current Status
 
 **Staying on quic-go v0.43.1** until we find the root cause or quic-go fixes it.
+
+This is clearly a quic-go 0.44.0+ bug that needs to be reported upstream with:
+- Environment details
+- Debug output showing where it hangs
+- Test programs demonstrating the issue
 

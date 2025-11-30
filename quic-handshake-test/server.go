@@ -65,10 +65,12 @@ func main() {
 	}
 
 	// Try different config options to see what works
+	// Also set MaxDatagramSize to work with Tailscale MTU (1280 bytes)
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout: 30 * time.Second,
 		MaxIdleTimeout:        60 * time.Second,
 		KeepAlivePeriod:       5 * time.Second,
+		MaxDatagramSize:       1200, // Reduced to fit in Tailscale MTU
 	}
 
 	listener, err := quic.ListenAddr(
