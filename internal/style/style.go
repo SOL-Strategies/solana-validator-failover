@@ -19,8 +19,8 @@ var (
 	ColorBlue = lipgloss.Color("#00BFFF")
 	// ColorActive is the color for active
 	ColorActive = lipgloss.Color("#00B894")
-	// ColorPassive is the color for passive
-	ColorPassive = lipgloss.Color("#F4A261")
+	// ColorPassive is the color for passive (light red to complement the active green)
+	ColorPassive = lipgloss.Color("#FF6B6B")
 	// ColorGrey is the color for grey
 	ColorGrey = lipgloss.Color("#666666")
 	// ColorLightGrey is the color for light grey

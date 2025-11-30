@@ -171,6 +171,53 @@ func (s Stream) GetFailoverEndSlot() uint64 {
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
 func (s *Stream) ConfirmFailover() (err error) {
+	// Template function to render code blocks with lipgloss styling
+	// Chevron in light faded purple, command name and arguments in light brown
+	renderCodeBlock := func(isDryRun bool, prmptChar, code string) string {
+		code = strings.TrimSpace(code)
+
+		// Light faded purple for chevron
+		lightPurpleStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#B19CD9")) // Light faded purple
+
+		// Light brown for command name
+		commandStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#D291BC")).
+			Bold(false) // light brown
+
+		// Render prompt character in light faded purple
+		renderedPromptChar := lightPurpleStyle.Render(prmptChar)
+
+		// Parse command: split by first space to separate command from arguments
+		parts := strings.SplitN(code, " ", 2)
+		commandName := parts[0]
+		arguments := ""
+		if len(parts) > 1 {
+			arguments = parts[1]
+		}
+
+		// Render command name in light brown
+		renderedCommand := commandStyle.Render(commandName)
+
+		// Render arguments in light brown (same style, not bold)
+		var renderedArgs string
+		if arguments != "" {
+			renderedArgs = " " + commandStyle.Bold(false).Render(arguments)
+		}
+
+		// Combine: chevron + space + command + arguments
+		result := renderedPromptChar + " " + renderedCommand + renderedArgs
+
+		// Add dry run prefix if needed
+		if isDryRun {
+			dryRunStyle := lipgloss.NewStyle().
+				Foreground(style.ColorLightGrey)
+			return dryRunStyle.Render("(dry run) ") + result
+		}
+
+		return result
+	}
+
 	// Add custom function to split commands
 	funcMap := template.FuncMap{
 		"splitCommand": func(cmd string) string {
@@ -182,6 +229,7 @@ func (s *Stream) ConfirmFailover() (err error) {
 			// Join with newlines and proper indentation
 			return parts[0] + " \\\n      " + strings.Join(parts[1:], " \\\n      ")
 		},
+		"CodeBlock": renderCodeBlock, // Use glamour for code blocks
 	}
 
 	// Merge with existing style functions
@@ -203,19 +251,19 @@ func (s *Stream) ConfirmFailover() (err error) {
 {{ Warning "⚠️  This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
 
-🟠 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+🔴 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
 ▪️
-▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
+▪️   {{ CodeBlock .IsDryRun "❯" .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }} 
 ▪️
-⚫ {{ Grey .ActiveNodeInfo.Hostname false }} → {{ LightGrey "tower-file" }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
+🟠 tower-file {{ Grey .ActiveNodeInfo.Hostname false }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
 ▪️
-▪️  {{ DarkPurple "→" }} {{ LightGrey .PassiveNodeInfo.TowerFile }}
+▪️   {{ CodeBlock false "❯" .PassiveNodeInfo.TowerFile }}
 {{- end }}
 ▪️
 🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
 ▪️
-▪️  {{ if .IsDryRun }}{{ DarkPurple "(dry run) "}}{{ end }}{{ DarkPurple "❯" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+▪️   {{ CodeBlock .IsDryRun "❯" .PassiveNodeInfo.SetIdentityCommand }}
 ▪️
 💰 {{ LightGrey "Profit" }}
 `)
@@ -282,7 +330,7 @@ func (s *Stream) GetFailoverDurationTableString() string {
 		{
 			formatStageColumnRows(
 				[]string{
-					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderActiveString(s.message.ActiveNodeInfo.Hostname, false),
 					style.RenderGreyString("--set-identity-->", false),
 					style.RenderPassiveString(s.message.ActiveNodeInfo.Identities.Passive.PubKey(), false),
 				},
@@ -297,9 +345,9 @@ func (s *Stream) GetFailoverDurationTableString() string {
 		rows = append(rows, []string{
 			formatStageColumnRows(
 				[]string{
-					style.RenderPassiveString(s.message.ActiveNodeInfo.Hostname, false),
+					style.RenderGreyString(s.message.ActiveNodeInfo.Hostname, false),
 					style.RenderGreyString("---tower-file--->", false),
-					style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+					style.RenderGreyString(s.message.PassiveNodeInfo.Hostname, false),
 				},
 			)[0],
 			fmt.Sprintf("%s (%s)",
@@ -314,7 +362,7 @@ func (s *Stream) GetFailoverDurationTableString() string {
 	rows = append(rows, []string{
 		formatStageColumnRows(
 			[]string{
-				style.RenderActiveString(s.message.PassiveNodeInfo.Hostname, false),
+				style.RenderPassiveString(s.message.PassiveNodeInfo.Hostname, false),
 				style.RenderGreyString("--set-identity-->", false),
 				style.RenderActiveString(s.message.PassiveNodeInfo.Identities.Active.PubKey(), false),
 			},
