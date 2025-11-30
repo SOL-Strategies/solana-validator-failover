@@ -439,16 +439,10 @@ func (c *Client) connectToServer() error {
 
 // tryQUICConnection attempts the actual QUIC connection that will be used
 func (c *Client) tryQUICConnection() error {
-	// Use explicit quic.Config with longer handshake timeout to work around
-	// Ubuntu 24 network stack issues with newer quic-go versions
-	quicConfig := &quic.Config{
-		HandshakeIdleTimeout: 10 * time.Second,
-		MaxIdleTimeout:       30 * time.Second,
-	}
 	conn, err := quic.DialAddr(c.ctx, c.serverAddress, &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{ProtocolName},
-	}, quicConfig)
+	}, nil)
 	if err != nil {
 		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
 		return err

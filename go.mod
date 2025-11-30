@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gagliardetto/solana-go v1.8.4
-	github.com/quic-go/quic-go v0.49.1
+	github.com/quic-go/quic-go v0.43.1
 	github.com/rs/zerolog v1.33.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.7.1
