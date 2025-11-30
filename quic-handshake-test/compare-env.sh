@@ -61,6 +61,12 @@ echo ""
 
 echo "=== Go Version ==="
 go version 2>/dev/null || echo "Go not found"
+go env CGO_ENABLED 2>/dev/null || echo "CGO check failed"
+echo ""
+
+echo "=== OpenSSL/Crypto Libraries ==="
+openssl version 2>/dev/null || echo "OpenSSL not found"
+ldconfig -p 2>/dev/null | grep -E "ssl|crypto" | head -5 || echo "ldconfig not available"
 echo ""
 
 echo "=== Network Routes ==="

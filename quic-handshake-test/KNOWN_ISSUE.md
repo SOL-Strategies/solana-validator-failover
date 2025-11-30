@@ -32,17 +32,20 @@ Tested connection methods:
 
 ## Root Cause
 
-**UPDATE**: This is NOT a general Ubuntu 24 compatibility issue. The same quic-go version works locally on Ubuntu 24 but fails on servers.
+**Key Finding**: quic-go v0.43.1 **WORKS** on the same servers, so this is NOT a firewall or general Ubuntu 24 issue.
 
-This suggests an **environment-specific configuration issue** on the servers, such as:
-- Network stack configuration differences
-- Firewall/iptables rules
-- UDP buffer sizes
-- Network interface settings
-- Containerization or network namespace differences
-- Kernel module differences
+This is a **quic-go 0.44.0+ specific change** that breaks compatibility with the server network environment (Tailscale + kernel 6.8.0), while:
+- ✅ Works locally (Ubuntu 24, kernel 6.16.3, Tailscale)
+- ✅ Works on servers with v0.43.1 (same servers, same firewall, same network)
+- ❌ Fails on servers with v0.44.0+ (same servers, same firewall, same network)
 
-The handshake packets appear to be sent but never received/acknowledged, suggesting a network configuration or UDP handling issue specific to the server environment.
+**Hypothesis**: quic-go 0.44.0+ introduced changes to:
+- UDP socket options
+- ECN (Explicit Congestion Notification) handling
+- Network interface feature detection
+- Packet handling that interacts differently with Tailscale/kernel 6.8.0
+
+The handshake packets appear to be sent but never received/acknowledged, suggesting a UDP packet handling difference in quic-go 0.44.0+ that's incompatible with the server's network stack configuration.
 
 ## Workarounds
 
