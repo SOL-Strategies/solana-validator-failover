@@ -1,6 +1,6 @@
 #!/bin/bash
 # Capture UDP packets to see what's happening during handshake
-
+ 
 if [ -z "$1" ]; then
     echo "Usage: $0 <interface>"
     echo "Example: $0 tailscale0"
