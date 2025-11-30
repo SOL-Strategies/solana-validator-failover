@@ -128,8 +128,9 @@ func (s *Server) Start() error {
 		fmt.Sprintf(":%d", s.port),
 		s.tlsConfig,
 		&quic.Config{
-			KeepAlivePeriod: s.heartbeatInterval,
-			MaxIdleTimeout:  s.streamTimeout,
+			HandshakeIdleTimeout: 10 * time.Second,
+			KeepAlivePeriod:       s.heartbeatInterval,
+			MaxIdleTimeout:        s.streamTimeout,
 		},
 	)
 	if err != nil {
