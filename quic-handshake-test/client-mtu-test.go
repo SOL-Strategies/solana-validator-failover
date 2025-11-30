@@ -30,17 +30,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Try with reduced MaxDatagramSize to work around Tailscale MTU (1280 bytes)
+	// Try with reduced InitialPacketSize to work around Tailscale MTU (1280 bytes)
 	// QUIC requires ~1350 bytes, but Tailscale tunnels are often 1280 bytes
-	// Setting a smaller MaxDatagramSize might help quic-go work around this
+	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout: 30 * time.Second,
 		MaxIdleTimeout:        60 * time.Second,
-		// Try setting MaxDatagramSize to fit within Tailscale's 1280 byte MTU
-		// Accounting for IP header (20 bytes IPv4, 40 bytes IPv6) and UDP header (8 bytes)
-		// 1280 - 20 - 8 = 1252 bytes max payload for IPv4
-		// But QUIC needs space for headers too, so try 1200 bytes
-		MaxDatagramSize: 1200, // Reduced from default to fit in Tailscale MTU
+		InitialPacketSize:     1200, // Reduced to fit in Tailscale MTU (1280 bytes)
 	}
 
 	tlsConfig := &tls.Config{
@@ -48,7 +44,7 @@ func main() {
 		NextProtos:         []string{ProtocolName},
 	}
 
-	fmt.Printf("[MTU TEST] Calling quic.DialAddr with MaxDatagramSize=%d...\n", quicConfig.MaxDatagramSize)
+	fmt.Printf("[MTU TEST] Calling quic.DialAddr with InitialPacketSize=%d...\n", quicConfig.InitialPacketSize)
 	fmt.Printf("[MTU TEST] Starting dial at %s\n", time.Now().Format("15:04:05.000"))
 
 	conn, err := quic.DialAddr(ctx, serverAddr, tlsConfig, quicConfig)

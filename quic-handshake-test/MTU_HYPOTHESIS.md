@@ -42,9 +42,9 @@ Look for:
 - Path MTU to server
 - Other tunnel interfaces
 
-### Step 2: Test with MaxDatagramSize
+### Step 2: Test with InitialPacketSize
 
-Try `client-mtu-test.go` which sets `MaxDatagramSize: 1200` to fit within Tailscale's MTU:
+Try `client-mtu-test.go` which sets `InitialPacketSize: 1200` to fit within Tailscale's MTU (based on [issue #5331 comment](https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914)):
 
 ```bash
 # On server 1 (run server)
@@ -56,7 +56,7 @@ go run client-mtu-test.go <server-ip>:9898
 
 ### Step 3: Increase Tailscale MTU (if test works)
 
-If the MaxDatagramSize workaround works, you can try increasing Tailscale's MTU:
+If the InitialPacketSize workaround works, you can try increasing Tailscale's MTU:
 
 ```bash
 # Check current MTU

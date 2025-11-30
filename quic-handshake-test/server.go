@@ -65,12 +65,13 @@ func main() {
 	}
 
 	// Try different config options to see what works
-	// Also set MaxDatagramSize to work with Tailscale MTU (1280 bytes)
+	// Set InitialPacketSize to work with Tailscale MTU (1280 bytes)
+	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout: 30 * time.Second,
 		MaxIdleTimeout:        60 * time.Second,
 		KeepAlivePeriod:       5 * time.Second,
-		MaxDatagramSize:       1200, // Reduced to fit in Tailscale MTU
+		InitialPacketSize:     1200, // Reduced to fit in Tailscale MTU (1280 bytes)
 	}
 
 	listener, err := quic.ListenAddr(

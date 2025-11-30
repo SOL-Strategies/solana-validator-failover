@@ -69,7 +69,7 @@ Minimal reproduction case available in: `quic-handshake-test/` directory
 
 ## Testing MTU Hypothesis
 
-We're testing if setting `MaxDatagramSize: 1200` in `quic.Config` helps work around Tailscale's 1280 byte MTU. Test programs available in `quic-handshake-test/` directory.
+We're testing if setting `InitialPacketSize: 1200` in `quic.Config` helps work around Tailscale's 1280 byte MTU (based on [issue #5331 comment](https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914)). Test programs available in `quic-handshake-test/` directory.
 
 ## Hypothesis
 
