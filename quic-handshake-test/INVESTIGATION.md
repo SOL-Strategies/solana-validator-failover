@@ -22,11 +22,18 @@
 ## What Changed in quic-go 0.44.0?
 
 Need to investigate:
-1. UDP socket option changes
-2. ECN (Explicit Congestion Notification) support
-3. Network interface feature detection
-4. Packet handling changes
-5. MTU discovery changes
+1. **TLS/kTLS handling changes** ⚠️ **PRIMARY HYPOTHESIS**
+2. UDP socket option changes
+3. ECN (Explicit Congestion Notification) support
+4. Network interface feature detection
+5. Packet handling changes
+6. MTU discovery changes
+
+## Primary Hypothesis: Kernel TLS (kTLS) Conflict
+
+**Key Finding**: Servers have kernel TLS modules loaded (`tls`, `crypto_simd`, `cryptd`) while local doesn't.
+
+Kernel TLS offloading may be interfering with quic-go 0.44.0+'s TLS handshake. See `KERNEL_TLS_HYPOTHESIS.md` for details.
 
 ## Next Steps
 
