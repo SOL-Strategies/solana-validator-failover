@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -75,15 +76,27 @@ func main() {
 		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
-	// Use EXACT same method as main application - ListenAddr with minimal config
-	// Main app uses: quic.ListenAddr(..., &quic.Config{KeepAlivePeriod: ..., MaxIdleTimeout: ...})
-	// Bind to IPv4 specifically (0.0.0.0) to match client's IPv4 address
-	fmt.Printf("[SERVER] Using ListenAddr (like main application)...\n")
-	listener, err := quic.ListenAddr(
-		fmt.Sprintf("0.0.0.0:%d", Port), // Explicitly bind to IPv4
-		tlsConfig,
-		quicConfig,
-	)
+	// Try explicit UDP binding to IPv4 to ensure we receive IPv4 packets
+	// Main app uses ListenAddr with :port, but v0.44.0+ might handle dual-stack differently
+	fmt.Printf("[SERVER] Binding UDP socket to IPv4 explicitly...\n")
+	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
+		IP:   net.IPv4(0, 0, 0, 0), // 0.0.0.0
+		Port: Port,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create UDP listener: %v", err))
+	}
+	defer udpConn.Close()
+	
+	fmt.Printf("[SERVER] UDP listener created: %s\n", udpConn.LocalAddr())
+	
+	// Use Transport with explicit UDP connection
+	tr := quic.Transport{
+		Conn: udpConn,
+	}
+	
+	fmt.Printf("[SERVER] Creating QUIC listener from Transport...\n")
+	listener, err := tr.Listen(tlsConfig, quicConfig)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create listener: %v", err))
 	}
