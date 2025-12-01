@@ -65,61 +65,60 @@ func main() {
 		panic(fmt.Sprintf("Failed to generate TLS config: %v", err))
 	}
 
-	// Try different config options to see what works
-	// Set InitialPacketSize to work with Tailscale MTU (1280 bytes)
-	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout:     30 * time.Second,
 		MaxIdleTimeout:           60 * time.Second,
 		KeepAlivePeriod:          5 * time.Second,
-		InitialPacketSize:        1200, // Reduced to fit in Tailscale MTU (1280 bytes)
-		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
+		InitialPacketSize:        1200,
+		DisablePathMTUDiscovery:  true,
 	}
 
-	// Try using explicit UDP binding like in issue #5331
-	// This might work better with quic-go 0.44.0+ on tunnel interfaces
-	fmt.Printf("[SERVER] Creating UDP listener on port %d...\n", Port)
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: Port})
+	// Try explicitly binding to Tailscale interface
+	// First, get the Tailscale IP
+	tailscaleIP := ""
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Name == "tailscale0" {
+				addrs, err := iface.Addrs()
+				if err == nil {
+					for _, addr := range addrs {
+						if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+							tailscaleIP = ipnet.IP.String()
+							fmt.Printf("[SERVER] Found Tailscale IP: %s\n", tailscaleIP)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Try binding to Tailscale IP explicitly
 	var listener *quic.Listener
-	
-	if err != nil {
-		fmt.Printf("[SERVER] Failed to create UDP listener: %v\n", err)
-		fmt.Printf("[SERVER] Falling back to ListenAddr...\n")
-		// Fallback to ListenAddr
-		listener, err = quic.ListenAddr(
-			fmt.Sprintf(":%d", Port),
-			tlsConfig,
-			quicConfig,
-		)
+	if tailscaleIP != "" {
+		fmt.Printf("[SERVER] Attempting to bind to %s:%d\n", tailscaleIP, Port)
+		listenAddr := fmt.Sprintf("%s:%d", tailscaleIP, Port)
+		listener, err = quic.ListenAddr(listenAddr, tlsConfig, quicConfig)
 		if err != nil {
-			panic(fmt.Sprintf("Failed to create listener: %v", err))
+			fmt.Printf("[SERVER] Failed to bind to %s: %v\n", listenAddr, err)
+			fmt.Printf("[SERVER] Falling back to :%d\n", Port)
+			listener, err = quic.ListenAddr(fmt.Sprintf(":%d", Port), tlsConfig, quicConfig)
 		}
 	} else {
-		fmt.Printf("[SERVER] UDP listener created: %s\n", udpConn.LocalAddr())
-		defer udpConn.Close()
-		
-		// Use Transport like in issue #5331
-		tr := quic.Transport{
-			Conn: udpConn,
-		}
-		
-		fmt.Printf("[SERVER] Creating QUIC listener from Transport...\n")
-		listener, err = tr.Listen(tlsConfig, quicConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Failed to create QUIC listener: %v", err))
-		}
+		fmt.Printf("[SERVER] Tailscale interface not found, binding to :%d\n", Port)
+		listener, err = quic.ListenAddr(fmt.Sprintf(":%d", Port), tlsConfig, quicConfig)
+	}
+
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create listener: %v", err))
 	}
 	defer listener.Close()
 
 	fmt.Printf("[SERVER] QUIC server listening on port %d\n", Port)
-	fmt.Printf("[SERVER] Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
-	fmt.Printf("[SERVER] DisablePathMTUDiscovery: %v\n", quicConfig.DisablePathMTUDiscovery)
-	
-	// Print what address we're actually listening on
 	if addr := listener.Addr(); addr != nil {
 		fmt.Printf("[SERVER] Actually listening on: %s\n", addr.String())
 	}
-	
 	fmt.Println("[SERVER] Waiting for client connection...")
 
 	ctx := context.Background()
@@ -131,7 +130,6 @@ func main() {
 	}
 	fmt.Printf("[SERVER] Accept() succeeded! Connection from %s\n", conn.RemoteAddr())
 
-	// Accept a stream
 	fmt.Println("[SERVER] Waiting for AcceptStream()...")
 	stream, err := conn.AcceptStream(ctx)
 	if err != nil {
@@ -141,8 +139,6 @@ func main() {
 	fmt.Printf("[SERVER] AcceptStream() succeeded!\n")
 
 	fmt.Println("[SERVER] Reading data from stream...")
-
-	// Read data from stream
 	buf := make([]byte, 1024)
 	n, err := stream.Read(buf)
 	if err != nil && err != io.EOF {
@@ -151,7 +147,6 @@ func main() {
 
 	fmt.Printf("[SERVER] Received %d bytes: %s\n", n, string(buf[:n]))
 
-	// Send response
 	response := []byte("Hello from server!")
 	_, err = stream.Write(response)
 	if err != nil {
