@@ -80,15 +80,13 @@ func main() {
 		Conn: udpConn,
 	}
 
-	// Try different InitialPacketSize values - server might need different setting
-	// Option 1: Don't set InitialPacketSize on server (let it accept client's size)
-	// Option 2: Try 1280 (Tailscale MTU) or other values
-	// Let's try without InitialPacketSize first - server should accept client's packets
+	// Try matching client's InitialPacketSize: 1200
+	// Maybe server needs to match client's packet size to receive them
 	quicConfig := &quic.Config{
-		HandshakeIdleTimeout: 30 * time.Second,
-		MaxIdleTimeout:       60 * time.Second,
-		KeepAlivePeriod:      5 * time.Second,
-		// Don't set InitialPacketSize - server should accept whatever client sends
+		HandshakeIdleTimeout:    30 * time.Second,
+		MaxIdleTimeout:          60 * time.Second,
+		KeepAlivePeriod:         5 * time.Second,
+		InitialPacketSize:       1200, // Match client - maybe server needs this too
 		DisablePathMTUDiscovery: true,
 	}
 
