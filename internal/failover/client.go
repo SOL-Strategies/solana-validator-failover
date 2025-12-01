@@ -251,6 +251,8 @@ func (c *Client) Start() {
 	}
 
 	// Check if server failed to set identity to active
+	// If rollback is requested, we know both client and server have rollback enabled
+	// (due to compatibility check during connection)
 	if c.failoverStream.GetRollbackRequested() {
 		c.logger.Warn().
 			Str("reason", c.failoverStream.GetRollbackReason()).
@@ -258,19 +260,14 @@ func (c *Client) Start() {
 
 		// Client already set identity to passive successfully, so now it needs to rollback
 		// to become active again since server failed
-		if c.rollbackEnabled {
-			if rollbackErr := c.executeRollbackWhenActive(); rollbackErr != nil {
-				c.logger.Error().Err(rollbackErr).Msg("failed to execute rollback")
-			} else {
-				c.logger.Info().Msg("✅ Client rollback completed successfully - client is active again")
-			}
-			// Send acknowledgment back to server
-			c.failoverStream.SetRollbackAcknowledged(true)
+		if rollbackErr := c.executeRollbackWhenActive(); rollbackErr != nil {
+			c.logger.Error().Err(rollbackErr).Msg("failed to execute rollback")
 		} else {
-			c.logger.Warn().Msg("⚠️  Rollback requested but rollback is disabled - client remains passive")
-			c.failoverStream.SetRollbackAcknowledged(false)
+			c.logger.Info().Msg("✅ Client rollback completed successfully - client is active again")
 		}
 
+		// Send acknowledgment back to server
+		c.failoverStream.SetRollbackAcknowledged(true)
 		if encodeErr := c.failoverStream.Encode(); encodeErr != nil {
 			c.logger.Error().Err(encodeErr).Msg("Failed to send rollback acknowledgment to server")
 		} else {
