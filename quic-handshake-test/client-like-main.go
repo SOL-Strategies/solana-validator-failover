@@ -30,14 +30,15 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Based on https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
-	// Need InitialPacketSize: 1200 to send packets on tunnel interfaces
+	// v0.43.1 sends 2504 byte packets and they arrive!
+	// InitialPacketSize: 1200 sends packets but they don't arrive
+	// Try 1280 (Tailscale MTU) or larger to see if that helps
 	quicConfig := &quic.Config{
-		InitialPacketSize:       1200, // Required for tunnel interfaces
+		InitialPacketSize:       1280, // Try Tailscale MTU instead of 1200
 		DisablePathMTUDiscovery: true, // Disable PMTUD on tunnel interfaces
 	}
 
-	fmt.Printf("[CLIENT] Calling quic.DialAddr with InitialPacketSize=1200 (required for tunnel)...\n")
+	fmt.Printf("[CLIENT] Calling quic.DialAddr with InitialPacketSize=1280 (Tailscale MTU)...\n")
 	fmt.Printf("[CLIENT] Starting dial at %s\n", time.Now().Format("15:04:05.000"))
 
 	conn, err := quic.DialAddr(ctx, serverAddr, &tls.Config{

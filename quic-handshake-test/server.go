@@ -100,7 +100,11 @@ func main() {
 	defer listener.Close()
 
 	fmt.Printf("[SERVER] QUIC server listening on port %d\n", Port)
-	fmt.Printf("[SERVER] Using InitialPacketSize: %d (required for tunnel interfaces)\n", quicConfig.InitialPacketSize)
+	if quicConfig.InitialPacketSize > 0 {
+		fmt.Printf("[SERVER] Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
+	} else {
+		fmt.Printf("[SERVER] Using default packet sizes (like v0.43.1 - ~2504 bytes)\n")
+	}
 	fmt.Printf("[SERVER] DisablePathMTUDiscovery: %v\n", quicConfig.DisablePathMTUDiscovery)
 
 	// Print what address we're actually listening on
