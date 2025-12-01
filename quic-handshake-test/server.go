@@ -33,10 +33,10 @@ func generateTLSConfig() (*tls.Config, error) {
 		Subject: pkix.Name{
 			Organization: []string{"Test"},
 		},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
 
@@ -65,26 +65,33 @@ func main() {
 		panic(fmt.Sprintf("Failed to generate TLS config: %v", err))
 	}
 
-	// Based on https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
-	// Need InitialPacketSize: 1200 for tunnel interfaces
-	// Client sends with InitialPacketSize: 1200, server should accept it
-	quicConfig := &quic.Config{
-		HandshakeIdleTimeout:     30 * time.Second,
-		MaxIdleTimeout:           60 * time.Second,
-		KeepAlivePeriod:          5 * time.Second,
-		InitialPacketSize:        1200, // Match client - required for tunnel interfaces
-		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
+	// Reproduce exact pattern from https://github.com/quic-go/quic-go/issues/5331
+	// Use Transport with explicit UDP binding to udp4
+	fmt.Printf("[SERVER] Reproducing issue #5331 pattern: Transport with udp4...\n")
+	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: Port})
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create UDP listener: %v", err))
+	}
+	defer udpConn.Close()
+
+	fmt.Printf("[SERVER] UDP listener created: %s\n", udpConn.LocalAddr())
+
+	tr := quic.Transport{
+		Conn: udpConn,
 	}
 
-	// Use EXACT same method as main application - ListenAddr with :port
-	// Main app uses: quic.ListenAddr(fmt.Sprintf(":%d", s.port), ...)
-	// Even if it shows IPv6, v0.43.1 works this way, so try matching exactly
-	fmt.Printf("[SERVER] Using ListenAddr exactly like main application...\n")
-	listener, err := quic.ListenAddr(
-		fmt.Sprintf(":%d", Port), // Exactly like main app - :port
-		tlsConfig,
-		quicConfig,
-	)
+	// Try different InitialPacketSize values as suggested in issue #5331
+	// Comment suggests InitialPacketSize: 1200, but let's try matching exactly first
+	quicConfig := &quic.Config{
+		HandshakeIdleTimeout:    30 * time.Second,
+		MaxIdleTimeout:          60 * time.Second,
+		KeepAlivePeriod:         5 * time.Second,
+		InitialPacketSize:       1200, // From issue #5331 comment
+		DisablePathMTUDiscovery: true,
+	}
+
+	fmt.Printf("[SERVER] Creating QUIC listener from Transport...\n")
+	listener, err := tr.Listen(tlsConfig, quicConfig)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create listener: %v", err))
 	}
@@ -93,12 +100,12 @@ func main() {
 	fmt.Printf("[SERVER] QUIC server listening on port %d\n", Port)
 	fmt.Printf("[SERVER] Using InitialPacketSize: %d (required for tunnel interfaces)\n", quicConfig.InitialPacketSize)
 	fmt.Printf("[SERVER] DisablePathMTUDiscovery: %v\n", quicConfig.DisablePathMTUDiscovery)
-	
+
 	// Print what address we're actually listening on
 	if addr := listener.Addr(); addr != nil {
 		fmt.Printf("[SERVER] Actually listening on: %s\n", addr.String())
 	}
-	
+
 	fmt.Println("[SERVER] Waiting for client connection...")
 
 	ctx := context.Background()
@@ -142,4 +149,3 @@ func main() {
 
 	fmt.Println("[SERVER] Server completed successfully!")
 }
-
