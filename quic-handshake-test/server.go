@@ -77,9 +77,10 @@ func main() {
 
 	// Use EXACT same method as main application - ListenAddr with minimal config
 	// Main app uses: quic.ListenAddr(..., &quic.Config{KeepAlivePeriod: ..., MaxIdleTimeout: ...})
+	// Bind to IPv4 specifically (0.0.0.0) to match client's IPv4 address
 	fmt.Printf("[SERVER] Using ListenAddr (like main application)...\n")
 	listener, err := quic.ListenAddr(
-		fmt.Sprintf(":%d", Port),
+		fmt.Sprintf("0.0.0.0:%d", Port), // Explicitly bind to IPv4
 		tlsConfig,
 		quicConfig,
 	)
