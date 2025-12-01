@@ -61,6 +61,7 @@ type Validator struct {
 	MinimumTimeToLeaderSlot        time.Duration
 	Peers                          Peers
 	PublicIP                       string
+	RPCAddress                     string
 	SetIdentityActiveCommand       string
 	SetIdentityPassiveCommand      string
 	TowerFile                      string
@@ -235,6 +236,7 @@ func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName string) er
 		Str("network_rpc_url", solanaClusterRPCURL).
 		Msg("rpc client configured")
 
+	v.RPCAddress = localRPCURL
 	v.solanaRPCClient = v.NewSolanaRPCClient(solana.NewClientParams{
 		LocalRPCURL:   localRPCURL,
 		NetworkRPCURL: solanaClusterRPCURL,
@@ -619,6 +621,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
 		},
 		SolanaRPCClient:  v.solanaRPCClient,
+		RPCURL:           v.RPCAddress,
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
 		SkipTowerSync:    params.SkipTowerSync,
@@ -674,6 +677,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 		MinTimeToLeaderSlot:            params.MinTimeToLeaderSlot,
 		WaitMinTimeToLeaderSlotEnabled: !params.NoMinTimeToLeaderSlot,
 		SolanaRPCClient:                v.solanaRPCClient,
+		RPCURL:                         v.RPCAddress,
 		SkipTowerSync:                  params.SkipTowerSync,
 		ActiveNodeInfo: &failover.NodeInfo{
 			Hostname:                       v.Hostname,

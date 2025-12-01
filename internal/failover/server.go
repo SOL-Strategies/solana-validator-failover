@@ -40,6 +40,7 @@ type ServerConfig struct {
 	StreamTimeout     string
 	PassiveNodeInfo   *NodeInfo
 	SolanaRPCClient   solana.ClientInterface
+	RPCURL            string
 	IsDryRunFailover  bool
 	Hooks             hooks.FailoverHooks
 	MonitorConfig     MonitorConfig
@@ -59,6 +60,7 @@ type Server struct {
 	logger            zerolog.Logger
 	passiveNodeInfo   *NodeInfo
 	solanaRPCClient   solana.ClientInterface
+	rpcURL            string
 	failoverStream    *Stream
 	isDryRunFailover  bool
 	activeConn        quic.Connection
@@ -90,6 +92,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		cancel:           cancel,
 		passiveNodeInfo:  config.PassiveNodeInfo,
 		solanaRPCClient:  config.SolanaRPCClient,
+		rpcURL:           config.RPCURL,
 		isDryRunFailover: config.IsDryRunFailover,
 		hooks:            config.Hooks,
 		monitorConfig:    config.MonitorConfig,
@@ -640,6 +643,7 @@ func (s *Server) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["THIS_NODE_PASSIVE_IDENTITY_PUBKEY"] = s.passiveNodeInfo.Identities.Passive.PubKey()
 	envMap["THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE"] = s.passiveNodeInfo.Identities.Passive.KeyFile
 	envMap["THIS_NODE_CLIENT_VERSION"] = s.passiveNodeInfo.ClientVersion
+	envMap["THIS_NODE_RPC_ADDRESS"] = s.rpcURL
 
 	// peer node is active
 	envMap["PEER_NODE_NAME"] = s.failoverStream.GetActiveNodeInfo().Hostname

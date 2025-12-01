@@ -138,21 +138,48 @@ validator:
 
     # (optional) Hooks to run pre/post failover and when active or passive.
     # They will run sequentially in the order they are declared.
-    # The specified command program of a given hook will receive the following runtime env vars
-    # it can choose to do what it wants to with (e.g. start/stop ancillary services, send notifications, etc):
+    #
+    # Template interpolation is supported in command, args, and environment variable values using Go text/template syntax.
+    # The template data structure provides access to failover state and node information (see template fields below).
+    #
+    # The specified command program will receive environment variables:
+    # 1. Custom environment variables from the 'environment' map (if specified)
+    # 2. Standard SOLANA_VALIDATOR_FAILOVER_* variables (set last, will override custom if duplicated there)
+    #
+    # Available template fields for interpolation in command, args, and environment values:
+    # ------------------------------------------------------------------------------------------------------------
+    # {{ .IsDryRunFailover }}                    - bool: true if this is a dry run failover
+    # {{ .ThisNodeRole }}                        - string: "active" or "passive"
+    # {{ .ThisNodeName }}                        - string: hostname of this node
+    # {{ .ThisNodePublicIP }}                    - string: public IP of this node
+    # {{ .ThisNodeActiveIdentityPubkey }}        - string: pubkey this node uses when active
+    # {{ .ThisNodeActiveIdentityKeyFile }}       - string: path to keyfile from validator.identities.active
+    # {{ .ThisNodePassiveIdentityPubkey }}       - string: pubkey this node uses when passive
+    # {{ .ThisNodePassiveIdentityKeyFile }}      - string: path to keyfile from validator.identities.passive
+    # {{ .ThisNodeClientVersion }}               - string: gossip-reported solana validator client semantic version for this node
+    # {{ .ThisNodeRPCAddress }}                  - string: local validator RPC URL from config (validator.rpc_address)
+    # {{ .PeerNodeRole }}                        - string: "active" or "passive"
+    # {{ .PeerNodeName }}                        - string: hostname of peer node
+    # {{ .PeerNodePublicIP }}                    - string: public IP of peer node
+    # {{ .PeerNodeActiveIdentityPubkey }}        - string: pubkey peer uses when active
+    # {{ .PeerNodePassiveIdentityPubkey }}       - string: pubkey peer uses when passive
+    # {{ .PeerNodeClientVersion }}               - string: gossip-reported solana validator client semantic version for peer node
+    #
+    # Standard environment variables passed to hook commands (SOLANA_VALIDATOR_FAILOVER_*):
     # ------------------------------------------------------------------------------------------------------------
     # SOLANA_VALIDATOR_FAILOVER_IS_DRY_RUN_FAILOVER                     = "true|false"
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_ROLE                          = "active|passive"
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_NAME                          = hostname of this node
-    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PUBLIC_IP                     = pubic IP of this node
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PUBLIC_IP                     = public IP of this node
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_ACTIVE_IDENTITY_PUBKEY        = pubkey this node uses when active
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_ACTIVE_IDENTITY_KEYPAIR_FILE  = path to keyfile from validator.identities.active
-    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey this node uses when active
-    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE = path to keyfile from validator.identities.active
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey this node uses when passive
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE = path to keyfile from validator.identities.passive
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_CLIENT_VERSION                = gossip-reported solana validator client semantic version for this node
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_RPC_ADDRESS                   = local validator RPC URL from config (validator.rpc_address)
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_ROLE                          = "active|passive"
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_NAME                          = hostname of peer
-    # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_PUBLIC_IP                     = pubic IP of peer
+    # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_PUBLIC_IP                     = public IP of peer
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_ACTIVE_IDENTITY_PUBKEY        = pubkey peer uses when active
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey peer uses when passive
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_VERSION                = gossip-reported solana validator client semantic version for peer node
@@ -162,27 +189,39 @@ validator:
         # run before failover when validator is active
         when_active:
           - name: x # vanity name
-            command: ./scripts/some_script.sh # command to run
-            args: ["arg1", "arg2"]
+            command: ./scripts/some_script.sh # command to run (supports template interpolation)
+            args: ["--role={{ .ThisNodeRole }}", "{{ .ThisNodeName }}"] # args support template interpolation
             must_succeed: true # aborts failover on failure
+            environment: # optional map of custom environment variables (values support template interpolation)
+              MY_VAR: "{{ .ThisNodeName }}"
+              PEER_IP: "{{ .PeerNodePublicIP }}"
         # run before failover when validator is passive
         when_passive:
           - name: x # vanity name
-            command: ./scripts/some_script.sh # command to run
-            args: ["arg1", "arg2"]
+            command: ./scripts/some_script.sh # command to run (supports template interpolation)
+            args: ["--role={{ .ThisNodeRole }}", "{{ .ThisNodeName }}"] # args support template interpolation
             must_succeed: true # aborts failover on failure
+            environment: # optional map of custom environment variables (values support template interpolation)
+              MY_VAR: "{{ .ThisNodeName }}"
+              PEER_IP: "{{ .PeerNodePublicIP }}"
       # hooks to run after failover - errors in post hooks displayed but do nothing
       post:
         # run after failover when validator is active
         when_active:
           - name: x # vanity name
-            command: ./scripts/some_script.sh # command to run
-            args: ["arg1", "arg2"]
+            command: ./scripts/some_script.sh # command to run (supports template interpolation)
+            args: ["--role={{ .ThisNodeRole }}", "{{ .ThisNodeName }}"] # args support template interpolation
+            environment: # optional map of custom environment variables (values support template interpolation)
+              MY_VAR: "{{ .ThisNodeName }}"
+              PEER_IP: "{{ .PeerNodePublicIP }}"
         # run after failover when validator is passive
         when_passive:
           - name: x # vanity name
-            command: ./scripts/some_script.sh # command to run
-            args: ["arg1", "arg2"]
+            command: ./scripts/some_script.sh # command to run (supports template interpolation)
+            args: ["--role={{ .ThisNodeRole }}", "{{ .ThisNodeName }}"] # args support template interpolation
+            environment: # optional map of custom environment variables (values support template interpolation)
+              MY_VAR: "{{ .ThisNodeName }}"
+              PEER_IP: "{{ .PeerNodePublicIP }}"
 ```
 
 ## Developing

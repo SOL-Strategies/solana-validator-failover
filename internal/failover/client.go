@@ -30,6 +30,7 @@ type ClientConfig struct {
 	Hooks                          hooks.FailoverHooks
 	LocalRPCClient                 *rpc.Client
 	SolanaRPCClient                solana.ClientInterface
+	RPCURL                         string
 	SkipTowerSync                  bool
 }
 
@@ -46,6 +47,7 @@ type Client struct {
 	waitMinTimeToLeaderSlotEnabled bool
 	localRPCClient                 *rpc.Client
 	solanaRPCClient                solana.ClientInterface
+	rpcURL                         string
 	serverName                     string
 	serverAddress                  string
 	skipTowerSync                  bool
@@ -65,6 +67,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		waitMinTimeToLeaderSlotEnabled: config.WaitMinTimeToLeaderSlotEnabled,
 		localRPCClient:                 config.LocalRPCClient,
 		solanaRPCClient:                config.SolanaRPCClient,
+		rpcURL:                         config.RPCURL,
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
@@ -386,6 +389,7 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["THIS_NODE_PASSIVE_IDENTITY_PUBKEY"] = c.activeNodeInfo.Identities.Passive.PubKey()
 	envMap["THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE"] = c.activeNodeInfo.Identities.Passive.KeyFile
 	envMap["THIS_NODE_CLIENT_VERSION"] = c.activeNodeInfo.ClientVersion
+	envMap["THIS_NODE_RPC_ADDRESS"] = c.rpcURL
 
 	// peer node
 	envMap["PEER_NODE_NAME"] = c.failoverStream.GetPassiveNodeInfo().Hostname

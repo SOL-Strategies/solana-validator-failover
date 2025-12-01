@@ -2,10 +2,12 @@ package hooks
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
+	"text/template"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog/log"
@@ -14,10 +16,11 @@ import (
 
 // Hook is a hook that is called before or after a failover
 type Hook struct {
-	Name        string   `mapstructure:"name"`
-	Command     string   `mapstructure:"command"`
-	Args        []string `mapstructure:"args"`
-	MustSucceed bool     `mapstructure:"must_succeed"`
+	Name        string            `mapstructure:"name"`
+	Command     string            `mapstructure:"command"`
+	Args        []string          `mapstructure:"args"`
+	MustSucceed bool              `mapstructure:"must_succeed"`
+	Environment map[string]string `mapstructure:"environment"`
 }
 
 // Hooks is a collection of hooks
@@ -51,20 +54,144 @@ func (h FailoverHooks) HasPreHooksWhenPassive() bool {
 	return len(h.Pre.WhenPassive) > 0
 }
 
+// HookTemplateData is the data structure available for hook templates
+type HookTemplateData struct {
+	// Failover state
+	IsDryRunFailover bool
+	ThisNodeRole     string
+	PeerNodeRole     string
+
+	// This node info
+	ThisNodeName                   string
+	ThisNodePublicIP               string
+	ThisNodeActiveIdentityPubkey   string
+	ThisNodeActiveIdentityKeyFile  string
+	ThisNodePassiveIdentityPubkey  string
+	ThisNodePassiveIdentityKeyFile string
+	ThisNodeClientVersion          string
+	ThisNodeRPCAddress             string
+
+	// Peer node info
+	PeerNodeName                  string
+	PeerNodePublicIP              string
+	PeerNodeActiveIdentityPubkey  string
+	PeerNodePassiveIdentityPubkey string
+	PeerNodeClientVersion         string
+}
+
+// newHookTemplateData creates a HookTemplateData from an envMap
+func newHookTemplateData(envMap map[string]string) HookTemplateData {
+	data := HookTemplateData{}
+
+	// Parse boolean
+	if envMap["IS_DRY_RUN_FAILOVER"] == "true" {
+		data.IsDryRunFailover = true
+	}
+
+	// Parse roles
+	data.ThisNodeRole = envMap["THIS_NODE_ROLE"]
+	data.PeerNodeRole = envMap["PEER_NODE_ROLE"]
+
+	// Parse this node info
+	data.ThisNodeName = envMap["THIS_NODE_NAME"]
+	data.ThisNodePublicIP = envMap["THIS_NODE_PUBLIC_IP"]
+	data.ThisNodeActiveIdentityPubkey = envMap["THIS_NODE_ACTIVE_IDENTITY_PUBKEY"]
+	data.ThisNodeActiveIdentityKeyFile = envMap["THIS_NODE_ACTIVE_IDENTITY_KEYPAIR_FILE"]
+	data.ThisNodePassiveIdentityPubkey = envMap["THIS_NODE_PASSIVE_IDENTITY_PUBKEY"]
+	data.ThisNodePassiveIdentityKeyFile = envMap["THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE"]
+	data.ThisNodeClientVersion = envMap["THIS_NODE_CLIENT_VERSION"]
+	data.ThisNodeRPCAddress = envMap["THIS_NODE_RPC_ADDRESS"]
+
+	// Parse peer node info
+	data.PeerNodeName = envMap["PEER_NODE_NAME"]
+	data.PeerNodePublicIP = envMap["PEER_NODE_PUBLIC_IP"]
+	data.PeerNodeActiveIdentityPubkey = envMap["PEER_NODE_ACTIVE_IDENTITY_PUBKEY"]
+	data.PeerNodePassiveIdentityPubkey = envMap["PEER_NODE_PASSIVE_IDENTITY_PUBKEY"]
+	data.PeerNodeClientVersion = envMap["PEER_NODE_CLIENT_VERSION"]
+
+	return data
+}
+
+// executeTemplate executes a template string with the given data
+func executeTemplate(tmplStr string, data HookTemplateData) (string, error) {
+	// If template string doesn't contain template syntax, return as-is
+	if !strings.Contains(tmplStr, "{{") {
+		return tmplStr, nil
+	}
+
+	tmpl, err := template.New("hook").Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
 // Run runs the hook
 func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, totalHooks int) error {
 	hookLogger := log.With().Logger()
+
+	// Create template data from envMap
+	templateData := newHookTemplateData(envMap)
+
+	// Execute templates for command and args
+	command, err := executeTemplate(h.Command, templateData)
+	if err != nil {
+		return fmt.Errorf("Hook %s failed to execute command template: %w", h.Name, err)
+	}
+
+	args := make([]string, len(h.Args))
+	for i, arg := range h.Args {
+		executedArg, err := executeTemplate(arg, templateData)
+		if err != nil {
+			return fmt.Errorf("Hook %s failed to execute arg[%d] template: %w", h.Name, i, err)
+		}
+		args[i] = executedArg
+	}
+
 	// run the command passing in custom env variables about the state using os.exec
-	cmd := exec.Command(h.Command, h.Args...)
+	cmd := exec.Command(command, args...)
+
+	// Build environment variables as a map first
+	envVars := make(map[string]string)
+
+	// Add custom environment variables from config first (with template support)
+	// These can be overridden by SOLANA_VALIDATOR_FAILOVER_* variables below
+	if h.Environment != nil {
+		for envKey, envValue := range h.Environment {
+			// Execute template for environment variable value
+			executedValue, err := executeTemplate(envValue, templateData)
+			if err != nil {
+				return fmt.Errorf("Hook %s failed to execute environment variable %s template: %w", h.Name, envKey, err)
+			}
+			// Trim newlines and whitespace from the value
+			cleanValue := strings.TrimSpace(executedValue)
+			envVars[envKey] = cleanValue
+		}
+	}
+
+	// Add standard failover environment variables last (so they can't be clobbered)
 	for k, v := range utils.SortStringMap(envMap) {
 		// Trim newlines and whitespace from the value
 		cleanValue := strings.TrimSpace(v)
-		cmd.Env = append(cmd.Env, fmt.Sprintf("SOLANA_VALIDATOR_FAILOVER_%s=%s", k, cleanValue))
+		envVars[fmt.Sprintf("SOLANA_VALIDATOR_FAILOVER_%s", k)] = cleanValue
+	}
+
+	// Append all environment variables to cmd.Env, ensuring all keys are uppercase
+	for envKey, envValue := range utils.SortStringMap(envVars) {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", strings.ToUpper(envKey), envValue))
 	}
 
 	hookLogger.Debug().
-		Str("command", h.Command).
-		Str("args", fmt.Sprintf("[%s]", strings.Join(h.Args, ", "))).
+		Str("command_template", h.Command).
+		Str("command_executed", command).
+		Str("args_template", fmt.Sprintf("[%s]", strings.Join(h.Args, ", "))).
+		Str("args_executed", fmt.Sprintf("[%s]", strings.Join(args, ", "))).
 		Str("env", fmt.Sprintf("[%s]", strings.Join(cmd.Env, ", "))).
 		Msg("running hook")
 
@@ -80,8 +207,8 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 
 	// Start the command
 	hookLogger.Info().
-		Str("command", h.Command).
-		Str("args", fmt.Sprintf("[%s]", strings.Join(h.Args, ", "))).
+		Str("command", command).
+		Str("args", fmt.Sprintf("[%s]", strings.Join(args, ", "))).
 		Msgf("🪝  Running hook %s", h.Name)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("Hook %s failed to start: %v", h.Name, err)
