@@ -30,15 +30,20 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Use EXACT same config as main application - nil config!
-	// This matches: quic.DialAddr(c.ctx, c.serverAddress, &tls.Config{...}, nil)
-	fmt.Printf("[CLIENT] Calling quic.DialAddr with nil config (like main app)...\n")
+	// Based on https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
+	// Need InitialPacketSize: 1200 to send packets on tunnel interfaces
+	quicConfig := &quic.Config{
+		InitialPacketSize:       1200, // Required for tunnel interfaces
+		DisablePathMTUDiscovery: true, // Disable PMTUD on tunnel interfaces
+	}
+
+	fmt.Printf("[CLIENT] Calling quic.DialAddr with InitialPacketSize=1200 (required for tunnel)...\n")
 	fmt.Printf("[CLIENT] Starting dial at %s\n", time.Now().Format("15:04:05.000"))
 
 	conn, err := quic.DialAddr(ctx, serverAddr, &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{ProtocolName},
-	}, nil) // nil config - exactly like main application
+	}, quicConfig)
 	if err != nil {
 		fmt.Printf("[CLIENT] ERROR at %s: %v\n", time.Now().Format("15:04:05.000"), err)
 		panic(fmt.Sprintf("Failed to dial server: %v", err))
