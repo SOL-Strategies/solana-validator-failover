@@ -76,27 +76,15 @@ func main() {
 		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
-	// Try explicit UDP binding to IPv4 to ensure we receive IPv4 packets
-	// Main app uses ListenAddr with :port, but v0.44.0+ might handle dual-stack differently
-	fmt.Printf("[SERVER] Binding UDP socket to IPv4 explicitly...\n")
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.IPv4(0, 0, 0, 0), // 0.0.0.0
-		Port: Port,
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create UDP listener: %v", err))
-	}
-	defer udpConn.Close()
-	
-	fmt.Printf("[SERVER] UDP listener created: %s\n", udpConn.LocalAddr())
-	
-	// Use Transport with explicit UDP connection
-	tr := quic.Transport{
-		Conn: udpConn,
-	}
-	
-	fmt.Printf("[SERVER] Creating QUIC listener from Transport...\n")
-	listener, err := tr.Listen(tlsConfig, quicConfig)
+	// Use EXACT same method as main application - ListenAddr with :port
+	// Main app uses: quic.ListenAddr(fmt.Sprintf(":%d", s.port), ...)
+	// Even if it shows IPv6, v0.43.1 works this way, so try matching exactly
+	fmt.Printf("[SERVER] Using ListenAddr exactly like main application...\n")
+	listener, err := quic.ListenAddr(
+		fmt.Sprintf(":%d", Port), // Exactly like main app - :port
+		tlsConfig,
+		quicConfig,
+	)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create listener: %v", err))
 	}
