@@ -65,14 +65,13 @@ func main() {
 		panic(fmt.Sprintf("Failed to generate TLS config: %v", err))
 	}
 
-	// Try different config options to see what works
-	// Set InitialPacketSize to work with Tailscale MTU (1280 bytes)
-	// Based on: https://github.com/quic-go/quic-go/issues/5331#issuecomment-3313524914
+	// v0.43.1 sends 2504 byte packets and they work!
+	// Don't set InitialPacketSize - let quic-go use default sizes like v0.43.1
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout:     30 * time.Second,
 		MaxIdleTimeout:           60 * time.Second,
 		KeepAlivePeriod:          5 * time.Second,
-		InitialPacketSize:        1200, // Reduced to fit in Tailscale MTU (1280 bytes)
+		// Don't set InitialPacketSize - v0.43.1 uses ~2504 bytes and it works
 		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
@@ -112,7 +111,11 @@ func main() {
 	defer listener.Close()
 
 	fmt.Printf("[SERVER] QUIC server listening on port %d\n", Port)
-	fmt.Printf("[SERVER] Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
+	if quicConfig.InitialPacketSize > 0 {
+		fmt.Printf("[SERVER] Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
+	} else {
+		fmt.Printf("[SERVER] Using default packet sizes (like v0.43.1 - ~2504 bytes)\n")
+	}
 	fmt.Printf("[SERVER] DisablePathMTUDiscovery: %v\n", quicConfig.DisablePathMTUDiscovery)
 	
 	// Print what address we're actually listening on
