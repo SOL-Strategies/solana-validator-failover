@@ -80,13 +80,13 @@ func main() {
 		Conn: udpConn,
 	}
 
-	// Try matching client's InitialPacketSize: 1200
-	// Maybe server needs to match client's packet size to receive them
+	// v0.43.1 sends 2504-byte packets that arrive at server
+	// Try matching v0.43.1's packet size to see if larger packets pass through Tailscale
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout:    30 * time.Second,
 		MaxIdleTimeout:          60 * time.Second,
 		KeepAlivePeriod:         5 * time.Second,
-		InitialPacketSize:       1200, // Match client - maybe server needs this too
+		InitialPacketSize:       2500, // Match v0.43.1's 2504-byte packets
 		DisablePathMTUDiscovery: true,
 	}
 
@@ -99,7 +99,7 @@ func main() {
 
 	fmt.Printf("[SERVER] QUIC server listening on port %d\n", Port)
 	if quicConfig.InitialPacketSize > 0 {
-		fmt.Printf("[SERVER] Using InitialPacketSize: %d\n", quicConfig.InitialPacketSize)
+		fmt.Printf("[SERVER] Using InitialPacketSize: %d (matching v0.43.1's 2504-byte packets)\n", quicConfig.InitialPacketSize)
 	} else {
 		fmt.Printf("[SERVER] Using default packet sizes (like v0.43.1 - ~2504 bytes)\n")
 	}
