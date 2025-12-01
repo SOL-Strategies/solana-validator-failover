@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net"
 	"time"
 
 	"github.com/quic-go/quic-go"
