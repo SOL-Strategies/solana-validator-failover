@@ -1,6 +1,6 @@
 module github.com/sol-strategies/solana-validator-failover
 
-go 1.25.1
+go 1.25.4
 
 require (
 	github.com/charmbracelet/huh v0.7.0
