@@ -65,6 +65,9 @@ type Validator struct {
 	SetIdentityPassiveCommand      string
 	TowerFile                      string
 	TowerFileAutoDeleteWhenPassive bool
+	RollbackEnabled                bool
+	RollbackWhenActive             RollbackCommand
+	RollbackWhenPassive            RollbackCommand
 
 	logger          zerolog.Logger
 	solanaRPCClient solana.ClientInterface
@@ -169,6 +172,12 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 
 	// get server
 	err = v.configureServer(cfg.Failover.Server, cfg.Failover.Monitor)
+	if err != nil {
+		return err
+	}
+
+	// configure rollback
+	err = v.configureRollback(cfg.Failover.Rollback)
 	if err != nil {
 		return err
 	}
@@ -540,6 +549,20 @@ func (v *Validator) configureServer(cfg ServerConfig, monitorCfg MonitorConfig) 
 	return nil
 }
 
+// configureRollback configures rollback settings
+func (v *Validator) configureRollback(cfg RollbackConfig) error {
+	v.RollbackEnabled = cfg.Enabled
+	v.RollbackWhenActive = cfg.WhenActive
+	v.RollbackWhenPassive = cfg.WhenPassive
+
+	v.logger.Debug().
+		Bool("enabled", v.RollbackEnabled).
+		Str("when_active_command", v.RollbackWhenActive.Command).
+		Str("when_passive_command", v.RollbackWhenPassive.Command).
+		Msg("rollback config set")
+	return nil
+}
+
 // configureGossipNode ensures the gossip node is valid and sets it
 func (v *Validator) configureGossipNode() (err error) {
 	v.GossipNode, err = v.solanaRPCClient.NodeFromIP(v.PublicIP)
@@ -617,11 +640,17 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 			SetIdentityCommand:             v.SetIdentityActiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
+			RollbackEnabled:                v.RollbackEnabled,
 		},
 		SolanaRPCClient:  v.solanaRPCClient,
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
 		SkipTowerSync:    params.SkipTowerSync,
+		RollbackEnabled:  v.RollbackEnabled,
+		RollbackWhenPassive: failover.RollbackCommandConfig{
+			Command: v.RollbackWhenPassive.Command,
+			Args:    v.RollbackWhenPassive.Args,
+		},
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -675,6 +704,11 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 		WaitMinTimeToLeaderSlotEnabled: !params.NoMinTimeToLeaderSlot,
 		SolanaRPCClient:                v.solanaRPCClient,
 		SkipTowerSync:                  params.SkipTowerSync,
+		RollbackEnabled:                v.RollbackEnabled,
+		RollbackWhenActive: failover.RollbackCommandConfig{
+			Command: v.RollbackWhenActive.Command,
+			Args:    v.RollbackWhenActive.Args,
+		},
 		ActiveNodeInfo: &failover.NodeInfo{
 			Hostname:                       v.Hostname,
 			PublicIP:                       v.PublicIP,
@@ -683,6 +717,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			SetIdentityCommand:             v.SetIdentityPassiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
+			RollbackEnabled:                v.RollbackEnabled,
 		},
 		Hooks: v.Hooks,
 	})

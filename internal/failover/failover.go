@@ -18,6 +18,12 @@ const (
 
 	// MessageTypeFileTransfer is the message type for file transfer
 	MessageTypeFileTransfer byte = 2
+
+	// MessageTypeRollbackRequest is the message type for requesting a rollback
+	MessageTypeRollbackRequest byte = 3
+
+	// MessageTypeRollbackAcknowledge is the message type for acknowledging a rollback request
+	MessageTypeRollbackAcknowledge byte = 4
 )
 
 // hookEnvMapParams is the parameters for the hook environment map

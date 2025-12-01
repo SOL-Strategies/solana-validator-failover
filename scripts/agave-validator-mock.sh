@@ -18,6 +18,10 @@ while [[ $# -gt 0 ]]; do
             echo "agave-validator 1.0.0 (src:7ac65892; feat:798020478, client:Mock)"
             exit 0
             ;;
+        --ledger)
+            echo "agave-validator-mock --ledger: $@"
+            exit 0
+            ;;
         *)
             echo "agave-validator-mock exec: $@"
             exit 0

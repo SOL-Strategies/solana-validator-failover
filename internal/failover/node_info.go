@@ -19,6 +19,7 @@ type NodeInfo struct {
 	SetIdentityCommand             string
 	ClientVersion                  string
 	SolanaValidatorFailoverVersion string
+	RollbackEnabled                bool
 }
 
 // SetTowerFileBytes sets the tower file bytes

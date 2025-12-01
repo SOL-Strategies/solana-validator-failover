@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         set-identity)
             echo "fdctl-mock set-identity: $@"
-            exit 0
+            exit 1
             ;;
         *)
             echo "fdctl-mock exec: $@"

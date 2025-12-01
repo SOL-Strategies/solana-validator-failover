@@ -20,6 +20,12 @@ import (
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
 )
 
+// RollbackCommandConfig is the configuration for a rollback command
+type RollbackCommandConfig struct {
+	Command string
+	Args    []string
+}
+
 // ClientConfig is the configuration for the failover client, client is always the active node
 type ClientConfig struct {
 	ServerName                     string
@@ -31,6 +37,8 @@ type ClientConfig struct {
 	LocalRPCClient                 *rpc.Client
 	SolanaRPCClient                solana.ClientInterface
 	SkipTowerSync                  bool
+	RollbackEnabled                bool
+	RollbackWhenActive             RollbackCommandConfig
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
@@ -49,6 +57,8 @@ type Client struct {
 	serverName                     string
 	serverAddress                  string
 	skipTowerSync                  bool
+	rollbackEnabled                bool
+	rollbackWhenActive             RollbackCommandConfig
 }
 
 // NewClientFromConfig creates a new QUIC client from a configuration
@@ -68,6 +78,8 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
+		rollbackEnabled:                config.RollbackEnabled,
+		rollbackWhenActive:             config.RollbackWhenActive,
 	}
 
 	err = client.connectToServer()
@@ -192,6 +204,19 @@ func (c *Client) Start() {
 	})
 	if err != nil {
 		c.logger.Error().Err(err).Msgf("failed to set identity to passive")
+		// Handle rollback if enabled
+		if c.rollbackEnabled {
+			c.logger.Warn().Msg("Rollback enabled - attempting to rollback failover")
+			if rollbackErr := c.executeRollbackWhenActive(); rollbackErr != nil {
+				c.logger.Error().Err(rollbackErr).Msg("failed to execute rollback")
+			}
+		}
+		// Send error message to server so it knows not to proceed
+		c.failoverStream.SetIsSuccessfullyCompleted(false)
+		c.failoverStream.SetErrorMessagef("client failed to set identity to passive: %v", err)
+		if encodeErr := c.failoverStream.Encode(); encodeErr != nil {
+			c.logger.Error().Err(encodeErr).Msg("Failed to send error message to server")
+		}
 		return
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
@@ -225,7 +250,36 @@ func (c *Client) Start() {
 		return
 	}
 
-	// send a message to the server to confirm we're proceeding
+	// Check if server failed to set identity to active
+	if c.failoverStream.GetRollbackRequested() {
+		c.logger.Warn().
+			Str("reason", c.failoverStream.GetRollbackReason()).
+			Msg("🔄 Server failed to set identity to active - client must rollback to become active again")
+
+		// Client already set identity to passive successfully, so now it needs to rollback
+		// to become active again since server failed
+		if c.rollbackEnabled {
+			if rollbackErr := c.executeRollbackWhenActive(); rollbackErr != nil {
+				c.logger.Error().Err(rollbackErr).Msg("failed to execute rollback")
+			} else {
+				c.logger.Info().Msg("✅ Client rollback completed successfully - client is active again")
+			}
+			// Send acknowledgment back to server
+			c.failoverStream.SetRollbackAcknowledged(true)
+		} else {
+			c.logger.Warn().Msg("⚠️  Rollback requested but rollback is disabled - client remains passive")
+			c.failoverStream.SetRollbackAcknowledged(false)
+		}
+
+		if encodeErr := c.failoverStream.Encode(); encodeErr != nil {
+			c.logger.Error().Err(encodeErr).Msg("Failed to send rollback acknowledgment to server")
+		} else {
+			c.logger.Info().Msg("📤 Sent rollback acknowledgment to server")
+		}
+		return
+	}
+
+	// Check if server failed to complete failover
 	if !c.failoverStream.GetIsSuccessfullyCompleted() {
 		c.logger.Error().Msgf("server failed to complete failover: %s", c.failoverStream.GetErrorMessage())
 		return
@@ -395,6 +449,36 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_CLIENT_VERSION"] = c.failoverStream.GetPassiveNodeInfo().ClientVersion
 
 	return envMap
+}
+
+// executeRollbackWhenActive executes the rollback command when active node needs to rollback
+func (c *Client) executeRollbackWhenActive() error {
+	c.logger.Info().Msg("🔄 Executing rollback - active node")
+
+	// Execute local rollback command
+	if c.rollbackWhenActive.Command != "" {
+		c.logger.Info().
+			Str("command", c.rollbackWhenActive.Command).
+			Str("args", fmt.Sprintf("[%s]", strings.Join(c.rollbackWhenActive.Args, ", "))).
+			Msg("🔄 Executing local rollback command")
+
+		rollbackCmd := []string{c.rollbackWhenActive.Command}
+		rollbackCmd = append(rollbackCmd, c.rollbackWhenActive.Args...)
+
+		err := utils.RunCommand(utils.RunCommandParams{
+			CommandSlice: rollbackCmd,
+			DryRun:       c.failoverStream.GetIsDryRunFailover(),
+			LogDebug:     c.logger.Debug().Enabled(),
+		})
+		if err != nil {
+			c.logger.Error().Err(err).Msg("failed to execute rollback command")
+			return fmt.Errorf("failed to execute rollback command: %w", err)
+		}
+
+		c.logger.Info().Msg("✅ Local rollback command executed successfully")
+	}
+
+	return nil
 }
 
 // connectToServer waits until a QUIC server is listening on the given address

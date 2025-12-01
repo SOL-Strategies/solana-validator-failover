@@ -35,36 +35,40 @@ type CreditSamplesConfig struct {
 
 // ServerConfig is the configuration for the failover server
 type ServerConfig struct {
-	Port              int
-	HeartbeatInterval string
-	StreamTimeout     string
-	PassiveNodeInfo   *NodeInfo
-	SolanaRPCClient   solana.ClientInterface
-	IsDryRunFailover  bool
-	Hooks             hooks.FailoverHooks
-	MonitorConfig     MonitorConfig
-	SkipTowerSync     bool
+	Port                int
+	HeartbeatInterval   string
+	StreamTimeout       string
+	PassiveNodeInfo     *NodeInfo
+	SolanaRPCClient     solana.ClientInterface
+	IsDryRunFailover    bool
+	Hooks               hooks.FailoverHooks
+	MonitorConfig       MonitorConfig
+	SkipTowerSync       bool
+	RollbackEnabled     bool
+	RollbackWhenPassive RollbackCommandConfig
 }
 
 // Server is the failover server - run by the passive node
 type Server struct {
-	port              int
-	listenAddr        string
-	tlsConfig         *tls.Config
-	listener          quic.Listener
-	heartbeatInterval time.Duration
-	streamTimeout     time.Duration
-	ctx               context.Context
-	cancel            context.CancelFunc
-	logger            zerolog.Logger
-	passiveNodeInfo   *NodeInfo
-	solanaRPCClient   solana.ClientInterface
-	failoverStream    *Stream
-	isDryRunFailover  bool
-	activeConn        quic.Connection
-	hooks             hooks.FailoverHooks
-	monitorConfig     MonitorConfig
-	skipTowerSync     bool
+	port                int
+	listenAddr          string
+	tlsConfig           *tls.Config
+	listener            quic.Listener
+	heartbeatInterval   time.Duration
+	streamTimeout       time.Duration
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	logger              zerolog.Logger
+	passiveNodeInfo     *NodeInfo
+	solanaRPCClient     solana.ClientInterface
+	failoverStream      *Stream
+	isDryRunFailover    bool
+	activeConn          quic.Connection
+	hooks               hooks.FailoverHooks
+	monitorConfig       MonitorConfig
+	skipTowerSync       bool
+	rollbackEnabled     bool
+	rollbackWhenPassive RollbackCommandConfig
 }
 
 // NewServerFromConfig creates a new failover server from a configuration
@@ -85,15 +89,17 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 				ProtocolName,
 			},
 		},
-		logger:           log.With().Logger(),
-		ctx:              ctx,
-		cancel:           cancel,
-		passiveNodeInfo:  config.PassiveNodeInfo,
-		solanaRPCClient:  config.SolanaRPCClient,
-		isDryRunFailover: config.IsDryRunFailover,
-		hooks:            config.Hooks,
-		monitorConfig:    config.MonitorConfig,
-		skipTowerSync:    config.SkipTowerSync,
+		logger:              log.With().Logger(),
+		ctx:                 ctx,
+		cancel:              cancel,
+		passiveNodeInfo:     config.PassiveNodeInfo,
+		solanaRPCClient:     config.SolanaRPCClient,
+		isDryRunFailover:    config.IsDryRunFailover,
+		hooks:               config.Hooks,
+		monitorConfig:       config.MonitorConfig,
+		skipTowerSync:       config.SkipTowerSync,
+		rollbackEnabled:     config.RollbackEnabled,
+		rollbackWhenPassive: config.RollbackWhenPassive,
 	}
 
 	if s.port == 0 {
@@ -236,6 +242,29 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		return
 	}
 
+	// Check rollback configuration compatibility
+	clientRollbackEnabled := s.failoverStream.GetActiveNodeInfo().RollbackEnabled
+
+	// If server has rollback enabled, client must also have it enabled
+	if s.rollbackEnabled && !clientRollbackEnabled {
+		s.failoverStream.LogErrorWithSetMessagef("Server has rollback enabled but client does not - connection rejected. Client must enable rollback to connect to this server.")
+		if err := s.failoverStream.Encode(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to send error message to client")
+		}
+		s.logger.Fatal().Msg("Client does not have rollback enabled but server requires it - aborting")
+		return
+	}
+
+	// If client has rollback enabled, server must also have it enabled
+	if clientRollbackEnabled && !s.rollbackEnabled {
+		s.failoverStream.LogErrorWithSetMessagef("Client has rollback enabled but server does not - connection rejected. Server must enable rollback to connect to this client.")
+		if err := s.failoverStream.Encode(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to send error message to client")
+		}
+		s.logger.Fatal().Msg("Server does not have rollback enabled but client requires it - aborting")
+		return
+	}
+
 	// query gossip for client by its public IP
 	s.logger.Debug().Msgf("querying gossip for active node IP %s", s.failoverStream.GetActiveNodeInfo().PublicIP)
 	gossipActiveNode, err := s.solanaRPCClient.NodeFromIP(s.failoverStream.GetActiveNodeInfo().PublicIP)
@@ -358,6 +387,28 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 			return
 		}
 
+		// Check if client failed to set identity to passive
+		// If ErrorMessage is set, the client failed and we should abort
+		if s.failoverStream.GetErrorMessage() != "" {
+			s.logger.Error().Msgf("Client failed to complete its part of failover: %s", s.failoverStream.GetErrorMessage())
+			s.logger.Info().Msg("Aborting failover - client did not successfully set identity to passive")
+
+			// Close the connection cleanly (stream will be closed by defer)
+			if err := s.activeConn.CloseWithError(quic.ApplicationErrorCode(0), "client failed"); err != nil {
+				s.logger.Debug().Msgf("closing connection after client failure: %v", err)
+			}
+
+			// Close the server listener and cancel the context to stop accepting new connections
+			if s.listener != (quic.Listener{}) {
+				if err := s.listener.Close(); err != nil {
+					s.logger.Error().Err(err).Msg("failed to close listener")
+				}
+			}
+			s.cancel()
+
+			return
+		}
+
 		// check that the TowerFileBytes sent are the same as the hash of the tower file
 		computedTowerFileHash := s.failoverStream.GetActiveNodeInfo().ComputeTowerFileHashFromBytes(s.failoverStream.GetActiveNodeInfo().TowerFileBytes)
 		expectedTowerFileHash := s.failoverStream.GetActiveNodeInfo().TowerFileHash
@@ -417,7 +468,64 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		LogDebug:     s.logger.Debug().Enabled(),
 	})
 	if err != nil {
-		s.logger.Fatal().Err(err).Msgf("failed to set identity to active with command: %s", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
+		s.logger.Error().Err(err).Msgf("failed to set identity to active with command: %s", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
+
+		// Execute local rollback if enabled
+		if s.rollbackEnabled {
+			s.logger.Warn().Msg("Rollback enabled - executing local rollback")
+			if rollbackErr := s.executeRollbackWhenPassive(); rollbackErr != nil {
+				s.logger.Error().Err(rollbackErr).Msg("failed to execute rollback")
+			}
+		}
+
+		// Tell client that failover failed
+		s.failoverStream.SetIsSuccessfullyCompleted(false)
+		s.failoverStream.SetErrorMessagef("failover failed: %v", err)
+
+		// Only send rollback request if rollback is enabled
+		if s.rollbackEnabled {
+			s.failoverStream.SetRollbackRequested(true)
+			s.failoverStream.SetRollbackReason(fmt.Sprintf("passive node failed to set identity to active: %v", err))
+			s.logger.Info().Msg("📤 Sending failover failure notification with rollback request to client - client will rollback to become active again")
+		} else {
+			s.failoverStream.SetRollbackRequested(false)
+			s.logger.Info().Msg("📤 Sending failover failure notification to client (rollback disabled)")
+		}
+
+		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+			s.logger.Error().Err(encodeErr).Msg("Failed to send failover failure notification to client")
+			return
+		}
+
+		// Wait for client acknowledgment (only if rollback was requested)
+		if s.rollbackEnabled {
+			s.logger.Info().Msg("⏳ Waiting for client rollback acknowledgment...")
+			if ackErr := s.failoverStream.Decode(); ackErr != nil {
+				s.logger.Warn().Err(ackErr).Msg("failed to receive rollback acknowledgment from client")
+			} else if s.failoverStream.GetRollbackAcknowledged() {
+				s.logger.Info().Msg("✅ Client acknowledged rollback")
+			}
+		}
+
+		// Close the stream and connection cleanly
+		if err := stream.Close(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to close stream")
+		}
+		if err := s.activeConn.CloseWithError(quic.ApplicationErrorCode(0), "rollback complete"); err != nil {
+			s.logger.Debug().Msgf("closing connection after rollback: %v", err)
+		}
+
+		// Close the server listener and cancel the context to stop accepting new connections
+		if s.listener != (quic.Listener{}) {
+			if err := s.listener.Close(); err != nil {
+				s.logger.Error().Err(err).Msg("failed to close listener")
+			}
+		}
+		s.cancel()
+
+		// Exit after rollback
+		s.logger.Info().Msg("🔄 Rollback complete - exiting")
+		return
 	}
 
 	s.failoverStream.SetPassiveNodeSetIdentityEndTime()
@@ -649,4 +757,34 @@ func (s *Server) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_CLIENT_VERSION"] = s.failoverStream.GetActiveNodeInfo().ClientVersion
 
 	return
+}
+
+// executeRollbackWhenPassive executes the rollback command when passive node needs to rollback
+func (s *Server) executeRollbackWhenPassive() error {
+	s.logger.Info().Msg("🔄 Executing rollback - passive node")
+
+	// Execute local rollback command
+	if s.rollbackWhenPassive.Command != "" {
+		s.logger.Info().
+			Str("command", s.rollbackWhenPassive.Command).
+			Str("args", fmt.Sprintf("[%s]", strings.Join(s.rollbackWhenPassive.Args, ", "))).
+			Msg("🔄 Executing local rollback command")
+
+		rollbackCmd := []string{s.rollbackWhenPassive.Command}
+		rollbackCmd = append(rollbackCmd, s.rollbackWhenPassive.Args...)
+
+		err := utils.RunCommand(utils.RunCommandParams{
+			CommandSlice: rollbackCmd,
+			DryRun:       s.isDryRunFailover,
+			LogDebug:     s.logger.Debug().Enabled(),
+		})
+		if err != nil {
+			s.logger.Error().Err(err).Msg("failed to execute rollback command")
+			return fmt.Errorf("failed to execute rollback command: %w", err)
+		}
+
+		s.logger.Info().Msg("✅ Local rollback command executed successfully")
+	}
+
+	return nil
 }

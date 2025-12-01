@@ -17,6 +17,14 @@ validator:
     peers:
       validator-1:
         address: localhost:9898
+    rollback:
+      enabled: false # enable rollback
+      when_passive: # when passive and unable to set yourself as active in a failover, send message to peer saying it should trigger its rollback and also issue your own rollback command after telling peer
+        command: ./scripts/rollback.sh
+        args: ["--force-identity", "passive"]
+      when_active: # when active and unable to set yourself to passive in a failover, call this command and tell peer the failover is cancelled.
+        command: ./scripts/rollback.sh
+        args: ["--force-identity", "active"]
     hooks:
       pre:
         when_passive:

@@ -166,6 +166,36 @@ func (s Stream) GetFailoverEndSlot() uint64 {
 	return s.message.FailoverEndSlot
 }
 
+// SetRollbackRequested sets the rollback requested flag
+func (s *Stream) SetRollbackRequested(rollbackRequested bool) {
+	s.message.RollbackRequested = rollbackRequested
+}
+
+// GetRollbackRequested returns the rollback requested flag
+func (s Stream) GetRollbackRequested() bool {
+	return s.message.RollbackRequested
+}
+
+// SetRollbackAcknowledged sets the rollback acknowledged flag
+func (s *Stream) SetRollbackAcknowledged(rollbackAcknowledged bool) {
+	s.message.RollbackAcknowledged = rollbackAcknowledged
+}
+
+// GetRollbackAcknowledged returns the rollback acknowledged flag
+func (s Stream) GetRollbackAcknowledged() bool {
+	return s.message.RollbackAcknowledged
+}
+
+// SetRollbackReason sets the rollback reason
+func (s *Stream) SetRollbackReason(reason string) {
+	s.message.RollbackReason = reason
+}
+
+// GetRollbackReason returns the rollback reason
+func (s Stream) GetRollbackReason() string {
+	return s.message.RollbackReason
+}
+
 // ConfirmFailover is called by the passive node to proceed with the failover
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity

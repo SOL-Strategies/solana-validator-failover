@@ -28,6 +28,10 @@ type Message struct {
 	FailoverEndSlot                  uint64
 	// key is the identity pubkey
 	CreditSamples CreditSamples
+	// Rollback fields
+	RollbackRequested    bool
+	RollbackAcknowledged bool
+	RollbackReason       string
 }
 
 func (m *Message) currentStateTableString() string {

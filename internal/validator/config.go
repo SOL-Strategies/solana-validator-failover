@@ -36,7 +36,21 @@ type FailoverConfig struct {
 	Monitor                       MonitorConfig       `mapstructure:"monitor"`
 	Peers                         PeersConfig         `mapstructure:"peers"`
 	Server                        ServerConfig        `mapstructure:"server"`
+	Rollback                      RollbackConfig      `mapstructure:"rollback"`
 	IsDryRun                      bool
+}
+
+// RollbackConfig is the configuration for rollback behavior
+type RollbackConfig struct {
+	Enabled     bool            `mapstructure:"enabled"`
+	WhenPassive RollbackCommand `mapstructure:"when_passive"`
+	WhenActive  RollbackCommand `mapstructure:"when_active"`
+}
+
+// RollbackCommand is the command to execute for rollback
+type RollbackCommand struct {
+	Command string   `mapstructure:"command"`
+	Args    []string `mapstructure:"args"`
 }
 
 // PeersConfig is the configuration for the peers
