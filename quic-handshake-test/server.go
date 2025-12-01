@@ -75,38 +75,16 @@ func main() {
 		DisablePathMTUDiscovery:  true, // Disable PMTUD which can fail on tunnel interfaces
 	}
 
-	// Try using explicit UDP binding like in issue #5331
-	// This might work better with quic-go 0.44.0+ on tunnel interfaces
-	fmt.Printf("[SERVER] Creating UDP listener on port %d...\n", Port)
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: Port})
-	var listener *quic.Listener
-	
+	// Use EXACT same method as main application - ListenAddr with minimal config
+	// Main app uses: quic.ListenAddr(..., &quic.Config{KeepAlivePeriod: ..., MaxIdleTimeout: ...})
+	fmt.Printf("[SERVER] Using ListenAddr (like main application)...\n")
+	listener, err := quic.ListenAddr(
+		fmt.Sprintf(":%d", Port),
+		tlsConfig,
+		quicConfig,
+	)
 	if err != nil {
-		fmt.Printf("[SERVER] Failed to create UDP listener: %v\n", err)
-		fmt.Printf("[SERVER] Falling back to ListenAddr...\n")
-		// Fallback to ListenAddr
-		listener, err = quic.ListenAddr(
-			fmt.Sprintf(":%d", Port),
-			tlsConfig,
-			quicConfig,
-		)
-		if err != nil {
-			panic(fmt.Sprintf("Failed to create listener: %v", err))
-		}
-	} else {
-		fmt.Printf("[SERVER] UDP listener created: %s\n", udpConn.LocalAddr())
-		defer udpConn.Close()
-		
-		// Use Transport like in issue #5331
-		tr := quic.Transport{
-			Conn: udpConn,
-		}
-		
-		fmt.Printf("[SERVER] Creating QUIC listener from Transport...\n")
-		listener, err = tr.Listen(tlsConfig, quicConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Failed to create QUIC listener: %v", err))
-		}
+		panic(fmt.Sprintf("Failed to create listener: %v", err))
 	}
 	defer listener.Close()
 
