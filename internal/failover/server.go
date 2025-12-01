@@ -479,31 +479,33 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		}
 
 		// Tell client that failover failed
+		// If rollback is enabled, we know client also has it enabled (due to compatibility check)
 		s.failoverStream.SetIsSuccessfullyCompleted(false)
 		s.failoverStream.SetErrorMessagef("failover failed: %v", err)
 
-		// Only send rollback request if rollback is enabled
 		if s.rollbackEnabled {
 			s.failoverStream.SetRollbackRequested(true)
 			s.failoverStream.SetRollbackReason(fmt.Sprintf("passive node failed to set identity to active: %v", err))
 			s.logger.Info().Msg("📤 Sending failover failure notification with rollback request to client - client will rollback to become active again")
-		} else {
-			s.failoverStream.SetRollbackRequested(false)
-			s.logger.Info().Msg("📤 Sending failover failure notification to client (rollback disabled)")
-		}
 
-		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
-			s.logger.Error().Err(encodeErr).Msg("Failed to send failover failure notification to client")
-			return
-		}
+			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+				s.logger.Error().Err(encodeErr).Msg("Failed to send failover failure notification to client")
+				return
+			}
 
-		// Wait for client acknowledgment (only if rollback was requested)
-		if s.rollbackEnabled {
+			// Wait for client rollback acknowledgment
 			s.logger.Info().Msg("⏳ Waiting for client rollback acknowledgment...")
 			if ackErr := s.failoverStream.Decode(); ackErr != nil {
 				s.logger.Warn().Err(ackErr).Msg("failed to receive rollback acknowledgment from client")
 			} else if s.failoverStream.GetRollbackAcknowledged() {
 				s.logger.Info().Msg("✅ Client acknowledged rollback")
+			}
+		} else {
+			// Rollback disabled - just send error, no rollback request
+			s.logger.Info().Msg("📤 Sending failover failure notification to client (rollback disabled)")
+			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+				s.logger.Error().Err(encodeErr).Msg("Failed to send failover failure notification to client")
+				return
 			}
 		}
 
