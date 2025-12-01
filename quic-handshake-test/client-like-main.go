@@ -32,14 +32,14 @@ func main() {
 
 	// v0.43.1 sends 2504 byte packets and they arrive!
 	// InitialPacketSize: 1200 sends packets (but they don't arrive at server)
-	// Without InitialPacketSize, no packets are sent in v0.44.0+
-	// Try matching v0.43.1's packet size (2504 bytes)
+	// InitialPacketSize: 2500 doesn't send packets (too large - QUIC min is 1200)
+	// Back to 1200 - the issue is why these packets don't arrive, not the size
 	quicConfig := &quic.Config{
-		InitialPacketSize:       2500, // Match v0.43.1's 2504-byte packets
+		InitialPacketSize:       1200, // QUIC minimum - required to send packets in v0.44.0+
 		DisablePathMTUDiscovery: true, // Disable PMTUD on tunnel interfaces
 	}
 
-	fmt.Printf("[CLIENT] Calling quic.DialAddr with InitialPacketSize=2500 (matching v0.43.1's 2504-byte packets)...\n")
+	fmt.Printf("[CLIENT] Calling quic.DialAddr with InitialPacketSize=1200 (QUIC minimum)...\n")
 	fmt.Printf("[CLIENT] Starting dial at %s\n", time.Now().Format("15:04:05.000"))
 
 	conn, err := quic.DialAddr(ctx, serverAddr, &tls.Config{

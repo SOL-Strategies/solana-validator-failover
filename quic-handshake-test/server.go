@@ -80,13 +80,14 @@ func main() {
 		Conn: udpConn,
 	}
 
-	// v0.43.1 sends 2504-byte packets that arrive at server
-	// Try matching v0.43.1's packet size to see if larger packets pass through Tailscale
+	// v0.43.1 sends 2504-byte packets that arrive at server (uses default, no InitialPacketSize set)
+	// v0.57.1 with InitialPacketSize: 1200 sends packets but they don't arrive
+	// The issue is not packet size - it's something else about how v0.57.1 constructs packets
 	quicConfig := &quic.Config{
 		HandshakeIdleTimeout:    30 * time.Second,
 		MaxIdleTimeout:          60 * time.Second,
 		KeepAlivePeriod:         5 * time.Second,
-		InitialPacketSize:       2500, // Match v0.43.1's 2504-byte packets
+		InitialPacketSize:       1200, // QUIC minimum - match client
 		DisablePathMTUDiscovery: true,
 	}
 
