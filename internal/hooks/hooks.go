@@ -263,9 +263,10 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 
 // Define styles using lipgloss - matching the reference repository colors
 var (
-	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("124"))
-	stdoutStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("28"))
-	prefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Grey for prefix
+	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("124")) // red
+	stdoutStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("28"))  // green
+	stdStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // light grey
+	prefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))   // Grey for prefix
 )
 
 // styledStreamOutputString creates styled output for stream content with the requested format
@@ -275,16 +276,15 @@ func styledStreamOutputString(stream string, text string, hookName string, hookT
 	styledPrefix := prefixStyle.Render(prefix)
 
 	// Apply color to the script output based on stream type
-	var outputStyle lipgloss.Style
+	var cursorStyle lipgloss.Style
 	if stream == "stderr" {
-		outputStyle = stderrStyle
+		cursorStyle = stderrStyle
 	} else {
-		outputStyle = stdoutStyle
+		cursorStyle = stdoutStyle
 	}
+	styledCursor := cursorStyle.Render("▶")
 
-	styledOutput := outputStyle.Render(text)
-
-	return fmt.Sprintf("%s %s", styledPrefix, styledOutput)
+	return fmt.Sprintf("%s %s %s", styledPrefix, styledCursor, stdStyle.Render(text))
 }
 
 // RunPreWhenPassive runs the pre hooks when the validator is passive
