@@ -271,7 +271,7 @@ var (
 
 // styledStreamOutputString creates styled output for stream content with the requested format
 func styledStreamOutputString(stream string, text string, hookName string, hookType string, hookIndex int, totalHooks int) string {
-	// Format: 🪝 hooks:<pre|post>:[1/1 <hook-name>]: <script output>
+	// Format: 🪝 hooks:<pre|post>:[1/1 <hook-name>]: ▶ <script output>
 	prefix := fmt.Sprintf("🪝  hooks:%s:[%d/%d %s]:", hookType, hookIndex, totalHooks, hookName)
 	styledPrefix := prefixStyle.Render(prefix)
 
