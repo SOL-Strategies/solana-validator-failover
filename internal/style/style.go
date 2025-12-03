@@ -71,17 +71,19 @@ var (
 // TemplateFuncMap returns a template.FuncMap with the style functions
 func TemplateFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"Active":     RenderActiveString,
-		"Passive":    RenderPassiveString,
-		"Warning":    RenderWarningString,
-		"Blue":       RenderBlueString,
-		"Orange":     RenderOrangeString,
-		"Purple":     RenderPurpleString,
-		"DarkPurple": RenderDarkPurpleString,
-		"Message":    RenderMessageString,
-		"Grey":       RenderGreyString,
-		"LightGrey":  RenderLightGreyString,
-		"Join":       strings.Join,
+		"Active":       RenderActiveString,
+		"Passive":      RenderPassiveString,
+		"Warning":      RenderWarningString,
+		"LightWarning": RenderLightWarningString,
+		"Blue":         RenderBlueString,
+		"LightBlue":    RenderLightBlueString,
+		"Orange":       RenderOrangeString,
+		"Purple":       RenderPurpleString,
+		"DarkPurple":   RenderDarkPurpleString,
+		"Message":      RenderMessageString,
+		"Grey":         RenderGreyString,
+		"LightGrey":    RenderLightGreyString,
+		"Join":         strings.Join,
 	}
 }
 
@@ -130,11 +132,29 @@ func RenderWarningString(message string) string {
 		Render(message)
 }
 
+// RenderLightWarningString renders a string in the light warning color
+func RenderLightWarningString(message string) string {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorWarning).
+		Faint(true).
+		Render(message)
+}
+
 // RenderBlueString renders a string in the blue color
 func RenderBlueString(message string) string {
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(ColorBlue).
+		Render(message)
+}
+
+// RenderLightBlueString renders a string in the light blue color
+func RenderLightBlueString(message string) string {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorBlue).
+		Faint(true).
 		Render(message)
 }
 

@@ -20,28 +20,35 @@ validator:
     hooks:
       pre:
         when_passive:
-          - name: pre_hook_x_when_passive
+          - name: v2_pre_when_passive
             command: ./scripts/hook-mock.sh
             args:
               [
-                "{{ .ThisNodeName }}",
-                "{{ .PeerNodeName }}",
-                "--rpc-url={{ .ThisNodeRPCAddress }}",
+                "--form={{ .PeerNodeName }}",
+                "--to={{ .ThisNodeName }}",
+                "--us-rpc-url={{ .ThisNodeRPCAddress }}",
+                "--us-role={{ .ThisNodeRole }}",
               ]
             must_succeed: true
             environment:
               MY_ENV_VAR: "{{ .ThisNodeName }}"
         when_active:
-          - name: pre_hook_y_when_active
+          - name: v2_pre_when_active
             command: ./scripts/hook-mock.sh
-            args: ["arg1", "arg2"]
+            args:
+              [
+                "--form={{ .ThisNodeName }}",
+                "--to={{ .PeerNodeName }}",
+                "--us-rpc-url={{ .ThisNodeRPCAddress }}",
+                "--us-role={{ .ThisNodeRole }}",
+              ]
             must_succeed: true
       post:
         when_passive:
-          - name: post_hook_y_when_passive
+          - name: v2_post_when_passive
             command: ./scripts/hook-mock.sh
-            args: ["arg1", "arg2"]
+            args: ["--us-role={{ .ThisNodeRole }}"]
         when_active:
-          - name: post_hook_z_when_active
+          - name: v2_post_when_active
             command: ./scripts/hook-mock.sh
-            args: ["arg1", "arg2"]
+            args: ["--us-role={{ .ThisNodeRole }}"]

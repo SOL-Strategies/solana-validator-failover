@@ -132,6 +132,33 @@ func executeTemplate(tmplStr string, data HookTemplateData) (string, error) {
 	return buf.String(), nil
 }
 
+// RenderHookCommand renders a hook's command and arguments with templates applied for display purposes.
+// This is used both for displaying the failover plan and during actual hook execution.
+// Returns the rendered command string (command + args joined with spaces).
+func RenderHookCommand(hook Hook, templateData HookTemplateData) (string, error) {
+	// Execute template for command
+	command, err := executeTemplate(hook.Command, templateData)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute command template: %w", err)
+	}
+
+	// Execute templates for args
+	args := make([]string, len(hook.Args))
+	for i, arg := range hook.Args {
+		executedArg, err := executeTemplate(arg, templateData)
+		if err != nil {
+			return "", fmt.Errorf("failed to execute arg[%d] template: %w", i, err)
+		}
+		args[i] = executedArg
+	}
+
+	// Combine command and args
+	if len(args) > 0 {
+		return command + " " + strings.Join(args, " "), nil
+	}
+	return command, nil
+}
+
 // Run runs the hook
 func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, totalHooks int) error {
 	hookLogger := log.With().Logger()
@@ -140,6 +167,8 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 	templateData := newHookTemplateData(envMap)
 
 	// Execute templates for command and args
+	// Note: We keep this separate from RenderHookCommand to properly handle
+	// arguments with spaces for exec.Command
 	command, err := executeTemplate(h.Command, templateData)
 	if err != nil {
 		return fmt.Errorf("Hook %s failed to execute command template: %w", h.Name, err)
@@ -265,15 +294,15 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 var (
 	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("124")) // red
 	stdoutStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("28"))  // green
-	stdStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // light grey
-	prefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))   // Grey for prefix
+	StdStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // light grey
+	PrefixStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))   // Grey for prefix
 )
 
 // styledStreamOutputString creates styled output for stream content with the requested format
 func styledStreamOutputString(stream string, text string, hookName string, hookType string, hookIndex int, totalHooks int) string {
 	// Format: 🪝 hooks:<pre|post>:[1/1 <hook-name>]: ▶ <script output>
 	prefix := fmt.Sprintf("🪝  hooks:%s:[%d/%d %s]:", hookType, hookIndex, totalHooks, hookName)
-	styledPrefix := prefixStyle.Render(prefix)
+	styledPrefix := PrefixStyle.Render(prefix)
 
 	// Apply color to the script output based on stream type
 	var cursorStyle lipgloss.Style
@@ -284,7 +313,7 @@ func styledStreamOutputString(stream string, text string, hookName string, hookT
 	}
 	styledCursor := cursorStyle.Render("▶")
 
-	return fmt.Sprintf("%s %s %s", styledPrefix, styledCursor, stdStyle.Render(text))
+	return fmt.Sprintf("%s %s %s", styledPrefix, styledCursor, StdStyle.Render(text))
 }
 
 // RunPreWhenPassive runs the pre hooks when the validator is passive
