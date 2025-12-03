@@ -19,6 +19,7 @@ type NodeInfo struct {
 	SetIdentityCommand             string
 	ClientVersion                  string
 	SolanaValidatorFailoverVersion string
+	RPCAddress                     string
 }
 
 // SetTowerFileBytes sets the tower file bytes

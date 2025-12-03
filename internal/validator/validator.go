@@ -619,6 +619,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 			SetIdentityCommand:             v.SetIdentityActiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
+			RPCAddress:                     v.RPCAddress,
 		},
 		SolanaRPCClient:  v.solanaRPCClient,
 		RPCURL:           v.RPCAddress,
@@ -687,6 +688,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			SetIdentityCommand:             v.SetIdentityPassiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
+			RPCAddress:                     v.RPCAddress,
 		},
 		Hooks: v.Hooks,
 	})

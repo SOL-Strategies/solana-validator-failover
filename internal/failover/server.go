@@ -264,7 +264,11 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 	}
 
 	// confirm the failover with the user
-	if err := s.failoverStream.ConfirmFailover(); err != nil {
+	// Get RPC URLs from the messages passed between client and server
+	activeRPCURL := s.failoverStream.GetActiveNodeInfo().RPCAddress
+	passiveRPCURL := s.failoverStream.GetPassiveNodeInfo().RPCAddress
+
+	if err := s.failoverStream.ConfirmFailover(s.hooks, activeRPCURL, passiveRPCURL); err != nil {
 		s.logger.Error().Err(err).Msg("failover cancelled")
 
 		// Send error message to client before exiting

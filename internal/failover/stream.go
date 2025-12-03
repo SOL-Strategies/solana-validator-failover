@@ -17,6 +17,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/quic-go/quic-go"
 	"github.com/rs/zerolog/log"
+	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/solana"
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
@@ -166,59 +167,86 @@ func (s Stream) GetFailoverEndSlot() uint64 {
 	return s.message.FailoverEndSlot
 }
 
+// buildHookTemplateDataForActiveNode builds HookTemplateData for the active node (client) from Stream data
+func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL string) hooks.HookTemplateData {
+	data := hooks.HookTemplateData{
+		IsDryRunFailover: s.message.IsDryRunFailover,
+	}
+
+	if isPreFailover {
+		data.ThisNodeRole = "active"
+		data.PeerNodeRole = "passive"
+	} else {
+		data.ThisNodeRole = "passive"
+		data.PeerNodeRole = "active"
+	}
+
+	// This node (active)
+	data.ThisNodeName = s.message.ActiveNodeInfo.Hostname
+	data.ThisNodePublicIP = s.message.ActiveNodeInfo.PublicIP
+	data.ThisNodeActiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Active.PubKey()
+	data.ThisNodeActiveIdentityKeyFile = s.message.ActiveNodeInfo.Identities.Active.KeyFile
+	data.ThisNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
+	data.ThisNodePassiveIdentityKeyFile = s.message.ActiveNodeInfo.Identities.Passive.KeyFile
+	data.ThisNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
+	data.ThisNodeRPCAddress = rpcURL
+
+	// Peer node (passive)
+	data.PeerNodeName = s.message.PassiveNodeInfo.Hostname
+	data.PeerNodePublicIP = s.message.PassiveNodeInfo.PublicIP
+	data.PeerNodeActiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Active.PubKey()
+	data.PeerNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
+	data.PeerNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
+
+	return data
+}
+
+// buildHookTemplateDataForPassiveNode builds HookTemplateData for the passive node (server) from Stream data
+func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL string) hooks.HookTemplateData {
+	data := hooks.HookTemplateData{
+		IsDryRunFailover: s.message.IsDryRunFailover,
+	}
+
+	if isPreFailover {
+		data.ThisNodeRole = "passive"
+		data.PeerNodeRole = "active"
+	} else {
+		data.ThisNodeRole = "active"
+		data.PeerNodeRole = "passive"
+	}
+
+	// This node (passive)
+	data.ThisNodeName = s.message.PassiveNodeInfo.Hostname
+	data.ThisNodePublicIP = s.message.PassiveNodeInfo.PublicIP
+	data.ThisNodeActiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Active.PubKey()
+	data.ThisNodeActiveIdentityKeyFile = s.message.PassiveNodeInfo.Identities.Active.KeyFile
+	data.ThisNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
+	data.ThisNodePassiveIdentityKeyFile = s.message.PassiveNodeInfo.Identities.Passive.KeyFile
+	data.ThisNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
+	data.ThisNodeRPCAddress = rpcURL
+
+	// Peer node (active)
+	data.PeerNodeName = s.message.ActiveNodeInfo.Hostname
+	data.PeerNodePublicIP = s.message.ActiveNodeInfo.PublicIP
+	data.PeerNodeActiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Active.PubKey()
+	data.PeerNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
+	data.PeerNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
+
+	return data
+}
+
 // ConfirmFailover is called by the passive node to proceed with the failover
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
-func (s *Stream) ConfirmFailover() (err error) {
-	// Template function to render code blocks with lipgloss styling
-	// Chevron in light faded purple, command name and arguments in light brown
-	renderCodeBlock := func(isDryRun bool, prmptChar, code string) string {
-		code = strings.TrimSpace(code)
+func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL, passiveRPCURL string) (err error) {
+	// Build template data for hooks
+	activePreTemplateData := s.buildHookTemplateDataForActiveNode(true, activeRPCURL)
+	activePostTemplateData := s.buildHookTemplateDataForActiveNode(false, activeRPCURL)
+	passivePreTemplateData := s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL)
+	passivePostTemplateData := s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL)
 
-		// Light faded purple for chevron
-		lightPurpleStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#B19CD9")) // Light faded purple
-
-		// Light brown for command name
-		commandStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#D291BC")).
-			Bold(false) // light brown
-
-		// Render prompt character in light faded purple
-		renderedPromptChar := lightPurpleStyle.Render(prmptChar)
-
-		// Parse command: split by first space to separate command from arguments
-		parts := strings.SplitN(code, " ", 2)
-		commandName := parts[0]
-		arguments := ""
-		if len(parts) > 1 {
-			arguments = parts[1]
-		}
-
-		// Render command name in light brown
-		renderedCommand := commandStyle.Render(commandName)
-
-		// Render arguments in light brown (same style, not bold)
-		var renderedArgs string
-		if arguments != "" {
-			renderedArgs = " " + commandStyle.Bold(false).Render(arguments)
-		}
-
-		// Combine: chevron + space + command + arguments
-		result := renderedPromptChar + " " + renderedCommand + renderedArgs
-
-		// Add dry run prefix if needed
-		if isDryRun {
-			dryRunStyle := lipgloss.NewStyle().
-				Foreground(style.ColorLightGrey)
-			return dryRunStyle.Render("(dry run) ") + result
-		}
-
-		return result
-	}
-
-	// Add custom function to split commands
+	// Add custom function to split commands and render hooks
 	funcMap := template.FuncMap{
 		"splitCommand": func(cmd string) string {
 			// Split the command by spaces
@@ -229,7 +257,72 @@ func (s *Stream) ConfirmFailover() (err error) {
 			// Join with newlines and proper indentation
 			return parts[0] + " \\\n      " + strings.Join(parts[1:], " \\\n      ")
 		},
-		"CodeBlock": renderCodeBlock, // Use glamour for code blocks
+		"RenderSetIdentityCommand": func(cmd string, isDryRun bool) string {
+			prefixSartString := hooks.PrefixStyle.Render("[set-identity")
+			dryRunString := ""
+			if isDryRun {
+				dryRunString = style.RenderLightBlueString(" (dry run)")
+			}
+			prefixEndString := hooks.PrefixStyle.Render("]:")
+
+			return fmt.Sprintf("%s%s%s %s", prefixSartString, dryRunString, prefixEndString, hooks.PrefixStyle.Render(cmd))
+		},
+		"RenderTowerFileSyncCommand": func(cmd string) string {
+			prefixSartString := hooks.PrefixStyle.Render("[destination]:")
+			return fmt.Sprintf("%s %s", prefixSartString, hooks.PrefixStyle.Render(cmd))
+		},
+		"RenderHooks": func(hooksList hooks.Hooks, nodeName string, hookType string) string {
+			if len(hooksList) == 0 {
+				return ""
+			}
+			var result strings.Builder
+			var templateData hooks.HookTemplateData
+
+			// Select appropriate template data based on node and hook type
+			if nodeName == s.message.ActiveNodeInfo.Hostname {
+				if hookType == "pre" {
+					templateData = activePreTemplateData
+				} else {
+					templateData = activePostTemplateData
+				}
+			} else {
+				if hookType == "pre" {
+					templateData = passivePreTemplateData
+				} else {
+					templateData = passivePostTemplateData
+				}
+			}
+
+			for i, hook := range hooksList {
+				hookCmd, err := hooks.RenderHookCommand(hook, templateData)
+				if err != nil {
+					// If rendering fails, fall back to original command
+					hookCmd = hook.Command
+					if len(hook.Args) > 0 {
+						hookCmd += " " + strings.Join(hook.Args, " ")
+					}
+				}
+
+				hookIndex := i + 1
+				prefixStartString := fmt.Sprintf("[%d/%d %s", hookIndex, len(hooksList), hook.Name)
+				mustSucceedString := ""
+				if hook.MustSucceed {
+					mustSucceedString = " (must succeed)"
+				}
+				prefixEndString := "]:"
+				styledHookString := fmt.Sprintf("%s%s%s %s",
+					hooks.PrefixStyle.Render(prefixStartString),
+					style.RenderLightWarningString(mustSucceedString),
+					hooks.PrefixStyle.Render(prefixEndString),
+					hooks.PrefixStyle.Render(hookCmd))
+
+				result.WriteString(fmt.Sprintf(" ↓   %s", styledHookString))
+				if i < len(hooksList)-1 {
+					result.WriteString(" ↓\n")
+				}
+			}
+			return result.String()
+		},
 	}
 
 	// Merge with existing style functions
@@ -246,25 +339,45 @@ func (s *Stream) ConfirmFailover() (err error) {
 
 {{/* Clear warning when not a drill i.e not a dry run */}}
 {{- if .IsDryRun -}}
-{{ Blue "This is a dry run - re-run with '--not-a-drill' for a real failover." }}
+{{ Blue "This is a dry run - re-run with '--not-a-drill' for a real failover," }}
 {{- else -}}
 {{ Warning "⚠️  This is a real failover - identities will be changed on both nodes." }}
 {{- end }}
-
-🔴 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
-▪️
-▪️   {{ CodeBlock .IsDryRun "❯" .ActiveNodeInfo.SetIdentityCommand }}
-{{- if not .SkipTowerSync }} 
-▪️
-🟠 tower-file {{ Grey .ActiveNodeInfo.Hostname false }} → {{ Grey .PassiveNodeInfo.Hostname false}} 
-▪️
-▪️   {{ CodeBlock false "❯" .PassiveNodeInfo.TowerFile }}
+{{ if .Hooks.Pre.WhenActive }}
+🪝  {{ .ActiveNodeInfo.Hostname }} → {{ Active "pre-passive" false }} hooks
+{{ RenderHooks .Hooks.Pre.WhenActive .ActiveNodeInfo.Hostname "pre" }}
+ ↓
 {{- end }}
-▪️
+🔴 {{ Active .ActiveNodeInfo.Hostname false }} → {{ Passive "PASSIVE" false }} {{ Passive .ActiveNodeInfo.Identities.Passive.PubKey false }}
+ ↓   {{ RenderSetIdentityCommand .ActiveNodeInfo.SetIdentityCommand .IsDryRun }} 
+{{- if not .SkipTowerSync }}
+ ↓
+🔁 {{ LightGrey "tower-file" }} {{ LightGrey .ActiveNodeInfo.Hostname }} → {{ LightGrey .PassiveNodeInfo.Hostname }} 
+ ↓   {{ RenderTowerFileSyncCommand .ActiveNodeInfo.TowerFile }}
+{{- end }}
+{{- if .Hooks.Pre.WhenPassive }}
+ ↓
+🪝  {{ .PassiveNodeInfo.Hostname }} → {{ Passive "pre-active" false }} hooks
+{{ RenderHooks .Hooks.Pre.WhenPassive .PassiveNodeInfo.Hostname "pre" }}
+ ↓
+{{- else }}
+{{- if not .SkipTowerSync }}
+ ↓
+{{- end }}
+{{- end }}
 🟢 {{ Passive .PassiveNodeInfo.Hostname false }} → {{ Active "ACTIVE" false }} {{ Active .PassiveNodeInfo.Identities.Active.PubKey false }} 
-▪️
-▪️   {{ CodeBlock .IsDryRun "❯" .PassiveNodeInfo.SetIdentityCommand }}
-▪️
+ ↓   {{ RenderSetIdentityCommand .PassiveNodeInfo.SetIdentityCommand .IsDryRun }} 
+{{- if .Hooks.Post.WhenActive }}
+ ↓
+🪝  {{ .PassiveNodeInfo.Hostname }} → {{ Active "post-active" false }} hooks
+{{ RenderHooks .Hooks.Post.WhenActive .PassiveNodeInfo.Hostname "post" }}
+{{- end }}
+{{- if .Hooks.Post.WhenPassive }}
+ ↓
+🪝  {{ .ActiveNodeInfo.Hostname }} → {{ Passive "post-passive" false }} hooks
+{{ RenderHooks .Hooks.Post.WhenPassive .ActiveNodeInfo.Hostname "post" }}
+{{- end }}
+ ↓
 💰 {{ LightGrey "Profit" }}
 `)
 
@@ -280,6 +393,7 @@ func (s *Stream) ConfirmFailover() (err error) {
 		"ActiveNodeInfo":  s.message.ActiveNodeInfo,
 		"SummaryTable":    s.message.currentStateTableString(),
 		"AppVersion":      pkgconstants.AppVersion,
+		"Hooks":           failoverHooks,
 	}); err != nil {
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
