@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Simple p2p Solana validator failovers
+Simple p2p Solana validator failovers. This tool helps automate *planned* failvoers. To automate *unexpected* failovers, see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
 
 ![solanna-validator-failover-passive-to-active-png](vhs/failover-passive-to-active.png)
 
