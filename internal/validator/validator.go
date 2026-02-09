@@ -97,7 +97,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	defer v.logger.Debug().Msg("configuration done")
 
 	// configure solana rpc clients all in one
-	err := v.configureRPCClient(cfg.RPCAddress, cfg.Cluster)
+	err := v.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL)
 	if err != nil {
 		return err
 	}
@@ -214,11 +214,9 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 }
 
 // configureRPCClient configures the solana rpc client
-func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName string) error {
-	// configure solana rpc clients all in one
-	err := utils.ValidateCluster(solanaClusterName)
-	if err != nil {
-		return err
+func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, networkRPCURL string) error {
+	if solanaClusterName == "" {
+		return fmt.Errorf("cluster is required")
 	}
 
 	if !utils.IsValidURLWithPort(localRPCURL) {
@@ -228,7 +226,21 @@ func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName string) er
 		)
 	}
 
-	solanaClusterRPCURL := constants.SolanaClusters[solanaClusterName].RPC
+	// determine the network RPC URL: use built-in URL for known clusters,
+	// otherwise require network_rpc_url from config
+	var solanaClusterRPCURL string
+	if utils.IsKnownCluster(solanaClusterName) {
+		solanaClusterRPCURL = constants.SolanaClusters[solanaClusterName].RPC
+	} else {
+		if networkRPCURL == "" {
+			return fmt.Errorf(
+				"network_rpc_url is required for custom cluster %q (known clusters: %s)",
+				solanaClusterName,
+				strings.Join(constants.SolanaClusterNames, ", "),
+			)
+		}
+		solanaClusterRPCURL = networkRPCURL
+	}
 
 	v.logger.Debug().
 		Str("cluster", solanaClusterName).

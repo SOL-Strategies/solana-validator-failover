@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Simple p2p Solana validator failovers. This tool helps automate *planned* failvoers. To automate *unexpected* failovers, see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
+Simple p2p Solana validator failovers. This tool helps automate _planned_ failvoers. To automate _unexpected_ failovers, see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
 
 ![solanna-validator-failover-passive-to-active-png](vhs/failover-passive-to-active.png)
 
@@ -41,6 +41,7 @@ solana-validator-failover run
 By default, `run` runs in dry-run mode where only the tower file is synced between nodes and set identity commands are mocked. This is to safeguard against fat fingers (we've all been there) and also to give an idea of the expected total failover time under current network conditions. When ready, re-run on the passive node with `--not-a-drill` to do it for realsies.
 
 ⚠️ WARNING: _who_ you run this program as matters - the user:
+
 - requires permissions to run set identity commands for the validator
 - requires permissions to read/write the tower file - check inherited tower file permissions are what you expect after a dry-run
 
@@ -63,8 +64,12 @@ validator:
   bin: agave-validator
 
   # (required) cluster this validator runs on
-  #            one of: mainnet-beta, testnet, devnet, localnet
+  #            well-known clusters: mainnet-beta, testnet, devnet, localnet
+  #            any other value is treated as a custom cluster (requires network_rpc_url)
   cluster: mainnet-beta
+
+  # (required for custom clusters) network RPC URL
+  # network_rpc_url: <solana_compatible_rpc_endpoint>
 
   # this validator's identities
   identities:
@@ -104,7 +109,6 @@ validator:
 
   # failover configuration
   failover:
-
     # failover server config (runs on passive node taking over from active node)
     server:
       # default: 9898 - QUIC (udp) port to listen on
@@ -118,7 +122,7 @@ validator:
     #                     the loaded identities from validator.identities
     # {{ .LedgerDir }}  - a resolved absolute path to validator.ledger_dir
     # defaults shown below
-    set_identity_active_cmd_template:  "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
+    set_identity_active_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
     set_identity_passive_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}"
 
     # failover peers - keys are vanity hostnames to help you review program output better
@@ -249,7 +253,7 @@ make build
 make build-compose
 ```
 
-## Laundry/wish list:
+## Laundry/wish list
 
 - [ ] TLS config
 - [ ] Refactor to make e2e testing easier - current setup not optimal

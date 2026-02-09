@@ -258,13 +258,10 @@ func EnsureBins(bins ...string) (err error) {
 	return nil
 }
 
-// ValidateCluster validates that the cluster is a valid cluster
-func ValidateCluster(cluster string) (err error) {
+// IsKnownCluster returns true if the cluster is a well-known Solana cluster
+func IsKnownCluster(cluster string) bool {
 	_, ok := constants.SolanaClusters[cluster]
-	if !ok {
-		return fmt.Errorf("invalid cluster: %s, must be one of: %s", cluster, strings.Join(constants.SolanaClusterNames, ", "))
-	}
-	return nil
+	return ok
 }
 
 // ResolveAndValidateDir resolves the path and validates that the directory exists
