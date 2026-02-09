@@ -48,21 +48,28 @@ type Client struct {
 	networkRPCClient RPCClientInterface
 	loggerLocal      zerolog.Logger
 	loggerNetwork    zerolog.Logger
+	averageSlotTime  time.Duration
 }
 
 // NewClientParams is the parameters for creating a new client
 type NewClientParams struct {
-	LocalRPCURL   string
-	NetworkRPCURL string
+	LocalRPCURL     string
+	NetworkRPCURL   string
+	AverageSlotTime int // average slot time in milliseconds, defaults to 400
 }
 
 // NewRPCClient creates a new client for the given solana cluster
 func NewRPCClient(params NewClientParams) ClientInterface {
+	avgSlotTime := params.AverageSlotTime
+	if avgSlotTime <= 0 {
+		avgSlotTime = 400
+	}
 	return &Client{
 		localRPCClient:   rpc.New(params.LocalRPCURL),
 		networkRPCClient: rpc.New(params.NetworkRPCURL),
 		loggerLocal:      log.Logger.With().Str("rpc_client", "local").Logger(),
 		loggerNetwork:    log.Logger.With().Str("rpc_client", "network").Logger(),
+		averageSlotTime:  time.Duration(avgSlotTime) * time.Millisecond,
 	}
 }
 
@@ -255,9 +262,9 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 		return false, time.Duration(0), nil
 	}
 
-	// Calculate time to next leader slot using slot difference and average slot time (400ms)
+	// Calculate time to next leader slot using slot difference and average slot time
 	slotDifference := nextLeaderSlot - epochInfo.AbsoluteSlot
-	timeToNextLeaderSlot = time.Duration(slotDifference) * 400 * time.Millisecond
+	timeToNextLeaderSlot = time.Duration(slotDifference) * c.averageSlotTime
 
 	c.loggerNetwork.Debug().
 		Uint64("nextLeaderSlot", nextLeaderSlot).

@@ -11,7 +11,8 @@ import (
 type Config struct {
 	Bin           string            `mapstructure:"bin"`
 	Cluster       string            `mapstructure:"cluster"`
-	NetworkRPCURL string            `mapstructure:"network_rpc_url"`
+	NetworkRPCURL  string            `mapstructure:"network_rpc_url"`
+	AverageSlotTime int              `mapstructure:"average_slot_time"`
 	Failover      FailoverConfig    `mapstructure:"failover"`
 	Identities    identities.Config `mapstructure:"identities"`
 	RPCAddress    string            `mapstructure:"rpc_address"`

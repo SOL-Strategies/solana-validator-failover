@@ -56,6 +56,7 @@ func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 	client := &Client{
 		localRPCClient:   localMock,
 		networkRPCClient: networkMock,
+		averageSlotTime:  400 * time.Millisecond,
 	}
 
 	return client, localMock, networkMock
@@ -70,6 +71,20 @@ func TestNewRPCClient(t *testing.T) {
 
 	assert.NotNil(t, client)
 	assert.IsType(t, &Client{}, client)
+	// Default average slot time should be 400ms
+	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotTime)
+}
+
+func TestNewRPCClient_CustomAverageSlotTime(t *testing.T) {
+	params := NewClientParams{
+		LocalRPCURL:     "http://localhost:8899",
+		NetworkRPCURL:   "https://api.mainnet-beta.solana.com",
+		AverageSlotTime: 200,
+	}
+	client := NewRPCClient(params)
+
+	assert.NotNil(t, client)
+	assert.Equal(t, 200*time.Millisecond, client.(*Client).averageSlotTime)
 }
 
 func TestGossipClient_NodeFromIP_Success(t *testing.T) {
@@ -820,6 +835,48 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_Success(t *testing.T) {
 	assert.Greater(t, timeToNext, time.Duration(0))
 	// Should be approximately 50 slots * 400ms = 20 seconds
 	expectedTime := time.Duration(50) * 400 * time.Millisecond
+	assert.Equal(t, expectedTime, timeToNext)
+
+	networkMock.AssertExpectations(t)
+}
+
+func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_CustomSlotTime(t *testing.T) {
+	// Create test client with custom average slot time
+	localMock := &MockRPCClient{}
+	networkMock := &MockRPCClient{}
+	client := &Client{
+		localRPCClient:   localMock,
+		networkRPCClient: networkMock,
+		averageSlotTime:  200 * time.Millisecond,
+	}
+
+	// Setup mock expectations
+	currentSlot := uint64(1000)
+	relativeSlot := uint64(50)
+	pubkey := createTestPublicKey(1)
+
+	epochInfo := &rpc.GetEpochInfoResult{
+		Epoch:        1,
+		SlotIndex:    100,
+		AbsoluteSlot: currentSlot,
+	}
+
+	leaderSchedule := rpc.GetLeaderScheduleResult{
+		pubkey: []uint64{relativeSlot, 150, 250},
+	}
+
+	networkMock.On("GetEpochInfo", mock.Anything, rpc.CommitmentConfirmed).Return(epochInfo, nil)
+	networkMock.On("GetLeaderSchedule", mock.Anything).Return(leaderSchedule, nil)
+
+	// Test the function
+	isOnSchedule, timeToNext, err := client.GetTimeToNextLeaderSlotForPubkey(pubkey)
+
+	// Assertions
+	require.NoError(t, err)
+	assert.True(t, isOnSchedule)
+	assert.Greater(t, timeToNext, time.Duration(0))
+	// Should be 50 slots * 200ms = 10 seconds (custom slot time)
+	expectedTime := time.Duration(50) * 200 * time.Millisecond
 	assert.Equal(t, expectedTime, timeToNext)
 
 	networkMock.AssertExpectations(t)

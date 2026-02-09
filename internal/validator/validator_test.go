@@ -74,7 +74,7 @@ func (tv *TestValidator) NewFromConfig(cfg *Config) error {
 	defer tv.logger.Debug().Msg("configuration done")
 
 	// configure solana rpc clients all in one
-	err := tv.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL)
+	err := tv.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL, cfg.AverageSlotTime)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func createTestValidator(t *testing.T) *TestValidator {
 func TestConfigureRPCClient_Success(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "testnet", "")
+	err := validator.configureRPCClient("http://localhost:8899", "testnet", "", 0)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, validator.solanaRPCClient)
@@ -223,7 +223,7 @@ func TestConfigureRPCClient_Success(t *testing.T) {
 func TestConfigureRPCClient_EmptyCluster(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "", "")
+	err := validator.configureRPCClient("http://localhost:8899", "", "", 0)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster is required")
@@ -232,7 +232,7 @@ func TestConfigureRPCClient_EmptyCluster(t *testing.T) {
 func TestConfigureRPCClient_InvalidRPCAddress(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("invalid-address", "testnet", "")
+	err := validator.configureRPCClient("invalid-address", "testnet", "", 0)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid rpc address")
@@ -241,7 +241,7 @@ func TestConfigureRPCClient_InvalidRPCAddress(t *testing.T) {
 func TestConfigureRPCClient_CustomCluster_Success(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "https://mainnet.custom.io")
+	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "https://mainnet.custom.io", 0)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, validator.solanaRPCClient)
@@ -250,7 +250,7 @@ func TestConfigureRPCClient_CustomCluster_Success(t *testing.T) {
 func TestConfigureRPCClient_CustomCluster_MissingNetworkRPCURL(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "")
+	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "", 0)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "network_rpc_url is required")

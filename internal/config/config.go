@@ -18,6 +18,9 @@ const (
 	// DefaultCluster is the default cluster for the validator
 	DefaultCluster = "testnet"
 
+	// DefaultAverageSlotTime is the default average slot time in milliseconds
+	DefaultAverageSlotTime = 400
+
 	// DefaultFailoverServerPort is the default port for the failover server
 	DefaultFailoverServerPort = 9898
 
@@ -88,6 +91,7 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 
 	// Set defaults
 	v.SetDefault("validator.bin", DefaultBin)
+	v.SetDefault("validator.average_slot_time", DefaultAverageSlotTime)
 	v.SetDefault("validator.cluster", DefaultCluster)
 	v.SetDefault("validator.failover.min_time_to_leader_slot", DefaultFailoverMinimumTimeToLeaderSlot)
 	v.SetDefault("validator.failover.monitor.credit_samples.count", DefaultFailoverMonitorCreditSamplesCount)

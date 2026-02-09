@@ -97,7 +97,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	defer v.logger.Debug().Msg("configuration done")
 
 	// configure solana rpc clients all in one
-	err := v.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL)
+	err := v.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL, cfg.AverageSlotTime)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 }
 
 // configureRPCClient configures the solana rpc client
-func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, networkRPCURL string) error {
+func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, networkRPCURL string, averageSlotTime int) error {
 	if solanaClusterName == "" {
 		return fmt.Errorf("cluster is required")
 	}
@@ -250,8 +250,9 @@ func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, networkRP
 
 	v.RPCAddress = localRPCURL
 	v.solanaRPCClient = v.NewSolanaRPCClient(solana.NewClientParams{
-		LocalRPCURL:   localRPCURL,
-		NetworkRPCURL: solanaClusterRPCURL,
+		LocalRPCURL:     localRPCURL,
+		NetworkRPCURL:   solanaClusterRPCURL,
+		AverageSlotTime: averageSlotTime,
 	})
 
 	return nil
