@@ -68,10 +68,18 @@ validator:
 
   # this validator's identities
   identities:
-    # (required) path to identity file to use when ACTIVE
+    # (required or active_pubkey) path to identity file to use when ACTIVE
+    # when supplied with active_pubkey, active takes precedence
     active: /home/solana/active-validator-identity.json
+    # (required or active) base58 encoded pubkey to use when ACTIVE
+    # when supplied with active, active takes precedence
+    active_pubkey: 111111ActivePubkey1111111111111111111111111
     # (required) path to identity file to use when PASSIVE
+    # when supplied with passive_pubkey, passive takes precedence
     passive: /home/solana/passive-validator-identity.json
+    # (required or passive) base58 encoded pubkey to use when PASSIVE
+    # when supplied with passive, passive takes precedence
+    passive_pubkey: 111111PassivePubkey1111111111111111111111111
 
   # (required) ledger directory made available to set-identity command templates
   ledger_dir: /mnt/ledger
