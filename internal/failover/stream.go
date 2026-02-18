@@ -26,13 +26,13 @@ import (
 // Stream is the message sent from the active node to the passive node (server) to initiate the failover process
 type Stream struct {
 	message Message
-	Stream  quic.Stream
+	Stream  *quic.Stream
 	decoder *gob.Decoder
 	encoder *gob.Encoder
 }
 
 // NewFailoverStream creates a new FailoverStream from a QUIC stream
-func NewFailoverStream(stream quic.Stream) *Stream {
+func NewFailoverStream(stream *quic.Stream) *Stream {
 	decoder := gob.NewDecoder(stream)
 	encoder := gob.NewEncoder(stream)
 

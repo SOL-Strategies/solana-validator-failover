@@ -1,4 +1,4 @@
-FROM golang:1.25.4-trixie
+FROM golang:1.26.0-trixie
 ARG APP_VERSION
 ARG APP_NAME
 ARG BUILD_OS_ARCH_LIST

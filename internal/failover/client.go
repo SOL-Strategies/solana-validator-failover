@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ type ClientConfig struct {
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
 type Client struct {
-	Conn                           quic.Connection
+	Conn                           *quic.Conn
 	ctx                            context.Context
 	cancel                         context.CancelFunc
 	logger                         zerolog.Logger
@@ -445,13 +446,29 @@ func (c *Client) connectToServer() error {
 	return sp.Run()
 }
 
-// tryQUICConnection attempts the actual QUIC connection that will be used
+// tryQUICConnection attempts the actual QUIC connection that will be used.
+// It uses a basicPacketConn wrapper to avoid quic-go's OOB (recvmsg/sendmsg)
+// optimizations that fail on virtual network interfaces like Tailscale/WireGuard.
 func (c *Client) tryQUICConnection() error {
-	conn, err := quic.DialAddr(c.ctx, c.serverAddress, &tls.Config{
+	udpAddr, err := net.ResolveUDPAddr("udp4", c.serverAddress)
+	if err != nil {
+		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("failed to resolve server address")
+		return err
+	}
+
+	wrapped, err := newBasicPacketConn(":0")
+	if err != nil {
+		c.logger.Debug().Err(err).Msg("failed to create UDP socket")
+		return err
+	}
+
+	tr := &quic.Transport{Conn: wrapped}
+	conn, err := tr.Dial(c.ctx, udpAddr, &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{ProtocolName},
 	}, nil)
 	if err != nil {
+		tr.Close()
 		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
 		return err
 	}

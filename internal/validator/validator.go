@@ -408,8 +408,23 @@ func (v *Validator) configureSetIdenttiyCommands(cfg FailoverConfig) (err error)
 func (v *Validator) configureHooks(cfg FailoverConfig) (err error) {
 	v.Hooks = cfg.Hooks
 	v.logger.Debug().
-		Interface("hooks", v.Hooks).
+		Int("pre_when_active", len(v.Hooks.Pre.WhenActive)).
+		Int("pre_when_passive", len(v.Hooks.Pre.WhenPassive)).
+		Int("post_when_active", len(v.Hooks.Post.WhenActive)).
+		Int("post_when_passive", len(v.Hooks.Post.WhenPassive)).
 		Msg("hooks set")
+	for _, h := range v.Hooks.Pre.WhenActive {
+		v.logger.Debug().Str("name", h.Name).Str("command", h.Command).Strs("args", h.Args).Bool("must_succeed", h.MustSucceed).Msg("  pre hook (when active)")
+	}
+	for _, h := range v.Hooks.Pre.WhenPassive {
+		v.logger.Debug().Str("name", h.Name).Str("command", h.Command).Strs("args", h.Args).Bool("must_succeed", h.MustSucceed).Msg("  pre hook (when passive)")
+	}
+	for _, h := range v.Hooks.Post.WhenActive {
+		v.logger.Debug().Str("name", h.Name).Str("command", h.Command).Strs("args", h.Args).Bool("must_succeed", h.MustSucceed).Msg("  post hook (when active)")
+	}
+	for _, h := range v.Hooks.Post.WhenPassive {
+		v.logger.Debug().Str("name", h.Name).Str("command", h.Command).Strs("args", h.Args).Bool("must_succeed", h.MustSucceed).Msg("  post hook (when passive)")
+	}
 	return nil
 }
 

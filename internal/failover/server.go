@@ -52,7 +52,8 @@ type Server struct {
 	port              int
 	listenAddr        string
 	tlsConfig         *tls.Config
-	listener          quic.Listener
+	transport         *quic.Transport
+	listener          *quic.Listener
 	heartbeatInterval time.Duration
 	streamTimeout     time.Duration
 	ctx               context.Context
@@ -63,7 +64,7 @@ type Server struct {
 	rpcURL            string
 	failoverStream    *Stream
 	isDryRunFailover  bool
-	activeConn        quic.Connection
+	activeConn        *quic.Conn
 	hooks             hooks.FailoverHooks
 	monitorConfig     MonitorConfig
 	skipTowerSync     bool
@@ -127,8 +128,13 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 
 // Start starts the failover server
 func (s *Server) Start() error {
-	listener, err := quic.ListenAddr(
-		fmt.Sprintf(":%d", s.port),
+	wrapped, err := newBasicPacketConn(fmt.Sprintf(":%d", s.port))
+	if err != nil {
+		return fmt.Errorf("failed to create UDP socket: %v", err)
+	}
+	s.transport = &quic.Transport{Conn: wrapped}
+
+	listener, err := s.transport.Listen(
 		s.tlsConfig,
 		&quic.Config{
 			KeepAlivePeriod: s.heartbeatInterval,
@@ -136,9 +142,10 @@ func (s *Server) Start() error {
 		},
 	)
 	if err != nil {
+		wrapped.Close()
 		return fmt.Errorf("failed to create listener: %v", err)
 	}
-	s.listener = *listener
+	s.listener = listener
 
 	s.logger.Info().Msgf("Listening on port %d - run this program on the ACTIVE validator to continue", s.port)
 
@@ -162,7 +169,7 @@ func (s *Server) Start() error {
 }
 
 // handleConnection handles a new failover connection
-func (s *Server) handleConnection(conn quic.Connection) {
+func (s *Server) handleConnection(conn *quic.Conn) {
 	defer conn.CloseWithError(0, "connection closed")
 
 	s.logger.Debug().Str("remote_addr", conn.RemoteAddr().String()).Msg("Accepted new connection")
@@ -182,7 +189,7 @@ func (s *Server) handleConnection(conn quic.Connection) {
 }
 
 // handleStream handles a new failover stream
-func (s *Server) handleStream(stream quic.Stream) {
+func (s *Server) handleStream(stream *quic.Stream) {
 	defer stream.Close()
 
 	// Read the message type
@@ -205,7 +212,7 @@ func (s *Server) handleStream(stream quic.Stream) {
 	}
 }
 
-func (s *Server) handleFailoverStream(stream quic.Stream) {
+func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	// read the message and parse it into a Stream struct
 	s.failoverStream = NewFailoverStream(stream)
 	if s.failoverStream.Decode() != nil {
@@ -278,9 +285,14 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 		}
 
 		// close the server listener and cancel the context to stop accepting new connections
-		if s.listener != (quic.Listener{}) {
+		if s.listener != nil {
 			if err := s.listener.Close(); err != nil {
 				s.logger.Error().Err(err).Msg("failed to close listener")
+			}
+		}
+		if s.transport != nil {
+			if err := s.transport.Close(); err != nil {
+				s.logger.Error().Err(err).Msg("failed to close transport")
 			}
 		}
 		s.cancel()
@@ -488,9 +500,14 @@ func (s *Server) handleFailoverStream(stream quic.Stream) {
 	}
 
 	// close the server listener and cancel the context to stop accepting new connections
-	if s.listener != (quic.Listener{}) {
+	if s.listener != nil {
 		if err := s.listener.Close(); err != nil {
 			s.logger.Error().Err(err).Msg("failed to close listener")
+		}
+	}
+	if s.transport != nil {
+		if err := s.transport.Close(); err != nil {
+			s.logger.Error().Err(err).Msg("failed to close transport")
 		}
 	}
 	s.cancel()
