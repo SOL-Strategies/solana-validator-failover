@@ -12,7 +12,7 @@ type Config struct {
 	Bin           string            `mapstructure:"bin"`
 	Cluster       string            `mapstructure:"cluster"`
 	ClusterRPCURL  string            `mapstructure:"cluster_rpc_url"`
-	AverageSlotTime int              `mapstructure:"average_slot_time"`
+	AverageSlotDuration string        `mapstructure:"average_slot_duration"`
 	Failover      FailoverConfig    `mapstructure:"failover"`
 	Identities    identities.Config `mapstructure:"identities"`
 	RPCAddress    string            `mapstructure:"rpc_address"`

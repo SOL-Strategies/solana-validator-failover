@@ -75,11 +75,11 @@ func TestNewRPCClient(t *testing.T) {
 	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotTime)
 }
 
-func TestNewRPCClient_CustomAverageSlotTime(t *testing.T) {
+func TestNewRPCClient_CustomAverageSlotDuration(t *testing.T) {
 	params := NewClientParams{
-		LocalRPCURL:     "http://localhost:8899",
-		ClusterRPCURL:   "https://api.mainnet-beta.solana.com",
-		AverageSlotTime: 200,
+		LocalRPCURL:         "http://localhost:8899",
+		ClusterRPCURL:       "https://api.mainnet-beta.solana.com",
+		AverageSlotDuration: 200 * time.Millisecond,
 	}
 	client := NewRPCClient(params)
 

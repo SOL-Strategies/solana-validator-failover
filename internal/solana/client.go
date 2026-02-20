@@ -53,23 +53,23 @@ type Client struct {
 
 // NewClientParams is the parameters for creating a new client
 type NewClientParams struct {
-	LocalRPCURL     string
-	ClusterRPCURL   string
-	AverageSlotTime int // average slot time in milliseconds, defaults to 400
+	LocalRPCURL         string
+	ClusterRPCURL       string
+	AverageSlotDuration time.Duration // average slot duration, defaults to 400ms
 }
 
 // NewRPCClient creates a new client for the given solana cluster
 func NewRPCClient(params NewClientParams) ClientInterface {
-	avgSlotTime := params.AverageSlotTime
-	if avgSlotTime <= 0 {
-		avgSlotTime = 400
+	avgSlotDuration := params.AverageSlotDuration
+	if avgSlotDuration <= 0 {
+		avgSlotDuration = 400 * time.Millisecond
 	}
 	return &Client{
 		localRPCClient:   rpc.New(params.LocalRPCURL),
 		networkRPCClient: rpc.New(params.ClusterRPCURL),
 		loggerLocal:      log.Logger.With().Str("rpc_client", "local").Logger(),
 		loggerNetwork:    log.Logger.With().Str("rpc_client", "network").Logger(),
-		averageSlotTime:  time.Duration(avgSlotTime) * time.Millisecond,
+		averageSlotTime:  avgSlotDuration,
 	}
 }
 

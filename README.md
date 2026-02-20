@@ -71,9 +71,9 @@ validator:
   # (required for custom clusters) cluster RPC URL
   # cluster_rpc_url: <solana_compatible_rpc_endpoint>
 
-  # average slot time in milliseconds, used to estimate time to next leader slot
-  # default: 400
-  # average_slot_time: 400
+  # average slot duration, used to estimate time to next leader slot
+  # default: 400ms
+  # average_slot_duration: 400ms
 
   # this validator's identities
   identities:
