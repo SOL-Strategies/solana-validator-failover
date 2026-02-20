@@ -562,10 +562,11 @@ func TestNewFromConfig_Success(t *testing.T) {
 
 	// Create config
 	cfg := &Config{
-		Bin:        agaveValidatorBin,
-		Cluster:    "testnet",
-		RPCAddress: "http://localhost:8899",
-		LedgerDir:  ledgerDir,
+		Bin:                 agaveValidatorBin,
+		Cluster:             "testnet",
+		RPCAddress:          "http://localhost:8899",
+		AverageSlotDuration: "400ms",
+		LedgerDir:           ledgerDir,
 		Identities: identities.Config{
 			Active:  activeKeyFile,
 			Passive: passiveKeyFile,
