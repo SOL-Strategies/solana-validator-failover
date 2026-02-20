@@ -9,17 +9,17 @@ import (
 
 // Config is the configuration for the validator
 type Config struct {
-	Bin           string            `mapstructure:"bin"`
-	Cluster       string            `mapstructure:"cluster"`
-	ClusterRPCURL  string            `mapstructure:"cluster_rpc_url"`
-	AverageSlotDuration string        `mapstructure:"average_slot_duration"`
-	Failover      FailoverConfig    `mapstructure:"failover"`
-	Identities    identities.Config `mapstructure:"identities"`
-	RPCAddress    string            `mapstructure:"rpc_address"`
-	LedgerDir     string            `mapstructure:"ledger_dir"`
-	Tower         TowerConfig       `mapstructure:"tower"`
-	PublicIP      string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
-	Hostname      string            `mapstructure:"hostname"`  // subject for removal once poor-man's testing setup is removed
+	Bin                 string            `mapstructure:"bin"`
+	Cluster             string            `mapstructure:"cluster"`
+	ClusterRPCURL       string            `mapstructure:"cluster_rpc_url"`
+	AverageSlotDuration string            `mapstructure:"average_slot_duration"`
+	Failover            FailoverConfig    `mapstructure:"failover"`
+	Identities          identities.Config `mapstructure:"identities"`
+	RPCAddress          string            `mapstructure:"rpc_address"`
+	LedgerDir           string            `mapstructure:"ledger_dir"`
+	Tower               TowerConfig       `mapstructure:"tower"`
+	PublicIP            string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
+	Hostname            string            `mapstructure:"hostname"`  // subject for removal once poor-man's testing setup is removed
 }
 
 // TowerConfig is the configuration for the towerfile

@@ -54,9 +54,9 @@ func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 	networkMock := &MockRPCClient{}
 
 	client := &Client{
-		localRPCClient:   localMock,
-		networkRPCClient: networkMock,
-		averageSlotTime:  400 * time.Millisecond,
+		localRPCClient:      localMock,
+		networkRPCClient:    networkMock,
+		averageSlotDuration: 400 * time.Millisecond,
 	}
 
 	return client, localMock, networkMock
@@ -72,7 +72,7 @@ func TestNewRPCClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.IsType(t, &Client{}, client)
 	// Default average slot time should be 400ms
-	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotTime)
+	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotDuration)
 }
 
 func TestNewRPCClient_CustomAverageSlotDuration(t *testing.T) {
@@ -84,7 +84,7 @@ func TestNewRPCClient_CustomAverageSlotDuration(t *testing.T) {
 	client := NewRPCClient(params)
 
 	assert.NotNil(t, client)
-	assert.Equal(t, 200*time.Millisecond, client.(*Client).averageSlotTime)
+	assert.Equal(t, 200*time.Millisecond, client.(*Client).averageSlotDuration)
 }
 
 func TestGossipClient_NodeFromIP_Success(t *testing.T) {
@@ -845,9 +845,9 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_CustomSlotTime(t *testing
 	localMock := &MockRPCClient{}
 	networkMock := &MockRPCClient{}
 	client := &Client{
-		localRPCClient:   localMock,
-		networkRPCClient: networkMock,
-		averageSlotTime:  200 * time.Millisecond,
+		localRPCClient:      localMock,
+		networkRPCClient:    networkMock,
+		averageSlotDuration: 200 * time.Millisecond,
 	}
 
 	// Setup mock expectations

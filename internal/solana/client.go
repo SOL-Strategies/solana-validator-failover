@@ -44,11 +44,11 @@ type ClientInterface interface {
 
 // Client implements Interface using an RPC client
 type Client struct {
-	localRPCClient   RPCClientInterface
-	networkRPCClient RPCClientInterface
-	loggerLocal      zerolog.Logger
-	loggerNetwork    zerolog.Logger
-	averageSlotTime  time.Duration
+	localRPCClient      RPCClientInterface
+	networkRPCClient    RPCClientInterface
+	loggerLocal         zerolog.Logger
+	loggerNetwork       zerolog.Logger
+	averageSlotDuration time.Duration
 }
 
 // NewClientParams is the parameters for creating a new client
@@ -65,11 +65,11 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 		avgSlotDuration = 400 * time.Millisecond
 	}
 	return &Client{
-		localRPCClient:   rpc.New(params.LocalRPCURL),
-		networkRPCClient: rpc.New(params.ClusterRPCURL),
-		loggerLocal:      log.Logger.With().Str("rpc_client", "local").Logger(),
-		loggerNetwork:    log.Logger.With().Str("rpc_client", "network").Logger(),
-		averageSlotTime:  avgSlotDuration,
+		localRPCClient:      rpc.New(params.LocalRPCURL),
+		networkRPCClient:    rpc.New(params.ClusterRPCURL),
+		loggerLocal:         log.Logger.With().Str("rpc_client", "local").Logger(),
+		loggerNetwork:       log.Logger.With().Str("rpc_client", "network").Logger(),
+		averageSlotDuration: avgSlotDuration,
 	}
 }
 
@@ -264,7 +264,7 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 
 	// Calculate time to next leader slot using slot difference and average slot time
 	slotDifference := nextLeaderSlot - epochInfo.AbsoluteSlot
-	timeToNextLeaderSlot = time.Duration(slotDifference) * c.averageSlotTime
+	timeToNextLeaderSlot = time.Duration(slotDifference) * c.averageSlotDuration
 
 	c.loggerNetwork.Debug().
 		Uint64("nextLeaderSlot", nextLeaderSlot).
