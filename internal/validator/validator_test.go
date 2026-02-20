@@ -74,7 +74,7 @@ func (tv *TestValidator) NewFromConfig(cfg *Config) error {
 	defer tv.logger.Debug().Msg("configuration done")
 
 	// configure solana rpc clients all in one
-	err := tv.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.NetworkRPCURL, cfg.AverageSlotTime)
+	err := tv.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.ClusterRPCURL, cfg.AverageSlotTime)
 	if err != nil {
 		return err
 	}
@@ -247,13 +247,13 @@ func TestConfigureRPCClient_CustomCluster_Success(t *testing.T) {
 	assert.NotNil(t, validator.solanaRPCClient)
 }
 
-func TestConfigureRPCClient_CustomCluster_MissingNetworkRPCURL(t *testing.T) {
+func TestConfigureRPCClient_CustomCluster_MissingClusterRPCURL(t *testing.T) {
 	validator := createTestValidator(t)
 
 	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "", 0)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "network_rpc_url is required")
+	assert.Contains(t, err.Error(), "cluster_rpc_url is required")
 }
 
 // ============================================================================

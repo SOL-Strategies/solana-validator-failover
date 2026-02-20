@@ -65,11 +65,11 @@ validator:
 
   # (required) cluster this validator runs on
   #            well-known clusters: mainnet-beta, testnet, devnet, localnet
-  #            any other value is treated as a custom cluster (requires network_rpc_url)
+  #            any other value is treated as a custom cluster (requires cluster_rpc_url)
   cluster: mainnet-beta
 
-  # (required for custom clusters) network RPC URL
-  # network_rpc_url: <solana_compatible_rpc_endpoint>
+  # (required for custom clusters) cluster RPC URL
+  # cluster_rpc_url: <solana_compatible_rpc_endpoint>
 
   # average slot time in milliseconds, used to estimate time to next leader slot
   # default: 400

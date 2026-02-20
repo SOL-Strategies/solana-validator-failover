@@ -65,7 +65,7 @@ func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 func TestNewRPCClient(t *testing.T) {
 	params := NewClientParams{
 		LocalRPCURL:   "http://localhost:8899",
-		NetworkRPCURL: "https://api.mainnet-beta.solana.com",
+		ClusterRPCURL: "https://api.mainnet-beta.solana.com",
 	}
 	client := NewRPCClient(params)
 
@@ -78,7 +78,7 @@ func TestNewRPCClient(t *testing.T) {
 func TestNewRPCClient_CustomAverageSlotTime(t *testing.T) {
 	params := NewClientParams{
 		LocalRPCURL:     "http://localhost:8899",
-		NetworkRPCURL:   "https://api.mainnet-beta.solana.com",
+		ClusterRPCURL:   "https://api.mainnet-beta.solana.com",
 		AverageSlotTime: 200,
 	}
 	client := NewRPCClient(params)
@@ -1033,7 +1033,7 @@ func BenchmarkGossipClient_GetTimeToNextLeaderSlotForPubkey(b *testing.B) {
 
 	gossipClient := NewRPCClient(NewClientParams{
 		LocalRPCURL:   "http://localhost:8899",
-		NetworkRPCURL: "https://api.mainnet-beta.solana.com",
+		ClusterRPCURL: "https://api.mainnet-beta.solana.com",
 	})
 
 	b.ResetTimer()

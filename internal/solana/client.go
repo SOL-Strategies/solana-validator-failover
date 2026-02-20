@@ -54,7 +54,7 @@ type Client struct {
 // NewClientParams is the parameters for creating a new client
 type NewClientParams struct {
 	LocalRPCURL     string
-	NetworkRPCURL   string
+	ClusterRPCURL   string
 	AverageSlotTime int // average slot time in milliseconds, defaults to 400
 }
 
@@ -66,7 +66,7 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 	}
 	return &Client{
 		localRPCClient:   rpc.New(params.LocalRPCURL),
-		networkRPCClient: rpc.New(params.NetworkRPCURL),
+		networkRPCClient: rpc.New(params.ClusterRPCURL),
 		loggerLocal:      log.Logger.With().Str("rpc_client", "local").Logger(),
 		loggerNetwork:    log.Logger.With().Str("rpc_client", "network").Logger(),
 		averageSlotTime:  time.Duration(avgSlotTime) * time.Millisecond,
