@@ -45,6 +45,7 @@ type ServerConfig struct {
 	Hooks             hooks.FailoverHooks
 	MonitorConfig     MonitorConfig
 	SkipTowerSync     bool
+	AutoConfirm       bool
 }
 
 // Server is the failover server - run by the passive node
@@ -68,6 +69,7 @@ type Server struct {
 	hooks             hooks.FailoverHooks
 	monitorConfig     MonitorConfig
 	skipTowerSync     bool
+	autoConfirm       bool
 }
 
 // NewServerFromConfig creates a new failover server from a configuration
@@ -98,6 +100,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		hooks:            config.Hooks,
 		monitorConfig:    config.MonitorConfig,
 		skipTowerSync:    config.SkipTowerSync,
+		autoConfirm:      config.AutoConfirm,
 	}
 
 	if s.port == 0 {
@@ -275,7 +278,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	activeRPCURL := s.failoverStream.GetActiveNodeInfo().RPCAddress
 	passiveRPCURL := s.failoverStream.GetPassiveNodeInfo().RPCAddress
 
-	if err := s.failoverStream.ConfirmFailover(s.hooks, activeRPCURL, passiveRPCURL); err != nil {
+	if err := s.failoverStream.ConfirmFailover(s.hooks, activeRPCURL, passiveRPCURL, s.autoConfirm); err != nil {
 		s.logger.Error().Err(err).Msg("failover cancelled")
 
 		// Send error message to client before exiting

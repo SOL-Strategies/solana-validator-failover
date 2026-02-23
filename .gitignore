@@ -12,3 +12,4 @@ pkg/constants/app.version
 scripts/air-cmd.sh
 release-notes.md
 vhs/*.tape
+.claude

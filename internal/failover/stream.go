@@ -239,7 +239,7 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
-func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL, passiveRPCURL string) (err error) {
+func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
 	// Build template data for hooks
 	activePreTemplateData := s.buildHookTemplateDataForActiveNode(true, activeRPCURL)
 	activePostTemplateData := s.buildHookTemplateDataForActiveNode(false, activeRPCURL)
@@ -400,6 +400,11 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL
 
 	// print confirm message
 	fmt.Println(style.RenderMessageString(buf.String()))
+
+	if autoConfirm {
+		log.Warn().Msg("--yes flag set, automatically proceeding with failover")
+		return nil
+	}
 
 	var confirmFailover bool
 	// ask to proceed
