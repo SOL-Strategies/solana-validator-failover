@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,8 @@ type FailoverParams struct {
 	NoMinTimeToLeaderSlot bool
 	MinTimeToLeaderSlot   time.Duration
 	SkipTowerSync         bool
+	AutoConfirm           bool   // -y/--yes: skip all interactive confirmations
+	ToPeer                string // --to-peer: auto-select peer by name or IP (active node only)
 }
 
 // Peers is a map of peers
@@ -207,9 +210,20 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 	params.MinTimeToLeaderSlot = v.MinimumTimeToLeaderSlot
 
 	if v.IsActive() {
+		if params.AutoConfirm && params.ToPeer != "" {
+			log.Warn().Msg("non-interactive mode: --yes and --to-peer are both set, all prompts will be skipped")
+		}
+		if params.AutoConfirm {
+			// --yes has no confirmations to skip on the active path, but it's not an error
+			log.Debug().Msg("--yes flag set (active node: no confirmations in this path)")
+		}
 		return v.makePassive(params)
 	}
 
+	// passive node path
+	if params.ToPeer != "" {
+		log.Warn().Str("to_peer", params.ToPeer).Msg("--to-peer flag is only applicable when run on an active node - ignoring")
+	}
 	return v.makeActive(params)
 }
 
@@ -625,13 +639,17 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 
 	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
 	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
-		log.Warn().Msgf("Tower file exists %s", v.TowerFile)
-		confirm, err := confirm("Delete tower file and proceed?")
-		if err != nil {
-			return err
-		}
-		if !confirm {
-			return fmt.Errorf("cancelled")
+		log.Warn().Str("tower_file", v.TowerFile).Msg("tower file exists")
+		if params.AutoConfirm {
+			log.Warn().Str("tower_file", v.TowerFile).Msg("--yes flag set, automatically deleting tower file")
+		} else {
+			confirmed, err := confirm("Delete tower file and proceed?")
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				return fmt.Errorf("cancelled")
+			}
 		}
 		// delete the tower file
 		if err = utils.RemoveFile(v.TowerFile); err != nil {
@@ -659,6 +677,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
 		SkipTowerSync:    params.SkipTowerSync,
+		AutoConfirm:      params.AutoConfirm,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -699,7 +718,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 	}
 
 	// select passive peer to connect to from declared peers
-	selectedPassivePeer, err := v.selectPassivePeer()
+	selectedPassivePeer, err := v.selectPassivePeer(params)
 	if err != nil {
 		return err
 	}
@@ -766,8 +785,36 @@ func (v *Validator) waitUntilHealthy() (err error) {
 	return sp.Run()
 }
 
-// selectPassivePeer allows selection of a peer from the list of peers
-func (v *Validator) selectPassivePeer() (selectedPeer Peer, err error) {
+// selectPassivePeer allows selection of a peer from the list of peers.
+// When params.ToPeer is set, it auto-selects by name or IP without an interactive prompt.
+func (v *Validator) selectPassivePeer(params FailoverParams) (selectedPeer Peer, err error) {
+	if params.ToPeer != "" {
+		// match by name first
+		if peer, ok := v.Peers[params.ToPeer]; ok {
+			log.Info().
+				Str("peer", peer.Name).
+				Str("address", peer.Address).
+				Msg("--to-peer: auto-selected peer by name")
+			return peer, nil
+		}
+		// match by IP (Address is "host:port")
+		for _, peer := range v.Peers {
+			host, _, splitErr := net.SplitHostPort(peer.Address)
+			if splitErr != nil {
+				continue
+			}
+			if host == params.ToPeer {
+				log.Info().
+					Str("peer", peer.Name).
+					Str("address", peer.Address).
+					Msg("--to-peer: auto-selected peer by IP")
+				return peer, nil
+			}
+		}
+		return selectedPeer, fmt.Errorf("--to-peer: no peer found matching %q (checked names and IP addresses)", params.ToPeer)
+	}
+
+	// no --to-peer: fall back to interactive selector
 	huhPeerOptions := make([]huh.Option[string], 0)
 	for name, peer := range v.Peers {
 		selectionKey := style.RenderPassiveString(name, false)

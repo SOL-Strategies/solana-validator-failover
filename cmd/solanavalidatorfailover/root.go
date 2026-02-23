@@ -74,7 +74,16 @@ func initLog() {
 			return style.RenderGreyString(i.(string)+"=", false)
 		},
 		FormatFieldValue: func(i any) string {
-			value := fmt.Sprintf("%v", i)
+			// Zerolog passes non-string field values (bools, arrays, etc.) as raw
+			// JSON-encoded []byte. Convert to string before further formatting so
+			// that e.g. Bool("must_succeed", true) renders as "true" rather than
+			// the byte sequence [116 114 117 101].
+			var value string
+			if b, ok := i.([]byte); ok {
+				value = string(b)
+			} else {
+				value = fmt.Sprintf("%v", i)
+			}
 			isPassive := strings.HasPrefix(value, internalconstants.NodeRolePassive)
 			isActive := strings.HasPrefix(value, internalconstants.NodeRoleActive)
 			if isPassive {
