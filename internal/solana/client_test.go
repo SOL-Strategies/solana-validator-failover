@@ -89,7 +89,7 @@ func TestNewRPCClient_CustomAverageSlotDuration(t *testing.T) {
 
 func TestGossipClient_NodeFromIP_Success(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
 	expectedNodes := []*rpc.GetClusterNodesResult{
@@ -107,7 +107,7 @@ func TestGossipClient_NodeFromIP_Success(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	// Test the function
 	node, err := client.NodeFromIP("192.168.1.100")
@@ -119,12 +119,12 @@ func TestGossipClient_NodeFromIP_Success(t *testing.T) {
 	assert.Equal(t, "11111111111111111111111111111111", node.PubKey())
 	assert.Equal(t, "1.16.0", node.Version())
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromIP_NotFound(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
 	expectedNodes := []*rpc.GetClusterNodesResult{
@@ -136,7 +136,7 @@ func TestGossipClient_NodeFromIP_NotFound(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	// Test the function
 	node, err := client.NodeFromIP("192.168.1.999")
@@ -146,15 +146,15 @@ func TestGossipClient_NodeFromIP_NotFound(t *testing.T) {
 	assert.Nil(t, node)
 	assert.Contains(t, err.Error(), "gossip node not found for ip: 192.168.1.999")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromIP_RPCError(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
-	networkMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
+	localMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
 
 	// Test the function
 	node, err := client.NodeFromIP("192.168.1.100")
@@ -164,12 +164,12 @@ func TestGossipClient_NodeFromIP_RPCError(t *testing.T) {
 	assert.Nil(t, node)
 	assert.Contains(t, err.Error(), "RPC connection failed")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromIP_NilGossip(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations - node with nil gossip
 	expectedNodes := []*rpc.GetClusterNodesResult{
@@ -181,7 +181,7 @@ func TestGossipClient_NodeFromIP_NilGossip(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	// Test the function
 	node, err := client.NodeFromIP("192.168.1.100")
@@ -191,12 +191,12 @@ func TestGossipClient_NodeFromIP_NilGossip(t *testing.T) {
 	assert.Nil(t, node)
 	assert.Contains(t, err.Error(), "gossip node not found for ip: 192.168.1.100")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromPubkey_Success(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
 	expectedNodes := []*rpc.GetClusterNodesResult{
@@ -214,7 +214,7 @@ func TestGossipClient_NodeFromPubkey_Success(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	// Test the function
 	node, err := client.NodeFromPubkey("11111111111111111111111111111111")
@@ -226,12 +226,12 @@ func TestGossipClient_NodeFromPubkey_Success(t *testing.T) {
 	assert.Equal(t, "11111111111111111111111111111111", node.PubKey())
 	assert.Equal(t, "1.16.0", node.Version())
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromPubkey_NotFound(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
 	expectedNodes := []*rpc.GetClusterNodesResult{
@@ -243,7 +243,7 @@ func TestGossipClient_NodeFromPubkey_NotFound(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	// Test the function
 	node, err := client.NodeFromPubkey("9999999999999999999999999999999999999999999999999999999999999999")
@@ -253,15 +253,15 @@ func TestGossipClient_NodeFromPubkey_NotFound(t *testing.T) {
 	assert.Nil(t, node)
 	assert.Contains(t, err.Error(), "gossip node not found for pubkey: 9999999999999999999999999999999999999999999999999999999999999999")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_NodeFromPubkey_RPCError(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Setup mock expectations
-	networkMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
+	localMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
 
 	// Test the function
 	node, err := client.NodeFromPubkey("11111111111111111111111111111111")
@@ -271,7 +271,7 @@ func TestGossipClient_NodeFromPubkey_RPCError(t *testing.T) {
 	assert.Nil(t, node)
 	assert.Contains(t, err.Error(), "RPC connection failed")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestNode_IP(t *testing.T) {
@@ -325,7 +325,7 @@ func TestNode_Version(t *testing.T) {
 
 func TestNode_Refresh_Success(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Create initial node
 	node := &Node{
@@ -345,7 +345,7 @@ func TestNode_Refresh_Success(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(updatedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(updatedNodes, nil)
 
 	// Test refresh
 	err := node.Refresh(client)
@@ -354,12 +354,12 @@ func TestNode_Refresh_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1.17.0", node.Version()) // Should have updated version
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestNode_Refresh_Error(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Create initial node
 	node := &Node{
@@ -371,7 +371,7 @@ func TestNode_Refresh_Error(t *testing.T) {
 	}
 
 	// Setup mock expectations for refresh failure
-	networkMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
+	localMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
 
 	// Test refresh
 	err := node.Refresh(client)
@@ -380,12 +380,12 @@ func TestNode_Refresh_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "RPC connection failed")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestNode_Refresh_NodeNotFound(t *testing.T) {
 	// Create test client with mocks
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 
 	// Create initial node
 	node := &Node{
@@ -405,7 +405,7 @@ func TestNode_Refresh_NodeNotFound(t *testing.T) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(updatedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(updatedNodes, nil)
 
 	// Test refresh
 	err := node.Refresh(client)
@@ -414,7 +414,7 @@ func TestNode_Refresh_NodeNotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "gossip node not found for ip: 192.168.1.100")
 
-	networkMock.AssertExpectations(t)
+	localMock.AssertExpectations(t)
 }
 
 func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_Success(t *testing.T) {
@@ -729,7 +729,7 @@ func TestIntegration_WithRealRPCClient(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkGossipClient_NodeFromIP(b *testing.B) {
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 	expectedNodes := []*rpc.GetClusterNodesResult{
 		{
 			Pubkey:  createTestPublicKey(1),
@@ -738,7 +738,7 @@ func BenchmarkGossipClient_NodeFromIP(b *testing.B) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -747,7 +747,7 @@ func BenchmarkGossipClient_NodeFromIP(b *testing.B) {
 }
 
 func BenchmarkGossipClient_NodeFromPubkey(b *testing.B) {
-	client, _, networkMock := createTestClient()
+	client, localMock, _ := createTestClient()
 	expectedNodes := []*rpc.GetClusterNodesResult{
 		{
 			Pubkey:  createTestPublicKey(1),
@@ -756,7 +756,7 @@ func BenchmarkGossipClient_NodeFromPubkey(b *testing.B) {
 		},
 	}
 
-	networkMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
+	localMock.On("GetClusterNodes", mock.Anything).Return(expectedNodes, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

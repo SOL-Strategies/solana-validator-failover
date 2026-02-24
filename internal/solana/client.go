@@ -115,7 +115,7 @@ func (c *Client) NodeFromPubkey(pubkey string) (*Node, error) {
 }
 
 func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err error) {
-	nodes, err := c.networkRPCClient.GetClusterNodes(context.Background())
+	nodes, err := c.localRPCClient.GetClusterNodes(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err err
 }
 
 func (c *Client) gossipNodeFromPubkey(pubkey string) (node *rpc.GetClusterNodesResult, err error) {
-	nodes, err := c.networkRPCClient.GetClusterNodes(context.Background())
+	nodes, err := c.localRPCClient.GetClusterNodes(context.Background())
 	if err != nil {
 		return nil, err
 	}
