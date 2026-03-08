@@ -117,7 +117,7 @@ func (c *Client) NodeFromPubkey(pubkey string) (*Node, error) {
 func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err error) {
 	nodes, err := c.localRPCClient.GetClusterNodes(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, wrapGetClusterNodesErr(err)
 	}
 
 	for _, node := range nodes {
@@ -135,7 +135,7 @@ func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err err
 func (c *Client) gossipNodeFromPubkey(pubkey string) (node *rpc.GetClusterNodesResult, err error) {
 	nodes, err := c.localRPCClient.GetClusterNodes(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, wrapGetClusterNodesErr(err)
 	}
 
 	for _, node := range nodes {
@@ -145,6 +145,20 @@ func (c *Client) gossipNodeFromPubkey(pubkey string) (node *rpc.GetClusterNodesR
 	}
 
 	return nil, fmt.Errorf("gossip node not found for pubkey: %s", pubkey)
+}
+
+// errFullRPCAPIHint is appended when the local validator RPC returns "Method not found"
+// for getClusterNodes (e.g. when the validator is started without --full-rpc-api).
+const errFullRPCAPIHint = "; the local validator RPC must support getClusterNodes: start the validator with --full-rpc-api"
+
+func wrapGetClusterNodesErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "Method not found") {
+		return fmt.Errorf("%w%s", err, errFullRPCAPIHint)
+	}
+	return err
 }
 
 // GetCreditRankedVoteAccountFromPubkey returns the credit rank-sorted current vote accounts rank is the difference
