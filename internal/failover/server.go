@@ -536,8 +536,12 @@ func (s *Server) confirmGossipNodesPostFailover() {
 			retryCount++
 			hasRetriesLeft := retryCount < maxRetries
 
-			// active node is now the old passive node
-			solanaActiveNode, err = s.solanaRPCClient.NodeFromIP(s.failoverStream.GetPassiveNodeInfo().PublicIP)
+			// active node is now the old passive node — prefer the expected pubkey to handle
+			// dual CRDS entries that briefly coexist during a gossip identity transition
+			solanaActiveNode, err = s.solanaRPCClient.NodeFromIPWithExpectedPubkey(
+				s.failoverStream.GetPassiveNodeInfo().PublicIP,
+				s.failoverStream.GetPassiveNodeInfo().Identities.Active.PubKey(),
+			)
 			if err != nil && hasRetriesLeft {
 				sp.Title(style.RenderWarningStringf("(attempt %d of %d) failed to refresh active node info from gossip - retrying", retryCount, maxRetries))
 				time.Sleep(retryDelay)
@@ -549,8 +553,11 @@ func (s *Server) confirmGossipNodesPostFailover() {
 				return fmt.Errorf("(attempt %d of %d) failed to refresh active node info from gossip - giving up", retryCount, maxRetries)
 			}
 
-			// passive node is now the old active node
-			solanaPassiveNode, err = s.solanaRPCClient.NodeFromIP(s.failoverStream.GetActiveNodeInfo().PublicIP)
+			// passive node is now the old active node — prefer the expected pubkey for the same reason
+			solanaPassiveNode, err = s.solanaRPCClient.NodeFromIPWithExpectedPubkey(
+				s.failoverStream.GetActiveNodeInfo().PublicIP,
+				s.failoverStream.GetActiveNodeInfo().Identities.Passive.PubKey(),
+			)
 			if err != nil && hasRetriesLeft {
 				sp.Title(style.RenderWarningStringf("(attempt %d of %d) failed to refresh fetch passive node info - retrying", retryCount, maxRetries))
 				time.Sleep(retryDelay)

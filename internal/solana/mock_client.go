@@ -11,9 +11,10 @@ import (
 // MockClient is a mock implementation of ClientInterface for testing
 type MockClient struct {
 	// Node management
-	mockNode       *Node
-	nodeFromIP     func(ip string) (*Node, error)
-	nodeFromPubkey func(pubkey string) (*Node, error)
+	mockNode                    *Node
+	nodeFromIP                  func(ip string) (*Node, error)
+	nodeFromPubkey              func(pubkey string) (*Node, error)
+	nodeFromIPWithExpectedPubkey func(ip, expectedPubkey string) (*Node, error)
 
 	// Health status
 	healthStatus       bool
@@ -53,6 +54,12 @@ func (m *MockClient) WithNodeFromIP(fn func(ip string) (*Node, error)) *MockClie
 // WithNodeFromPubkey sets a custom NodeFromPubkey function
 func (m *MockClient) WithNodeFromPubkey(fn func(pubkey string) (*Node, error)) *MockClient {
 	m.nodeFromPubkey = fn
+	return m
+}
+
+// WithNodeFromIPWithExpectedPubkey sets a custom NodeFromIPWithExpectedPubkey function
+func (m *MockClient) WithNodeFromIPWithExpectedPubkey(fn func(ip, expectedPubkey string) (*Node, error)) *MockClient {
+	m.nodeFromIPWithExpectedPubkey = fn
 	return m
 }
 
@@ -110,6 +117,14 @@ func (m *MockClient) NodeFromIP(ip string) (*Node, error) {
 func (m *MockClient) NodeFromPubkey(pubkey string) (*Node, error) {
 	if m.nodeFromPubkey != nil {
 		return m.nodeFromPubkey(pubkey)
+	}
+	return m.mockNode, nil
+}
+
+// NodeFromIPWithExpectedPubkey implements ClientInterface.NodeFromIPWithExpectedPubkey
+func (m *MockClient) NodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*Node, error) {
+	if m.nodeFromIPWithExpectedPubkey != nil {
+		return m.nodeFromIPWithExpectedPubkey(ip, expectedPubkey)
 	}
 	return m.mockNode, nil
 }
