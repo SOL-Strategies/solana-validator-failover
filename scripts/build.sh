@@ -50,10 +50,7 @@ go_build() {
         GOOS=${os} GOARCH=${arch} CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o "${binOutput}" || exit 1
         log_info "building ${binOutput} - complete"
         if [ "${CI}" = "true" ]; then
-            # create sha256 checksum
-            sha256sum "${binOutput}" > "${binOutput}.sha256"
-            log_info "created sha256 checksum for ${binOutput}"
-            # create gzipped binary
+            # create gzipped binary (GitHub shows sha256 for each asset automatically)
             gzip -9 "${binOutput}"
             log_info "created gzipped binary for ${binOutput}"
         fi
