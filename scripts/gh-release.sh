@@ -36,16 +36,9 @@ ${AUTO_NOTES}
 ### Installation
 Download the appropriate binary for your platform and extract it:
 \`\`\`bash
-# Download and extract
 wget https://github.com/sol-strategies/solana-validator-failover/releases/download/${REPO_TAG}/solana-validator-failover-${APP_VERSION}-<platform>.gz
 gunzip solana-validator-failover-${APP_VERSION}-<platform>.gz
 chmod +x solana-validator-failover-${APP_VERSION}-<platform>
-\`\`\`
-
-### Verification
-Each binary includes a SHA256 checksum file for integrity verification:
-\`\`\`bash
-sha256sum -c solana-validator-failover-${APP_VERSION}-<platform>.sha256
 \`\`\`
 EOF
 

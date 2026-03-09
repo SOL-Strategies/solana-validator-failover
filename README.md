@@ -84,7 +84,29 @@ solana-validator-failover run --to-peer backup-validator-region-x --yes
 
 ## Installation
 
-Build from source or download the built package for your system from the [releases](https://github.com/SOL-Strategies/solana-validator-failover/releases) page. If your arch isn't listed, ping us.
+### Download binary
+
+Download and install the latest [release](https://github.com/SOL-Strategies/solana-validator-failover/releases) binary for your system.
+
+### From source
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/sol-strategies/solana-validator-failover.git
+   cd solana-validator-failover
+   ```
+
+2. **Build the application:**
+   ```bash
+   make build
+   # or manually:
+   go build -o bin/solana-validator-failover ./cmd/solanavalidatorfailover
+   ```
+
+3. **Copy the binary to where you need it:**
+   ```bash
+   cp ./bin/solana-validator-failover /usr/local/bin/solana-validator-failover
+   ```
 
 ## Prerequisites
 
