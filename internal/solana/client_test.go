@@ -298,7 +298,7 @@ func TestNodeFromIPWithExpectedPubkey_MatchFound(t *testing.T) {
 func TestNodeFromIPWithExpectedPubkey_DualEntry_StaleFirst_ReturnsExpected(t *testing.T) {
 	client, localMock, _ := createTestClient()
 
-	stalePubkey := createTestPublicKey(2)   // old identity, still in gossip
+	stalePubkey := createTestPublicKey(2)    // old identity, still in gossip
 	expectedPubkey := createTestPublicKey(1) // new identity, just appeared
 	nodes := []*rpc.GetClusterNodesResult{
 		{Pubkey: stalePubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},

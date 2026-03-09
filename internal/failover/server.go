@@ -99,9 +99,9 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		port:        config.Port,
-		tlsConfig:   serverTLSConfig,
-		mtlsEnabled: mtlsEnabled,
+		port:             config.Port,
+		tlsConfig:        serverTLSConfig,
+		mtlsEnabled:      mtlsEnabled,
 		logger:           log.With().Logger(),
 		ctx:              ctx,
 		cancel:           cancel,
@@ -305,6 +305,8 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	activeRPCURL := s.failoverStream.GetActiveNodeInfo().RPCAddress
 	passiveRPCURL := s.failoverStream.GetPassiveNodeInfo().RPCAddress
 
+	s.logger.Info().Msgf("%s connected from %s - failover plan:", s.failoverStream.GetActiveNodeInfo().Hostname, s.activeConn.RemoteAddr())
+
 	if err := s.failoverStream.ConfirmFailover(s.hooks, activeRPCURL, passiveRPCURL, s.autoConfirm); err != nil {
 		s.logger.Error().Err(err).Msg("failover cancelled")
 
@@ -488,38 +490,46 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		return
 	}
 
-	// failover is complete, timings will be reported in the main failover stream
-	s.logger.Info().Msg("🟢 Failover complete:")
-	fmt.Println(s.failoverStream.GetStateTable())
-
 	// run post hooks when active
 	s.hooks.RunPostWhenActive(s.getHookEnvMap(hookEnvMapParams{
 		isDryRunFailover: s.isDryRunFailover,
 		isPostFailover:   true,
 	}))
 
-	s.logger.Info().Msg("🕐 Failover timing summary:")
-	fmt.Println(s.failoverStream.GetFailoverDurationTableString())
-
 	if !s.isDryRunFailover {
 		s.confirmGossipNodesPostFailover()
 	}
 
+	// build and render the post-failover summary immediately (before credit monitoring)
+	summaryData := s.failoverStream.BuildSummaryData()
+	rendered, renderErr := RenderFailoverSummary(summaryData)
+	if renderErr != nil {
+		s.logger.Error().Err(renderErr).Msg("failed to render failover summary")
+	} else {
+		s.logger.Info().Msg("Post-failover state:")
+		fmt.Print(style.RenderMessageString(strings.Trim(rendered, "\n")))
+	}
+
 	// monitor the credits by pulling configured samples
-	s.logger.Info().Msg("🩺 Monitoring vote credits post-failover...")
+	s.logger.Info().Msg("Monitoring vote credits post-failover...")
 	err = s.failoverStream.PullActiveIdentityVoteCreditsSamples(s.solanaRPCClient, s.monitorConfig.CreditSamples.Count, s.monitorConfig.CreditSamples.IntervalDuration)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("failed to pull active identity vote credits samples")
-		return
 	}
 
-	// report the credit samples difference
-	rankDifference, firstRank, lastRank, err := s.failoverStream.GetVoteCreditRankDifference()
-	if err != nil {
-		s.logger.Error().Err(err).Msg("failed to get vote credit rank difference")
-		return
+	rankDifference, firstRank, lastRank, rankErr := s.failoverStream.GetVoteCreditRankDifference()
+	if rankErr == nil {
+		var rankMsg string
+		switch {
+		case rankDifference > 0:
+			rankMsg = style.RenderActiveString(fmt.Sprintf("improved by +%d", rankDifference), false)
+		case rankDifference < 0:
+			rankMsg = style.RenderPassiveString(fmt.Sprintf("worsened by %d", rankDifference), false)
+		default:
+			rankMsg = style.RenderLightGreyString("unchanged")
+		}
+		s.logger.Info().Msgf("Vote credits: rank %s (%d → %d)", rankMsg, firstRank, lastRank)
 	}
-	s.logger.Info().Msgf("🏁 Vote credit rank change: %d (%d -> %d)", rankDifference, firstRank, lastRank)
 
 	// close the stream and connection cleanly
 	if err := stream.Close(); err != nil {

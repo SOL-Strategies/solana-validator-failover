@@ -800,6 +800,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			PublicIP:                       v.PublicIP,
 			Identities:                     v.Identities,
 			TowerFile:                      v.TowerFile,
+			TowerFileSizeBytes:             utils.FileSize(v.TowerFile),
 			SetIdentityCommand:             v.SetIdentityPassiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
