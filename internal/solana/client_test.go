@@ -274,6 +274,117 @@ func TestGossipClient_NodeFromPubkey_RPCError(t *testing.T) {
 	localMock.AssertExpectations(t)
 }
 
+func TestNodeFromIPWithExpectedPubkey_MatchFound(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	expectedPubkey := createTestPublicKey(1)
+	nodes := []*rpc.GetClusterNodesResult{
+		{Pubkey: expectedPubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+	}
+	localMock.On("GetClusterNodes", mock.Anything).Return(nodes, nil)
+
+	node, err := client.NodeFromIPWithExpectedPubkey("192.168.1.10", expectedPubkey.String())
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, expectedPubkey.String(), node.PubKey())
+	assert.Equal(t, "192.168.1.10", node.IP())
+	localMock.AssertExpectations(t)
+}
+
+// TestNodeFromIPWithExpectedPubkey_DualEntry_StaleFirst confirms that when two CRDS entries
+// exist for the same IP (stale pubkey first, expected pubkey second), the expected entry wins.
+// This mirrors the gossip identity transition window described in the ha repo.
+func TestNodeFromIPWithExpectedPubkey_DualEntry_StaleFirst_ReturnsExpected(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	stalePubkey := createTestPublicKey(2)   // old identity, still in gossip
+	expectedPubkey := createTestPublicKey(1) // new identity, just appeared
+	nodes := []*rpc.GetClusterNodesResult{
+		{Pubkey: stalePubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+		{Pubkey: expectedPubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+	}
+	localMock.On("GetClusterNodes", mock.Anything).Return(nodes, nil)
+
+	node, err := client.NodeFromIPWithExpectedPubkey("192.168.1.10", expectedPubkey.String())
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, expectedPubkey.String(), node.PubKey())
+	localMock.AssertExpectations(t)
+}
+
+// TestNodeFromIPWithExpectedPubkey_DualEntry_ExpectedFirst confirms ordering doesn't matter:
+// even when the expected entry comes first, it is returned correctly.
+func TestNodeFromIPWithExpectedPubkey_DualEntry_ExpectedFirst_ReturnsExpected(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	expectedPubkey := createTestPublicKey(1)
+	stalePubkey := createTestPublicKey(2)
+	nodes := []*rpc.GetClusterNodesResult{
+		{Pubkey: expectedPubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+		{Pubkey: stalePubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+	}
+	localMock.On("GetClusterNodes", mock.Anything).Return(nodes, nil)
+
+	node, err := client.NodeFromIPWithExpectedPubkey("192.168.1.10", expectedPubkey.String())
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, expectedPubkey.String(), node.PubKey())
+	localMock.AssertExpectations(t)
+}
+
+// TestNodeFromIPWithExpectedPubkey_ExpectedNotPresent_ReturnsFirstMatch confirms that when
+// the expected pubkey isn't at the IP yet (switch not yet in gossip), the first entry is
+// returned as a fallback so callers can inspect what pubkey is currently visible.
+func TestNodeFromIPWithExpectedPubkey_ExpectedNotPresent_ReturnsFirstMatch(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	stalePubkey := createTestPublicKey(2) // only stale entry visible so far
+	nodes := []*rpc.GetClusterNodesResult{
+		{Pubkey: stalePubkey, Gossip: stringPtr("192.168.1.10:8001"), Version: stringPtr("1.16.0")},
+	}
+	localMock.On("GetClusterNodes", mock.Anything).Return(nodes, nil)
+
+	expectedPubkey := createTestPublicKey(1)
+	node, err := client.NodeFromIPWithExpectedPubkey("192.168.1.10", expectedPubkey.String())
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, stalePubkey.String(), node.PubKey()) // stale returned as fallback
+	localMock.AssertExpectations(t)
+}
+
+func TestNodeFromIPWithExpectedPubkey_NotFound(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	nodes := []*rpc.GetClusterNodesResult{
+		{Pubkey: createTestPublicKey(1), Gossip: stringPtr("192.168.1.100:8001"), Version: stringPtr("1.16.0")},
+	}
+	localMock.On("GetClusterNodes", mock.Anything).Return(nodes, nil)
+
+	node, err := client.NodeFromIPWithExpectedPubkey("10.0.0.99", createTestPublicKey(1).String())
+
+	assert.Error(t, err)
+	assert.Nil(t, node)
+	assert.Contains(t, err.Error(), "gossip node not found for ip: 10.0.0.99")
+	localMock.AssertExpectations(t)
+}
+
+func TestNodeFromIPWithExpectedPubkey_RPCError(t *testing.T) {
+	client, localMock, _ := createTestClient()
+
+	localMock.On("GetClusterNodes", mock.Anything).Return([]*rpc.GetClusterNodesResult{}, errors.New("RPC connection failed"))
+
+	node, err := client.NodeFromIPWithExpectedPubkey("192.168.1.10", createTestPublicKey(1).String())
+
+	assert.Error(t, err)
+	assert.Nil(t, node)
+	assert.Contains(t, err.Error(), "RPC connection failed")
+	localMock.AssertExpectations(t)
+}
+
 func TestNode_IP(t *testing.T) {
 	// Create a node with gossip address
 	node := &Node{

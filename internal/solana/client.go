@@ -35,6 +35,12 @@ type ClientInterface interface {
 	NodeFromIP(ip string) (*Node, error)
 	// NodeFromPubkey returns a Node from a pubkey
 	NodeFromPubkey(pubkey string) (*Node, error)
+	// NodeFromIPWithExpectedPubkey returns a Node from an IP address, preferring the entry
+	// whose pubkey matches expectedPubkey. During a gossip identity transition, both the old
+	// and new CRDS entries for a node briefly coexist; this method returns the expected entry
+	// if present, falling back to the first entry for the IP otherwise. Returns an error only
+	// if no entry exists for the IP at all.
+	NodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*Node, error)
 	// GetCreditRankedVoteAccountFromPubkey returns the credit rank-sorted current vote accounts rank is the difference
 	// between current epoch credits and total credits (descending)
 	GetCreditRankedVoteAccountFromPubkey(pubkey string) (*rpc.VoteAccountsResult, int, error)
@@ -167,6 +173,49 @@ func (c *Client) gossipNodeFromPubkey(pubkey string) (node *rpc.GetClusterNodesR
 	}
 
 	return nil, fmt.Errorf("gossip node not found for pubkey: %s", pubkey)
+}
+
+// NodeFromIPWithExpectedPubkey returns a Node from an IP address, preferring the entry
+// whose pubkey matches expectedPubkey. During a gossip identity transition, both the old
+// and new CRDS entries for a node briefly coexist; this method returns the expected entry
+// if present, falling back to the first entry for the IP otherwise. Returns an error only
+// if no entry exists for the IP at all.
+func (c *Client) NodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*Node, error) {
+	gossipNode, err := c.nodeFromIPWithExpectedPubkey(ip, expectedPubkey)
+	if err != nil {
+		return nil, err
+	}
+	return &Node{gossipNode: gossipNode}, nil
+}
+
+func (c *Client) nodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*rpc.GetClusterNodesResult, error) {
+	nodes, err := c.getClusterNodes()
+	if err != nil {
+		return nil, err
+	}
+
+	var firstMatch *rpc.GetClusterNodesResult
+	for _, node := range nodes {
+		if node.Gossip == nil {
+			continue
+		}
+		gossipIP := strings.Split(*node.Gossip, ":")[0]
+		if gossipIP != ip {
+			continue
+		}
+		// Found a node at this IP — prefer the one with the expected pubkey
+		if node.Pubkey.String() == expectedPubkey {
+			return node, nil
+		}
+		if firstMatch == nil {
+			firstMatch = node // stale entry — keep as fallback
+		}
+	}
+
+	if firstMatch != nil {
+		return firstMatch, nil
+	}
+	return nil, fmt.Errorf("gossip node not found for ip: %s", ip)
 }
 
 // GetCreditRankedVoteAccountFromPubkey returns the credit rank-sorted current vote accounts rank is the difference
