@@ -11,9 +11,9 @@ import (
 // MockClient is a mock implementation of ClientInterface for testing
 type MockClient struct {
 	// Node management
-	mockNode                    *Node
-	nodeFromIP                  func(ip string) (*Node, error)
-	nodeFromPubkey              func(pubkey string) (*Node, error)
+	mockNode                     *Node
+	nodeFromIP                   func(ip string) (*Node, error)
+	nodeFromPubkey               func(pubkey string) (*Node, error)
 	nodeFromIPWithExpectedPubkey func(ip, expectedPubkey string) (*Node, error)
 
 	// Health status
