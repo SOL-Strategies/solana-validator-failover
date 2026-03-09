@@ -46,6 +46,10 @@ type ServerConfig struct {
 	MonitorConfig     MonitorConfig
 	SkipTowerSync     bool
 	AutoConfirm       bool
+	// TLSConfig is an optional mTLS config. When non-nil, the server requires
+	// connecting clients to present a certificate signed by the configured CA.
+	// When nil, an ephemeral self-signed certificate is used (no client auth).
+	TLSConfig *tls.Config
 }
 
 // Server is the failover server - run by the passive node
@@ -70,26 +74,34 @@ type Server struct {
 	monitorConfig     MonitorConfig
 	skipTowerSync     bool
 	autoConfirm       bool
+	mtlsEnabled       bool
 }
 
 // NewServerFromConfig creates a new failover server from a configuration
 func NewServerFromConfig(config ServerConfig) (*Server, error) {
-	// TODO: accept and parse local cert if supplied
-	tlsCert, err := utils.GenerateTLSCertificate()
-	if err != nil {
-		return nil, err
+	var serverTLSConfig *tls.Config
+	mtlsEnabled := config.TLSConfig != nil
+	if mtlsEnabled {
+		cloned := config.TLSConfig.Clone()
+		cloned.NextProtos = []string{ProtocolName}
+		serverTLSConfig = cloned
+	} else {
+		tlsCert, err := utils.GenerateTLSCertificate()
+		if err != nil {
+			return nil, err
+		}
+		serverTLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{tlsCert},
+			NextProtos:   []string{ProtocolName},
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		port: config.Port,
-		tlsConfig: &tls.Config{
-			Certificates: []tls.Certificate{tlsCert},
-			NextProtos: []string{
-				ProtocolName,
-			},
-		},
+		port:        config.Port,
+		tlsConfig:   serverTLSConfig,
+		mtlsEnabled: mtlsEnabled,
 		logger:           log.With().Logger(),
 		ctx:              ctx,
 		cancel:           cancel,
@@ -116,6 +128,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		config.StreamTimeout = DefaultStreamTimeoutDurationStr
 	}
 
+	var err error
 	s.heartbeatInterval, err = time.ParseDuration(config.HeartbeatInterval)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse heartbeat interval: %v", err)
@@ -176,6 +189,20 @@ func (s *Server) handleConnection(conn *quic.Conn) {
 	defer conn.CloseWithError(0, "connection closed")
 
 	s.logger.Debug().Str("remote_addr", conn.RemoteAddr().String()).Msg("Accepted new connection")
+
+	if s.mtlsEnabled {
+		tlsState := conn.ConnectionState().TLS
+		if len(tlsState.PeerCertificates) > 0 {
+			peer := tlsState.PeerCertificates[0]
+			s.logger.Info().
+				Str("remote_addr", conn.RemoteAddr().String()).
+				Str("subject", peer.Subject.String()).
+				Str("issuer", peer.Issuer.String()).
+				Time("expires", peer.NotAfter).
+				Msg("mTLS: client certificate verified")
+		}
+	}
+
 	s.activeConn = conn
 
 	// Accept streams

@@ -2,6 +2,7 @@ package validator
 
 import (
 	"context"
+	gotls "crypto/tls"
 	"fmt"
 	"html/template"
 	"net"
@@ -72,6 +73,8 @@ type Validator struct {
 
 	logger          zerolog.Logger
 	solanaRPCClient solana.ClientInterface
+	serverTLSConfig *gotls.Config // non-nil when mTLS is enabled; used by the passive QUIC server
+	clientTLSConfig *gotls.Config // non-nil when mTLS is enabled; used by the active QUIC client
 }
 
 // NewSolanaRPCClient creates a new Solana RPC client
@@ -173,6 +176,12 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 
 	// get server
 	err = v.configureServer(cfg.Failover.Server, cfg.Failover.Monitor)
+	if err != nil {
+		return err
+	}
+
+	// configure mTLS (no-op when tls.enabled is false)
+	err = v.configureTLS(cfg.Failover.TLS)
 	if err != nil {
 		return err
 	}
@@ -589,6 +598,59 @@ func (v *Validator) configureServer(cfg ServerConfig, monitorCfg MonitorConfig) 
 	return nil
 }
 
+// configureTLS validates and loads mTLS material when tls.enabled is true.
+// When disabled (the default), it is a no-op and the QUIC layer falls back
+// to an ephemeral self-signed certificate (encrypted but unauthenticated).
+func (v *Validator) configureTLS(cfg TLSConfig) error {
+	if !cfg.Enabled {
+		v.logger.Debug().Msg("mTLS disabled; QUIC connections use an ephemeral self-signed certificate (encrypted but unauthenticated)")
+		return nil
+	}
+
+	if cfg.CACert == "" {
+		return fmt.Errorf("tls.ca_cert is required when tls.enabled is true")
+	}
+	if cfg.Cert == "" {
+		return fmt.Errorf("tls.cert is required when tls.enabled is true")
+	}
+	if cfg.Key == "" {
+		return fmt.Errorf("tls.key is required when tls.enabled is true")
+	}
+
+	caCertPath, err := utils.ResolvePath(cfg.CACert)
+	if err != nil {
+		return fmt.Errorf("tls.ca_cert: failed to resolve path: %w", err)
+	}
+	certPath, err := utils.ResolvePath(cfg.Cert)
+	if err != nil {
+		return fmt.Errorf("tls.cert: failed to resolve path: %w", err)
+	}
+	keyPath, err := utils.ResolvePath(cfg.Key)
+	if err != nil {
+		return fmt.Errorf("tls.key: failed to resolve path: %w", err)
+	}
+
+	serverTLS, err := utils.BuildMTLSServerConfig(caCertPath, certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("tls: failed to build server TLS config: %w", err)
+	}
+
+	clientTLS, err := utils.BuildMTLSClientConfig(caCertPath, certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("tls: failed to build client TLS config: %w", err)
+	}
+
+	v.serverTLSConfig = serverTLS
+	v.clientTLSConfig = clientTLS
+
+	v.logger.Info().
+		Str("ca_cert", caCertPath).
+		Str("cert", certPath).
+		Msg("mTLS enabled: certificate and CA loaded successfully")
+
+	return nil
+}
+
 // configureGossipNode ensures the gossip node is valid and sets it
 func (v *Validator) configureGossipNode() (err error) {
 	v.GossipNode, err = v.solanaRPCClient.NodeFromIP(v.PublicIP)
@@ -678,6 +740,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		Hooks:            v.Hooks,
 		SkipTowerSync:    params.SkipTowerSync,
 		AutoConfirm:      params.AutoConfirm,
+		TLSConfig:        v.serverTLSConfig,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -742,7 +805,8 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
 			RPCAddress:                     v.RPCAddress,
 		},
-		Hooks: v.Hooks,
+		Hooks:     v.Hooks,
+		TLSConfig: v.clientTLSConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to peer %s: %w", selectedPassivePeer.Name, err)
