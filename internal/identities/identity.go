@@ -1,6 +1,8 @@
 package identities
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 
 	"github.com/gagliardetto/solana-go"
@@ -83,4 +85,40 @@ func (i *Identity) PubKey() string {
 		return i.Key.PublicKey().String()
 	}
 	return i.PubKeyStr
+}
+
+// identityWire is the gob-safe representation of Identity.
+// It intentionally omits the Key field (solana.PrivateKey) to prevent
+// private key material from being serialized over the wire (QUIC stream).
+type identityWire struct {
+	KeyFile   string
+	PubKeyStr string
+}
+
+// GobEncode implements gob.GobEncoder to prevent private key serialization.
+// Only KeyFile and PubKeyStr are transmitted; the Key field is excluded.
+func (i Identity) GobEncode() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(identityWire{
+		KeyFile:   i.KeyFile,
+		PubKeyStr: i.PubKeyStr,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to gob-encode identity: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// GobDecode implements gob.GobDecoder to reconstruct Identity without private key.
+// After decoding, Key is nil — PubKey() will use PubKeyStr instead.
+func (i *Identity) GobDecode(data []byte) error {
+	var w identityWire
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&w); err != nil {
+		return fmt.Errorf("failed to gob-decode identity: %w", err)
+	}
+	i.KeyFile = w.KeyFile
+	i.PubKeyStr = w.PubKeyStr
+	i.Key = nil // explicitly nil — private key never comes from the wire
+	return nil
 }
