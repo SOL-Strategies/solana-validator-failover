@@ -92,6 +92,8 @@ Build from source or download the built package for your system from the [releas
 
 2. **Some focus and appreciation of what you're doing** — these can be high pucker factor operations regardless of tooling.
 
+3. **Local validator started with `--full-rpc-api`** — this tool calls `getClusterNodes` on the local RPC, which requires the validator to be started with the `--full-rpc-api` flag (Agave/Firedancer).
+
 ## Configuration
 
 ```yaml
@@ -135,6 +137,7 @@ validator:
 
   # local rpc address of node this program runs on
   # default: http://localhost:8899
+  # note: the validator must be started with --full-rpc-api (required for getClusterNodes)
   rpc_address: http://localhost:8899
 
   # tower file config
