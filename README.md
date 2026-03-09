@@ -161,6 +161,36 @@ validator:
       # default: 9898 - QUIC (udp) port to listen on
       port: 9898
 
+    # (optional) mutual TLS for the QUIC connection between validators.
+    # When disabled (the default), the connection uses an ephemeral self-signed
+    # certificate — encrypted but unauthenticated.
+    # When enabled, both nodes must present a certificate signed by the shared CA.
+    #
+    # Certificate requirements:
+    # - ca_cert: the same CA certificate must be present on both nodes
+    # - cert/key: each node's certificate must include a SAN matching the address
+    #   used in failover.peers — an IP SAN if the address is an IP, a DNS SAN if a hostname
+    #
+    # Generating certs (example using openssl):
+    #   # CA
+    #   openssl ecparam -name prime256v1 -genkey -noout -out ca.key
+    #   openssl req -new -x509 -key ca.key -out ca.crt -days 3650 -subj "/CN=failover-ca"
+    #
+    #   # Node cert with IP SAN (use DNS:hostname instead if peers use FQDNs)
+    #   openssl ecparam -name prime256v1 -genkey -noout -out node.key
+    #   openssl req -new -key node.key -out node.csr -subj "/CN=validator-node"
+    #   openssl x509 -req -in node.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+    #     -out node.crt -days 3650 -extfile <(printf "subjectAltName=IP:192.0.2.1")
+    tls:
+      # default: false
+      enabled: false
+      # path to the shared CA certificate (must be identical on both nodes)
+      ca_cert: /etc/solana-failover/tls/ca.crt
+      # path to this node's certificate (signed by ca_cert)
+      cert: /etc/solana-failover/tls/node.crt
+      # path to this node's private key
+      key: /etc/solana-failover/tls/node.key
+
     # golang template strings for command to set identity to active/passive
     # use this to set the appropriate command/args for your validator as required
     # available to this template will be:
@@ -303,6 +333,5 @@ make build-compose
 
 ## Laundry/wish list
 
-- [ ] TLS config
 - [ ] Refactor to make e2e testing easier - current setup not optimal
 - [ ] Rollbacks (to the extent it's possible)

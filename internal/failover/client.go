@@ -34,6 +34,10 @@ type ClientConfig struct {
 	SolanaRPCClient                solana.ClientInterface
 	RPCURL                         string
 	SkipTowerSync                  bool
+	// TLSConfig is an optional mTLS config. When non-nil, the client presents its
+	// certificate to the server and verifies the server's certificate against the CA.
+	// When nil, server certificate verification is skipped (InsecureSkipVerify).
+	TLSConfig *tls.Config
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
@@ -53,11 +57,19 @@ type Client struct {
 	serverName                     string
 	serverAddress                  string
 	skipTowerSync                  bool
+	tlsConfig                      *tls.Config // non-nil when mTLS is enabled
 }
 
 // NewClientFromConfig creates a new QUIC client from a configuration
 func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	var clientTLSConfig *tls.Config
+	if config.TLSConfig != nil {
+		cloned := config.TLSConfig.Clone()
+		cloned.NextProtos = []string{ProtocolName}
+		clientTLSConfig = cloned
+	}
 
 	client = &Client{
 		logger:                         log.With().Logger(),
@@ -73,6 +85,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
+		tlsConfig:                      clientTLSConfig,
 	}
 
 	err = client.connectToServer()
@@ -463,16 +476,35 @@ func (c *Client) tryQUICConnection() error {
 	}
 
 	tr := &quic.Transport{Conn: wrapped}
-	conn, err := tr.Dial(c.ctx, udpAddr, &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{ProtocolName},
-	}, nil)
+
+	quicTLSConfig := c.tlsConfig
+	if quicTLSConfig == nil {
+		quicTLSConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // intentional fallback when mTLS is not configured
+			NextProtos:         []string{ProtocolName},
+		}
+	}
+
+	conn, err := tr.Dial(c.ctx, udpAddr, quicTLSConfig, nil)
 	if err != nil {
 		tr.Close()
 		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
 		return err
 	}
-	// Connection successful, store it
+
+	if c.tlsConfig != nil {
+		tlsState := conn.ConnectionState().TLS
+		if len(tlsState.PeerCertificates) > 0 {
+			peer := tlsState.PeerCertificates[0]
+			c.logger.Info().
+				Str("remote_addr", conn.RemoteAddr().String()).
+				Str("subject", peer.Subject.String()).
+				Str("issuer", peer.Issuer.String()).
+				Time("expires", peer.NotAfter).
+				Msg("mTLS: server certificate verified")
+		}
+	}
+
 	c.Conn = conn
 	return nil
 }

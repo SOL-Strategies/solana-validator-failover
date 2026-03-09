@@ -1,8 +1,16 @@
 package validator
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -893,4 +901,133 @@ func BenchmarkValidator_IsPassive(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		validator.IsPassive()
 	}
+}
+
+// ============================================================================
+// Helpers for configureTLS tests
+// ============================================================================
+
+// generateValidatorTLSTestFiles creates temp cert/key files for mTLS validator tests.
+// Returns (caCertPath, certPath, keyPath).
+func generateValidatorTLSTestFiles(t *testing.T) (string, string, string) {
+	t.Helper()
+
+	// Generate CA key and self-signed cert.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	// Generate node key and cert signed by the CA (loopback IP SAN).
+	nodeKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	nodeTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "test-node"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	nodeDER, err := x509.CreateCertificate(rand.Reader, nodeTmpl, caCert, &nodeKey.PublicKey, caKey)
+	require.NoError(t, err)
+
+	nodeKeyDER, err := x509.MarshalECPrivateKey(nodeKey)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	caCertPath := filepath.Join(dir, "ca.crt")
+	certPath := filepath.Join(dir, "node.crt")
+	keyPath := filepath.Join(dir, "node.key")
+
+	require.NoError(t, os.WriteFile(caCertPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0600))
+	require.NoError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: nodeDER}), 0600))
+	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: nodeKeyDER}), 0600))
+
+	return caCertPath, certPath, keyPath
+}
+
+// ============================================================================
+// Tests for configureTLS
+// ============================================================================
+
+func TestConfigureTLS_Disabled(t *testing.T) {
+	v := createTestValidator(t).Validator
+
+	err := v.configureTLS(TLSConfig{Enabled: false})
+
+	assert.NoError(t, err)
+	assert.Nil(t, v.serverTLSConfig)
+	assert.Nil(t, v.clientTLSConfig)
+}
+
+func TestConfigureTLS_EnabledMissingCACert(t *testing.T) {
+	v := createTestValidator(t).Validator
+
+	err := v.configureTLS(TLSConfig{Enabled: true})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tls.ca_cert is required")
+}
+
+func TestConfigureTLS_EnabledMissingCert(t *testing.T) {
+	v := createTestValidator(t).Validator
+
+	err := v.configureTLS(TLSConfig{Enabled: true, CACert: "/some/ca.crt"})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tls.cert is required")
+}
+
+func TestConfigureTLS_EnabledMissingKey(t *testing.T) {
+	v := createTestValidator(t).Validator
+
+	err := v.configureTLS(TLSConfig{Enabled: true, CACert: "/some/ca.crt", Cert: "/some/node.crt"})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tls.key is required")
+}
+
+func TestConfigureTLS_InvalidPaths(t *testing.T) {
+	v := createTestValidator(t).Validator
+
+	err := v.configureTLS(TLSConfig{
+		Enabled: true,
+		CACert:  "/nonexistent/ca.crt",
+		Cert:    "/nonexistent/node.crt",
+		Key:     "/nonexistent/node.key",
+	})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tls:")
+}
+
+func TestConfigureTLS_Success(t *testing.T) {
+	v := createTestValidator(t).Validator
+	caCertPath, certPath, keyPath := generateValidatorTLSTestFiles(t)
+
+	err := v.configureTLS(TLSConfig{
+		Enabled: true,
+		CACert:  caCertPath,
+		Cert:    certPath,
+		Key:     keyPath,
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, v.serverTLSConfig)
+	assert.NotNil(t, v.clientTLSConfig)
 }

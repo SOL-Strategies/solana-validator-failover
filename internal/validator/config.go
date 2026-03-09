@@ -38,7 +38,21 @@ type FailoverConfig struct {
 	Monitor                       MonitorConfig       `mapstructure:"monitor"`
 	Peers                         PeersConfig         `mapstructure:"peers"`
 	Server                        ServerConfig        `mapstructure:"server"`
+	TLS                           TLSConfig           `mapstructure:"tls"`
 	IsDryRun                      bool
+}
+
+// TLSConfig holds the optional mTLS configuration for the QUIC connection between validators.
+// When Enabled is false (the default), the connection uses an ephemeral self-signed certificate
+// and the client skips server verification — encrypted but unauthenticated.
+// When Enabled is true, both sides must present a certificate signed by the shared CA.
+// Node certificates must include a SAN matching the address used in failover.peers —
+// an IP SAN if the address is an IP, or a DNS SAN if a hostname.
+type TLSConfig struct {
+	Enabled bool   `mapstructure:"enabled"` // default: false
+	CACert  string `mapstructure:"ca_cert"` // path to CA certificate (must be present on both nodes)
+	Cert    string `mapstructure:"cert"`    // path to this node's certificate (signed by CACert)
+	Key     string `mapstructure:"key"`     // path to this node's private key
 }
 
 // PeersConfig is the configuration for the peers
