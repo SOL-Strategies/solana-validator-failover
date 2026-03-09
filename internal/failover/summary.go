@@ -72,12 +72,12 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 		"FormatSlot": func(n uint64) string {
 			return humanize.Comma(int64(n))
 		},
-		// SlotsSuffix returns ", over N slots" when N > 0, otherwise "".
+		// SlotsSuffix returns ", same slot" when N == 0, otherwise ", over N slots".
 		"SlotsSuffix": func(n uint64) string {
 			if n == 0 {
-				return ""
+				return ", same slot"
 			}
-			return fmt.Sprintf(" over %s slots", humanize.Comma(int64(n)))
+			return fmt.Sprintf(", over %s slots", humanize.Comma(int64(n)))
 		},
 		// PadRight pads s with trailing spaces to the given width (ASCII labels only).
 		"PadRight": func(s string, width int) string {
