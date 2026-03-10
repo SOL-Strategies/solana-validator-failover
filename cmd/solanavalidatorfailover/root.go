@@ -56,6 +56,9 @@ func Execute() {
 }
 
 func init() {
+	// Suppress quic-go's UDP receive buffer size warning — informational only,
+	// doesn't affect functionality. See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes
+	os.Setenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING", "true") //nolint:errcheck
 	cobra.OnInitialize(initLog)
 }
 
