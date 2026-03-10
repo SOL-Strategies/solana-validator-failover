@@ -18,6 +18,16 @@ const (
 
 	// MessageTypeFileTransfer is the message type for file transfer
 	MessageTypeFileTransfer byte = 2
+
+	// WireProtocolVersion is the binary framing version for QUIC streams.
+	// Bump this whenever the stream framing or gob types change in a
+	// backward-incompatible way (e.g. adding GobEncode/GobDecode to a type).
+	// Both nodes must agree on this version before any gob work starts.
+	//
+	// History:
+	//   1 = original (pre-v0.1.18) — no version byte, implicit
+	//   2 = version byte added after msg_type / before first gob frame (v0.1.18+)
+	WireProtocolVersion byte = 2
 )
 
 // hookEnvMapParams is the parameters for the hook environment map

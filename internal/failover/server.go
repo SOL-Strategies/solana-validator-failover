@@ -233,6 +233,14 @@ func (s *Server) handleStream(stream *quic.Stream) {
 		return
 	}
 
+	// Check wire protocol version before any gob work.
+	// This gives a clear error when nodes are running incompatible versions,
+	// rather than the cryptic gob type-mismatch that would otherwise surface.
+	if err := readAndCheckWireVersion(stream); err != nil {
+		s.logger.Fatal().Err(err).Msg("aborting: " + err.Error())
+		return
+	}
+
 	switch msgType[0] {
 	case MessageTypeFailoverInitiateRequest: // failover
 		s.logger.Debug().Msgf("Received failover initiate request")
@@ -246,6 +254,13 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	// read the message and parse it into a Stream struct
 	s.failoverStream = NewFailoverStream(stream)
 	if s.failoverStream.Decode() != nil {
+		return
+	}
+
+	// Write our wire protocol version in the server→client direction before
+	// any gob encode so the client can verify compatibility symmetrically.
+	if err := writeWireVersion(stream); err != nil {
+		s.logger.Error().Err(err).Msg("failed to write wire version to client")
 		return
 	}
 
