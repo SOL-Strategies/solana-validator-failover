@@ -399,9 +399,9 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	}
 
 	if s.skipTowerSync {
-		s.logger.Info().Msgf("🟤 Failover started - skipping tower file sync")
+		s.logger.Info().Msg("Failover started - skipping tower file sync")
 	} else {
-		s.logger.Info().Msgf("🟤 Failover started - waiting for tower file from %s", s.failoverStream.GetActiveNodeInfo().Hostname)
+		s.logger.Info().Msgf("Failover started - waiting for tower file from %s", s.failoverStream.GetActiveNodeInfo().Hostname)
 
 		// Wait for the updated node info with tower file bytes
 		if err := s.failoverStream.Decode(); err != nil {
@@ -427,7 +427,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 			)
 			s.logger.Error().Msg("then run:")
 			fmt.Printf("  %s \n", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
-			s.logger.Fatal().Msg("something has turned to 💩")
+			s.logger.Fatal().Msg("tower file hash mismatch - failover aborted")
 			return
 		}
 
@@ -444,7 +444,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		}
 
 		s.failoverStream.SetPassiveNodeSyncTowerFileEndTime()
-		s.logger.Info().Msg("👉 Received tower file")
+		s.logger.Info().Msg("Received tower file")
 	}
 
 	// set identity to active
@@ -454,7 +454,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	}
 	s.logger.Info().
 		Str("command", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand).
-		Msgf("👉%sSetting identity to %s - %s",
+		Msgf("%sSetting identity to %s - %s",
 			dryRunPrefix,
 			style.RenderActiveString(strings.ToUpper(constants.NodeRoleActive), false),
 			style.RenderActiveString(s.failoverStream.GetPassiveNodeInfo().Identities.Active.PubKey(), false),

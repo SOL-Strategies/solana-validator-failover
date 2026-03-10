@@ -235,10 +235,10 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 	}
 
 	// Start the command
-	hookLogger.Info().
+	hookLogger.Debug().
 		Str("command", command).
 		Str("args", fmt.Sprintf("[%s]", strings.Join(args, ", "))).
-		Msgf("🪝  Running hook %s", h.Name)
+		Msgf("Running hook %s", h.Name)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("Hook %s failed to start: %v", h.Name, err)
 	}
@@ -283,10 +283,10 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 	wg.Wait()
 
 	if err != nil {
-		return fmt.Errorf("🪝 🔴 Hook %s failed: %v", h.Name, err)
+		return fmt.Errorf("Hook %s failed: %v", h.Name, err)
 	}
 
-	hookLogger.Info().Msgf("🪝  Hook %s completed successfully", h.Name)
+	hookLogger.Debug().Msgf("Hook %s completed successfully", h.Name)
 	return nil
 }
 
@@ -300,8 +300,8 @@ var (
 
 // styledStreamOutputString creates styled output for stream content with the requested format
 func styledStreamOutputString(stream string, text string, hookName string, hookType string, hookIndex int, totalHooks int) string {
-	// Format: 🪝 hooks:<pre|post>:[1/1 <hook-name>]: ▶ <script output>
-	prefix := fmt.Sprintf("🪝  hooks:%s:[%d/%d %s]:", hookType, hookIndex, totalHooks, hookName)
+	// Format: hooks:<pre|post>:[1/1 <hook-name>]: ▶ <script output>
+	prefix := fmt.Sprintf("hooks:%s:[%d/%d %s]:", hookType, hookIndex, totalHooks, hookName)
 	styledPrefix := PrefixStyle.Render(prefix)
 
 	// Apply color to the script output based on stream type
