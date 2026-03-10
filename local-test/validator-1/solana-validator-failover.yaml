@@ -2,7 +2,7 @@ validator:
   bin: ./scripts/agave-validator-mock.sh
   cluster: mainnet-beta
   public_ip: 202.8.8.186 # don't set IRL
-  hostname: validator-1
+  name: validator-1
   identities:
     active: ./local-test/validator-1/active-identity.json
     passive: ./local-test/validator-1/passive-identity.json

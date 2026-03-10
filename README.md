@@ -135,6 +135,10 @@ validator:
   # to override the default (e.g. to use a private RPC), set this explicitly.
   # cluster_rpc_url: <solana_compatible_rpc_endpoint>
 
+  # optional display name used in failover plans, logs, and hook templates
+  # defaults to OS hostname if not set
+  # name: london
+
   # average slot duration, used to estimate time to next leader slot
   # default: 400ms
   # average_slot_duration: 400ms

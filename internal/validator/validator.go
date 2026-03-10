@@ -163,7 +163,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	}
 
 	// get hostname
-	err = v.configureHostname(cfg.Hostname)
+	err = v.configureHostname(cfg.Name)
 	if err != nil {
 		return err
 	}
@@ -546,24 +546,20 @@ func (v *Validator) GetHostname() (string, error) {
 	return os.Hostname()
 }
 
-// configureHostname ensures the hostname is valid and sets it
-func (v *Validator) configureHostname(hostname string) (err error) {
-	if hostname != "" {
-		v.Hostname = hostname
-		v.logger.Debug().
-			Str("hostname", v.Hostname).
-			Msg("hostname set in config")
+// configureHostname sets the node's display name from validator.name if provided,
+// otherwise falls back to the OS hostname.
+func (v *Validator) configureHostname(name string) (err error) {
+	if name != "" {
+		v.Hostname = name
+		v.logger.Debug().Str("name", v.Hostname).Msg("name set from config")
 		return nil
 	}
 
-	hostname, err = v.GetHostname()
+	v.Hostname, err = v.GetHostname()
 	if err != nil {
 		return err
 	}
-	v.Hostname = hostname
-	v.logger.Debug().
-		Str("hostname", v.Hostname).
-		Msg("hostname set")
+	v.logger.Debug().Str("hostname", v.Hostname).Msg("hostname set from OS")
 	return nil
 }
 

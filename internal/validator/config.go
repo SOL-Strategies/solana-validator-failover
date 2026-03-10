@@ -18,8 +18,8 @@ type Config struct {
 	RPCAddress          string            `mapstructure:"rpc_address"`
 	LedgerDir           string            `mapstructure:"ledger_dir"`
 	Tower               TowerConfig       `mapstructure:"tower"`
+	Name                string            `mapstructure:"name"`      // optional display name used in plans/logs; defaults to OS hostname
 	PublicIP            string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
-	Hostname            string            `mapstructure:"hostname"`  // subject for removal once poor-man's testing setup is removed
 }
 
 // TowerConfig is the configuration for the towerfile
