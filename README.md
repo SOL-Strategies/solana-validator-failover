@@ -4,7 +4,7 @@
 
 Simple p2p Solana validator failovers. This tool helps automate _planned_ failovers. To automate _unexpected_ failovers, see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
 
-![solana-validator-failover](vhs/failover-passive-to-active.png)
+![solana-validator-failover](docs/failover.png)
 
 A QUIC-based program that orchestrates safe, fast failovers between Solana validators. [This post](https://blog.solstrategies.io/quic-solana-validator-failovers-738d712ac737) covers the background in more detail. In summary, it coordinates three steps across both nodes:
 
@@ -30,9 +30,9 @@ Running `solana-validator-failover run` on either node **automatically detects t
 
 **You run the command on both nodes.** Start the passive node first so it is listening when the active node connects.
 
-![solana-validator-failover passive-to-active](vhs/failover-passive-to-active.gif)
+![solana-validator-failover passive-to-active](docs/failover-passive-to-active.gif)
 
-![solana-validator-failover active-to-passive](vhs/failover-active-to-passive.gif)
+![solana-validator-failover active-to-passive](docs/failover-active-to-passive.gif)
 
 ## Usage
 

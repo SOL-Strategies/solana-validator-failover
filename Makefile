@@ -34,3 +34,18 @@ test:
 
 build:
 	BUILD_DIR=$(BUILD_DIR) APP_NAME=$(APP_NAME) APP_VERSION=$(APP_VERSION) BUILD_OS_ARCH_LIST=$(BUILD_OS_ARCH_LIST) CI=$(CI) ./scripts/build.sh
+
+# ── Demo / GIF generation ──────────────────────────────────────────────────────
+
+demo:
+	docker compose -f integration/docker-compose.demo.yml up --build -d
+	@echo "mock-solana running on localhost:8899 (chicago=active)"
+	@echo "run 'make demo-down' to stop"
+
+demo-down:
+	docker compose -f integration/docker-compose.demo.yml down
+
+gif:
+	@which vhs >/dev/null 2>&1 || (echo "vhs not found — install from https://github.com/charmbracelet/vhs" && exit 1)
+	vhs integration/tapes/failover-passive-to-active.tape
+	vhs integration/tapes/failover-active-to-passive.tape

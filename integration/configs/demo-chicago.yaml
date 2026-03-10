@@ -1,0 +1,22 @@
+validator:
+  bin: ./scripts/agave-validator-mock.sh
+  cluster: integration
+  cluster_rpc_url: http://localhost:8899
+  hostname: chicago
+  public_ip: 10.0.0.1
+  identities:
+    active: ./integration/test-keys/active-identity.json
+    passive: ./integration/test-keys/validator-1-passive.json
+  rpc_address: http://localhost:8899?validator=chicago
+  ledger_dir: ./integration/test-ledgers/chicago
+  tower:
+    dir: ./integration/test-towers/chicago
+  average_slot_duration: 400ms
+  failover:
+    peers:
+      london:
+        address: localhost:9898
+    monitor:
+      credit_samples:
+        count: 2
+        interval: 1s

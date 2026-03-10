@@ -447,4 +447,3 @@ func (s *Stream) GetVoteCreditRankDifference() (difference, first, last int, err
 	// invert the difference (lower number is better)
 	return -1 * difference, first, last, nil
 }
-

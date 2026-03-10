@@ -1,0 +1,27 @@
+validator:
+  bin: ./scripts/fdctl-mock.sh
+  cluster: integration
+  cluster_rpc_url: http://localhost:8899
+  hostname: london
+  public_ip: 10.0.0.2
+  identities:
+    active: ./integration/test-keys/active-identity.json
+    passive: ./integration/test-keys/validator-2-passive.json
+  rpc_address: http://localhost:8899?validator=london
+  ledger_dir: ./integration/test-ledgers/london
+  tower:
+    dir: ./integration/test-towers/london
+    auto_empty_when_passive: true
+  average_slot_duration: 400ms
+  failover:
+    set_identity_active_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml --force {{ .Identities.Active.KeyFile }}"
+    set_identity_passive_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml {{ .Identities.Passive.KeyFile }}"
+    server:
+      port: 9898
+    peers:
+      chicago:
+        address: localhost:9897
+    monitor:
+      credit_samples:
+        count: 2
+        interval: 1s
