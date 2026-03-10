@@ -8,6 +8,7 @@ tmp*
 tmp*/
 local-test/**/*.bin
 local-test/**/*.json
+integration/test-towers/london/*.bin
 pkg/constants/app.version
 scripts/air-cmd.sh
 release-notes.md

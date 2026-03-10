@@ -1,0 +1,30 @@
+FROM golang:1.26.0-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+COPY . .
+
+RUN go mod download && go mod tidy
+RUN GOOS=linux GOARCH=amd64 go build -mod=mod -o bin/mock-solana ./integration/mock-solana
+
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates tzdata
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY --from=builder /app/bin/mock-solana ./bin/mock-solana
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
+EXPOSE 8899
+
+CMD ["./bin/mock-solana"]

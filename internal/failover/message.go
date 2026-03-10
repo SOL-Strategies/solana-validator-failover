@@ -25,4 +25,3 @@ type Message struct {
 	// key is the identity pubkey
 	CreditSamples CreditSamples
 }
-

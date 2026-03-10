@@ -507,7 +507,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		s.logger.Error().Err(renderErr).Msg("failed to render failover summary")
 	} else {
 		s.logger.Info().Msg("Post-failover state:")
-		fmt.Print(style.RenderMessageString(strings.Trim(rendered, "\n")))
+		fmt.Println(style.RenderMessageString(strings.Trim(rendered, "\n")))
 	}
 
 	// monitor the credits by pulling configured samples

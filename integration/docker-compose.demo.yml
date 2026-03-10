@@ -1,0 +1,9 @@
+services:
+  mock-solana:
+    build:
+      context: ..
+      dockerfile: integration/Dockerfile.mock-solana
+    ports:
+      - "8899:8899"
+    environment:
+      - ACTIVE_VALIDATOR=chicago

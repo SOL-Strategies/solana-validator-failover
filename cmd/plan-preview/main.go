@@ -78,8 +78,8 @@ func main() {
 		SkipTowerSync:   *skipTower,
 		ActiveNodeInfo:  activeNode,
 		PassiveNodeInfo: passiveNode,
-		AppVersion: "dev",
-		Hooks:      exampleHooks,
+		AppVersion:      "dev",
+		Hooks:           exampleHooks,
 	}
 
 	rendered, err := failover.RenderFailoverPlan(data)
