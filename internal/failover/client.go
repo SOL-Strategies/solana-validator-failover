@@ -121,6 +121,13 @@ func (c *Client) Start() {
 		return
 	}
 
+	// Send wire protocol version before any gob encoding so the server can
+	// verify compatibility before attempting to decode the gob payload.
+	if err := writeWireVersion(stream); err != nil {
+		c.logger.Error().Err(err).Msg("Failed to send wire protocol version")
+		return
+	}
+
 	// send message with your own info
 	c.failoverStream.SetActiveNodeInfo(c.activeNodeInfo)
 	err = c.failoverStream.Encode()
@@ -133,6 +140,11 @@ func (c *Client) Start() {
 	// wait for failover signal from server before proceeding
 	sp := spinner.New().Title(fmt.Sprintf("Connected to %s, waiting for failover signal...", style.RenderPassiveString(c.serverName, false)))
 	sp.ActionWithErr(func(ctx context.Context) error {
+		// Read the server's wire protocol version before any gob decoding.
+		// A mismatch here means the passive node is running an incompatible version.
+		if err := readAndCheckWireVersion(stream); err != nil {
+			return err
+		}
 		return c.failoverStream.Decode()
 	})
 	err = sp.Run()
