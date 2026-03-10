@@ -175,7 +175,7 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Info().Msg("🟢 Failover started")
+	c.logger.Info().Msg("Failover started")
 
 	// wait until the next slot starts so we switch right at the beginning of the next slot
 	// this ensures we're early in the slot when we start the switch
@@ -195,7 +195,7 @@ func (c *Client) Start() {
 	}
 	c.logger.Info().
 		Str("command", c.failoverStream.GetActiveNodeInfo().SetIdentityCommand).
-		Msgf("👉%sSetting identity to %s - %s",
+		Msgf("%sSetting identity to %s - %s",
 			dryRunPrefix,
 			style.RenderPassiveString(strings.ToUpper(constants.NodeRolePassive), false),
 			style.RenderPassiveString(c.failoverStream.GetActiveNodeInfo().Identities.Passive.PubKey(), false),
@@ -215,10 +215,10 @@ func (c *Client) Start() {
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 
 	if skipTowerSync {
-		c.logger.Info().Msgf("⏭️  Skipping tower file sync")
+		c.logger.Info().Msg("Skipping tower file sync")
 		// Don't send anything - server won't wait for tower file when skipTowerSync is true
 	} else {
-		c.logger.Info().Msgf("👉 Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
+		c.logger.Info().Msgf("Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
 
 		// Read the tower file into TowerFileBytes
 		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
@@ -249,7 +249,7 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Info().Msg("🟤 Failover complete")
+	c.logger.Info().Msg("Failover complete")
 
 	// run post hooks now this is passive and active node says all is peachy
 	c.hooks.RunPostWhenPassive(c.getHookEnvMap(hookEnvMapParams{
