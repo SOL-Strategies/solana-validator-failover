@@ -2,7 +2,7 @@ validator:
   bin: ./scripts/fdctl-mock.sh
   cluster: mainnet-beta
   public_ip: 67.213.119.47 # don't set IRL
-  hostname: validator-2
+  name: validator-2
   identities:
     active: ./local-test/validator-2/active-identity.json
     passive: ./local-test/validator-2/passive-identity.json

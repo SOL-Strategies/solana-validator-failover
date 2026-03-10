@@ -2,7 +2,7 @@ validator:
   bin: ./scripts/fdctl-mock.sh
   cluster: integration
   cluster_rpc_url: http://localhost:8899
-  hostname: london
+  name: london
   public_ip: 10.0.0.2
   identities:
     active: ./integration/test-keys/active-identity.json

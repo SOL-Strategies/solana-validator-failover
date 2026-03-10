@@ -2,7 +2,7 @@ validator:
   bin: ./scripts/agave-validator-mock.sh
   cluster: integration
   cluster_rpc_url: http://localhost:8899
-  hostname: chicago
+  name: chicago
   public_ip: 10.0.0.1
   identities:
     active: ./integration/test-keys/active-identity.json
