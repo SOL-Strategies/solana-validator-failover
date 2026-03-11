@@ -151,6 +151,17 @@ func (s Stream) GetRollbackRequired() bool {
 	return s.message.RollbackRequired
 }
 
+// SetActiveRollbackEnabled records whether the active node (client) has rollback configured.
+// Called by the client before sending its initial message so the server can detect mismatches.
+func (s *Stream) SetActiveRollbackEnabled(enabled bool) {
+	s.message.ActiveRollbackEnabled = enabled
+}
+
+// GetActiveRollbackEnabled returns whether the active node (client) has rollback configured.
+func (s Stream) GetActiveRollbackEnabled() bool {
+	return s.message.ActiveRollbackEnabled
+}
+
 // SetFailoverStartSlot sets the failover start slot
 func (s *Stream) SetFailoverStartSlot(failoverStartSlot uint64) {
 	s.message.FailoverStartSlot = failoverStartSlot
