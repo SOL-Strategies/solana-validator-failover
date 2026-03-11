@@ -1,9 +1,26 @@
 package failover
 
 import (
+	"errors"
 	"fmt"
 	"io"
+
+	"github.com/quic-go/quic-go"
 )
+
+// cryptoNoApplicationProtocol is the QUIC transport error code for TLS alert 120
+// ("no_application_protocol"), sent when ALPN negotiation fails because the peer
+// does not support any of the offered protocol names.
+// QUIC maps TLS alerts to error codes as 0x100 + alert_code (RFC 9001 §4.8).
+const cryptoNoApplicationProtocol = quic.TransportErrorCode(0x178)
+
+// isALPNMismatch reports whether err is a QUIC ALPN negotiation failure.
+// This happens when the client and server advertise different ProtocolName
+// values, meaning they are running incompatible wire protocol versions.
+func isALPNMismatch(err error) bool {
+	var te *quic.TransportError
+	return errors.As(err, &te) && te.ErrorCode == cryptoNoApplicationProtocol
+}
 
 // WireVersionMismatchError is returned when the peer's wire protocol version
 // does not match ours. It carries both versions for a clear error message.
