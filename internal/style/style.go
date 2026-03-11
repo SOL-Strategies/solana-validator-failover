@@ -55,7 +55,7 @@ var (
 	MessageStyle = lipgloss.NewStyle().
 			Align(lipgloss.Left).
 			Width(150).
-			Padding(1)
+			Padding(1, 1, 0, 1)
 
 	// LogLevels styles - stolen from https://github.com/charmbracelet/log/blob/main/styles.go
 	LogLevels = map[string]lipgloss.Style{
