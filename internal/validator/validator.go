@@ -34,6 +34,7 @@ type FailoverParams struct {
 	SkipTowerSync         bool
 	AutoConfirm           bool   // -y/--yes: skip all interactive confirmations
 	ToPeer                string // --to-peer: auto-select peer by name or IP (active node only)
+	RollbackEnabled       bool   // --rollback-enabled/-r: force-enable rollback regardless of config
 }
 
 // Peers is a map of peers
@@ -224,6 +225,11 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 	}
 
 	params.MinTimeToLeaderSlot = v.MinimumTimeToLeaderSlot
+
+	if params.RollbackEnabled && !v.Rollback.Enabled {
+		log.Debug().Msg("--rollback-enabled flag set: overriding rollback.enabled to true")
+		v.Rollback.Enabled = true
+	}
 
 	if v.IsActive() {
 		if params.AutoConfirm && params.ToPeer != "" {
