@@ -134,6 +134,7 @@ func (c *Client) Start() {
 
 	// send message with your own info
 	c.failoverStream.SetActiveNodeInfo(c.activeNodeInfo)
+	c.failoverStream.SetActiveRollbackEnabled(c.rollback.Enabled)
 	err = c.failoverStream.Encode()
 	if err != nil {
 		return

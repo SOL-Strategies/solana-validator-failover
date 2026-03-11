@@ -14,6 +14,7 @@ type Message struct {
 	IsSuccessfullyCompleted          bool
 	SkipTowerSync                    bool
 	RollbackRequired                 bool
+	ActiveRollbackEnabled            bool
 	ActiveNodeSetIdentityStartTime   time.Time
 	ActiveNodeSetIdentityEndTime     time.Time
 	ActiveNodeSyncTowerFileStartTime time.Time

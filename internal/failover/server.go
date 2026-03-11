@@ -323,6 +323,26 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	activeRPCURL := s.failoverStream.GetActiveNodeInfo().RPCAddress
 	passiveRPCURL := s.failoverStream.GetPassiveNodeInfo().RPCAddress
 
+	// Abort if rollback is enabled on one side but not the other.
+	// Partial rollback is worse than no rollback — one node reverts while the other stays passive.
+	clientRollback := s.failoverStream.GetActiveRollbackEnabled()
+	serverRollback := s.rollback.Enabled
+	if serverRollback != clientRollback {
+		var msg string
+		if serverRollback {
+			msg = "rollback mismatch: this node has rollback.enabled=true but the active node does not"
+		} else {
+			msg = "rollback mismatch: the active node has rollback.enabled=true but this node does not"
+		}
+		msg += " — both nodes must have rollback identically configured; fix the config and retry"
+		s.failoverStream.SetErrorMessage(msg)
+		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+			s.logger.Error().Err(encodeErr).Msg("failed to send error message to client")
+		}
+		s.logger.Fatal().Msg(msg)
+		return
+	}
+
 	s.logger.Info().Msgf("%s connected from %s - failover plan:", s.failoverStream.GetActiveNodeInfo().Hostname, s.activeConn.RemoteAddr())
 
 	if err := s.failoverStream.ConfirmFailover(s.hooks, s.rollback, activeRPCURL, passiveRPCURL, s.autoConfirm); err != nil {
@@ -488,11 +508,11 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	if err != nil {
 		s.logger.Error().Err(err).Msgf("failed to set identity to active with command: %s", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
 		if s.rollback.Enabled {
-			s.logger.Warn().Msg("rollback enabled: signalling client to rollback, then running server rollback to passive")
+			// Both sides have rollback enabled (mismatch is caught earlier).
+			s.logger.Warn().Msg("rollback enabled: signalling active node to revert, then re-asserting passive identity")
 			s.failoverStream.SetRollbackRequired(true)
 			// best-effort — client may already be gone; ignore encode error
 			_ = s.failoverStream.Encode()
-			// server re-asserts passive identity
 			if rbErr := RunRollbackToPassive(s.rollback, s.getHookEnvMap(hookEnvMapParams{
 				isDryRunFailover: s.isDryRunFailover,
 				isPostFailover:   true,
