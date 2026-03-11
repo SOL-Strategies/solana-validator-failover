@@ -1,9 +1,14 @@
 package failover
 
-const (
-	// ProtocolName is the name of the QUIC protocol
-	ProtocolName = "solana-validator-failover"
+import "fmt"
 
+// ProtocolName is the QUIC ALPN identifier for this protocol.
+// It encodes WireProtocolVersion so that nodes running different wire versions
+// are rejected at the TLS handshake level before any stream data is exchanged.
+// When WireProtocolVersion is bumped, ProtocolName changes automatically.
+var ProtocolName = fmt.Sprintf("solana-validator-failover/%d", WireProtocolVersion)
+
+const (
 	// DefaultPort is the default port for the QUIC server
 	DefaultPort = 9898
 

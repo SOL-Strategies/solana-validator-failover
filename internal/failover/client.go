@@ -500,6 +500,13 @@ func (c *Client) tryQUICConnection() error {
 	conn, err := tr.Dial(c.ctx, udpAddr, quicTLSConfig, nil)
 	if err != nil {
 		tr.Close()
+		if isALPNMismatch(err) {
+			// Fatal logs and calls os.Exit(1) — the spinner will not retry.
+			c.logger.Fatal().Msg(
+				"passive node rejected connection: incompatible wire protocol version — " +
+					"ensure both nodes run the same version of solana-validator-failover",
+			)
+		}
 		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
 		return err
 	}
