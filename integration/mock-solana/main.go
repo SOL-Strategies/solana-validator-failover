@@ -29,20 +29,22 @@ var validatorMeta = map[string]struct {
 
 // MockSolanaServer simulates a Solana RPC node and exposes a control API.
 type MockSolanaServer struct {
-	mu               sync.RWMutex
-	activeValidator  string          // which validator currently holds the active identity
-	disconnected     map[string]bool // validators removed from gossip
-	unhealthy        map[string]bool // validators whose local health check returns unhealthy
-	callingValidator string          // populated from ?validator= query param per request
-	slotCounter      atomic.Uint64
+	mu                sync.RWMutex
+	activeValidator   string          // which validator currently holds the active identity
+	disconnected      map[string]bool // validators removed from gossip
+	unhealthy         map[string]bool // validators whose local health check returns unhealthy
+	failNextSetActive map[string]bool // validators whose next set-identity-to-active call should fail
+	callingValidator  string          // populated from ?validator= query param per request
+	slotCounter       atomic.Uint64
 }
 
 // NewMockSolanaServer creates a new MockSolanaServer with slot auto-increment.
 func NewMockSolanaServer() *MockSolanaServer {
 	s := &MockSolanaServer{
-		activeValidator: os.Getenv("ACTIVE_VALIDATOR"),
-		disconnected:    make(map[string]bool),
-		unhealthy:       make(map[string]bool),
+		activeValidator:   os.Getenv("ACTIVE_VALIDATOR"),
+		disconnected:      make(map[string]bool),
+		unhealthy:         make(map[string]bool),
+		failNextSetActive: make(map[string]bool),
 	}
 	s.slotCounter.Store(startSlot)
 	// Increment slot every 400ms to simulate real Solana slot progression.
@@ -195,8 +197,13 @@ func (s *MockSolanaServer) handleAction(w http.ResponseWriter, r *http.Request) 
 	case "reset":
 		s.disconnected = make(map[string]bool)
 		s.unhealthy = make(map[string]bool)
+		s.failNextSetActive = make(map[string]bool)
 		s.activeValidator = action.Target
 		log.Printf("[control] reset: active=%q", action.Target)
+
+	case "fail_next_set_active":
+		s.failNextSetActive[action.Target] = true
+		log.Printf("[control] fail_next_set_active: %q — next set-identity-to-active call will fail", action.Target)
 
 	default:
 		s.mu.Unlock()
@@ -351,12 +358,37 @@ func (s *MockSolanaServer) getVoteAccounts() VoteAccountsResult {
 	}
 }
 
+// handleFailCheck is called by mock validator scripts before executing a set-identity-to-active
+// command. It returns {"fail": true} (and clears the flag) when fail_next_set_active was set
+// for the requesting validator, signalling the script to exit 1 and trigger rollback.
+//
+// Query params: ?validator=<name>&action=set_active
+func (s *MockSolanaServer) handleFailCheck(w http.ResponseWriter, r *http.Request) {
+	validator := r.URL.Query().Get("validator")
+	action := r.URL.Query().Get("action")
+
+	shouldFail := false
+	if validator != "" && action == "set_active" {
+		s.mu.Lock()
+		if s.failNextSetActive[validator] {
+			shouldFail = true
+			delete(s.failNextSetActive, validator)
+			log.Printf("[fail-check] validator=%q action=%q → FAIL (flag cleared)", validator, action)
+		}
+		s.mu.Unlock()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"fail": shouldFail})
+}
+
 func main() {
 	server := NewMockSolanaServer()
 
 	http.HandleFunc("/", server.handleRPC)
 	http.HandleFunc("/action", server.handleAction)
 	http.HandleFunc("/public-ip", server.handlePublicIP)
+	http.HandleFunc("/fail-check", server.handleFailCheck)
 
 	port := ":8899"
 	log.Printf("mock-solana starting on %s", port)

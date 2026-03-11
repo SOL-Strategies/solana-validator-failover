@@ -21,6 +21,7 @@ type PlanData struct {
 	PassiveNodeInfo     NodeInfo
 	AppVersion          string
 	Hooks               hooks.FailoverHooks
+	Rollback            hooks.RollbackConfig
 	ActivePreHookData   hooks.HookTemplateData
 	ActivePostHookData  hooks.HookTemplateData
 	PassivePreHookData  hooks.HookTemplateData
@@ -60,7 +61,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		// (identity changes, tower sync, hooks) sits on its own line. Continuation
 		// lines are indented to align with the value start after "   Plan: ".
 		// The indent is 11 chars: 2 (template leading spaces) + 8 (label) + 1 (space).
-		"planSummaryLines": func(activeHostname, passiveHostname string, skipTowerSync bool, h hooks.FailoverHooks) string {
+		"planSummaryLines": func(activeHostname, passiveHostname string, skipTowerSync bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
 			const indent = "           " // 11 spaces
 
 			identityLine := fmt.Sprintf("2 identity changes (%s %s, %s %s)",
@@ -93,6 +94,10 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 			}
 			if total > 0 {
 				lines = append(lines, fmt.Sprintf("%d hooks (%s)", total, strings.Join(parts, ", ")))
+			}
+
+			if rollback.Enabled {
+				lines = append(lines, "1 rollback plan (if failover fails)")
 			}
 
 			return strings.Join(lines, "\n"+indent)
@@ -171,8 +176,14 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 {{ RenderHooks .Hooks.Post.WhenActive .PassiveNodeInfo.Hostname "post" }}{{- end }}{{- if .Hooks.Post.WhenPassive }}
   {{ Purple (printf "%d — run hooks %s post-passive" (Step) .ActiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Post.WhenPassive .ActiveNodeInfo.Hostname "post" }}{{- end }}
+{{- if .Rollback.Enabled }}
+
+  {{ Warning "Rollback" }} if failover fails:
+      {{ Warning "!" }} {{ Purple .ActiveNodeInfo.Hostname }} → {{ Active "active" false }}: {{ LightGrey .Rollback.ToActive.ResolvedCmd }}
+      {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} → {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
+{{- end }}
   {{ HRule }}
-  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks }}
+  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ LightGrey .AppVersion }}
   {{ if .IsDryRun }}{{ Blue "   Note:" }} dry run — re-run with {{ LightGrey "--not-a-drill" }} on the passive node to do for realsies.{{ else }}{{ Warning "Warning:" }} This is a real failover — identities will be changed on both nodes.{{ end }}
   {{ HRule }}
@@ -189,6 +200,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		"ActiveNodeInfo":  data.ActiveNodeInfo,
 		"AppVersion":      data.AppVersion,
 		"Hooks":           data.Hooks,
+		"Rollback":        data.Rollback,
 	}); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}

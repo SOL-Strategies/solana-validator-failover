@@ -20,3 +20,11 @@ validator:
       credit_samples:
         count: 2
         interval: 1s
+    rollback:
+      enabled: true
+      to_active:
+        hooks:
+          post:
+            - name: rollback-done
+              command: echo
+              args: ["[chicago] rollback to active complete"]

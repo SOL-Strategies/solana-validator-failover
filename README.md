@@ -338,7 +338,81 @@ validator:
             environment: # optional map of custom environment variables (values support template interpolation)
               MY_VAR: "{{ .ThisNodeName }}"
               PEER_IP: "{{ .PeerNodePublicIP }}"
+    # (optional) Automatic rollback configuration.
+    # When enabled, if a failover fails after the active node has already switched to passive,
+    # the passive node signals the active node to revert. Both nodes attempt to return to their
+    # original roles.
+    #
+    # IMPORTANT LIMITATIONS — read before enabling:
+    # - Rollback is only triggered by an explicit signal from the passive node. If the network
+    #   connection drops after the passive node successfully sets its identity to active, no
+    #   automatic rollback occurs (to prevent the risk of two active validators). The operator
+    #   must check gossip and intervene manually.
+    # - If the rollback itself fails, the cluster may still be left without an active leader.
+    #   Rollback failures are logged at ERROR level with manual recovery commands.
+    # - Both nodes must have rollback enabled and configured identically for coordination to work.
+    # - Rollback hooks are always run (pre then post), even if the set-identity command fails.
+    rollback:
+      # default: false — opt-in
+      enabled: false
+
+      # Configuration for reverting the active node (which switched to passive) back to active.
+      # Triggered when the passive node signals that it failed to become active.
+      to_active:
+        # Go template for the rollback set-identity command.
+        # Supports the same template fields as set_identity_active_cmd_template.
+        # When empty, defaults to set_identity_active_cmd_template.
+        cmd_template: ""
+        hooks:
+          # run after the rollback set-identity command (always runs, even if cmd failed)
+          post:
+            - name: notify-rollback-to-active
+              command: ./scripts/notify_rollback.sh
+              args: ["to-active"]
+
+      # Configuration for re-asserting the passive node's passive identity when it failed to
+      # become active. Triggered on the passive node when set-identity-to-active fails.
+      to_passive:
+        # Go template for the rollback set-identity command.
+        # Supports the same template fields as set_identity_passive_cmd_template.
+        # When empty, defaults to set_identity_passive_cmd_template.
+        cmd_template: ""
+        hooks:
+          # run after the rollback set-identity command (always runs, even if cmd failed)
+          post:
+            - name: notify-rollback-to-passive
+              command: ./scripts/notify_rollback.sh
+              args: ["to-passive"]
 ```
+
+## Rollback
+
+`failover.rollback` is an opt-in feature that attempts to automatically revert both nodes to their original roles if a failover fails after identities have started changing.
+
+### When it triggers
+
+Rollback is only triggered by an **explicit signal** from the passive node. Specifically: after the active node has switched to passive and sent the tower file, if the passive node's `set-identity-to-active` command fails, it signals the active node to revert before exiting.
+
+### What it does
+
+| Node                                             | Rollback action                                                                   |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Active node (was active, became passive)         | Runs `set-identity-to-active` command → `rollback.to_active` post-hooks           |
+| Passive node (tried and failed to become active) | Runs `set-identity-to-passive` command → `rollback.to_passive` post-hooks         |
+
+Post-hooks always run even if the set-identity command fails. Pre hooks are intentionally not supported for rollback: a pre hook with `must_succeed: true` could block the rollback set-identity command from running, which would defeat the purpose of rollback.
+
+### Limitations
+
+**No auto-rollback on connection drop.** If the network connection drops after the passive node *successfully* set its identity to active (but before the client received confirmation), the active node does **not** automatically rollback. Auto-rollback in this scenario would risk creating two active validators. Instead, a `CRITICAL` log is emitted with the manual recovery command, and the operator must check gossip to determine the actual cluster state.
+
+**Rollback can itself fail.** If the rollback set-identity command fails, both nodes may still be passive. Rollback failures are logged at `ERROR` level with the manual recovery command. There is no retry — operators must intervene.
+
+**Both nodes must be configured identically.** Rollback config is local to each node's config file. Both nodes must have `rollback.enabled: true` and the correct commands configured.
+
+### Rollback is shown in the failover plan
+
+When `rollback.enabled: true`, the pre-failover plan shows the rollback commands that would run on each node if the failover fails, giving operators visibility before they confirm.
 
 ## Developing
 
@@ -356,7 +430,3 @@ make build
 # or build from docker
 make build-compose
 ```
-
-## Laundry/wish list
-
-- [ ] Rollbacks (to the extent it's possible)

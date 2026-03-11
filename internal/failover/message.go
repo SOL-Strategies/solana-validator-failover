@@ -13,6 +13,7 @@ type Message struct {
 	IsDryRunFailover                 bool
 	IsSuccessfullyCompleted          bool
 	SkipTowerSync                    bool
+	RollbackRequired                 bool
 	ActiveNodeSetIdentityStartTime   time.Time
 	ActiveNodeSetIdentityEndTime     time.Time
 	ActiveNodeSyncTowerFileStartTime time.Time

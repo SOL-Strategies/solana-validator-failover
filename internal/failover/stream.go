@@ -141,6 +141,16 @@ func (s Stream) GetIsSuccessfullyCompleted() bool {
 	return s.message.IsSuccessfullyCompleted
 }
 
+// SetRollbackRequired signals to the client that it must rollback its identity change.
+func (s *Stream) SetRollbackRequired(required bool) {
+	s.message.RollbackRequired = required
+}
+
+// GetRollbackRequired returns true if the server has signalled that a rollback is required.
+func (s Stream) GetRollbackRequired() bool {
+	return s.message.RollbackRequired
+}
+
 // SetFailoverStartSlot sets the failover start slot
 func (s *Stream) SetFailoverStartSlot(failoverStartSlot uint64) {
 	s.message.FailoverStartSlot = failoverStartSlot
@@ -233,7 +243,7 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity
 // and tower file sync
-func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
+func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hooks.RollbackConfig, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
 	data := PlanData{
 		IsDryRun:            s.message.IsDryRunFailover,
 		SkipTowerSync:       s.message.SkipTowerSync,
@@ -241,6 +251,7 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL
 		PassiveNodeInfo:     s.message.PassiveNodeInfo,
 		AppVersion:          pkgconstants.AppVersion,
 		Hooks:               failoverHooks,
+		Rollback:            rollback,
 		ActivePreHookData:   s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
 		ActivePostHookData:  s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
 		PassivePreHookData:  s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
@@ -253,6 +264,7 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, activeRPCURL
 	}
 
 	fmt.Print(style.RenderMessageString(strings.Trim(rendered, "\n")))
+	fmt.Println()
 
 	if autoConfirm {
 		log.Warn().Msg("--yes flag set, automatically proceeding with failover")

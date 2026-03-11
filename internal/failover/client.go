@@ -34,6 +34,7 @@ type ClientConfig struct {
 	SolanaRPCClient                solana.ClientInterface
 	RPCURL                         string
 	SkipTowerSync                  bool
+	Rollback                       hooks.RollbackConfig
 	// TLSConfig is an optional mTLS config. When non-nil, the client presents its
 	// certificate to the server and verifies the server's certificate against the CA.
 	// When nil, server certificate verification is skipped (InsecureSkipVerify).
@@ -57,6 +58,7 @@ type Client struct {
 	serverName                     string
 	serverAddress                  string
 	skipTowerSync                  bool
+	rollback                       hooks.RollbackConfig
 	tlsConfig                      *tls.Config // non-nil when mTLS is enabled
 }
 
@@ -85,6 +87,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
 		skipTowerSync:                  config.SkipTowerSync,
+		rollback:                       config.Rollback,
 		tlsConfig:                      clientTLSConfig,
 	}
 
@@ -102,6 +105,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 // Start starts the QUIC client
 func (c *Client) Start() {
 	c.logger.Debug().Msg("Starting QUIC client")
+	var wentPassive bool
 
 	// open a bidirectional stream to the server
 	stream, err := c.Conn.OpenStreamSync(c.ctx)
@@ -225,6 +229,7 @@ func (c *Client) Start() {
 		return
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
+	wentPassive = true // this node is now passive; used below for rollback/warning decisions
 
 	if skipTowerSync {
 		c.logger.Info().Msg("Skipping tower file sync")
@@ -244,6 +249,15 @@ func (c *Client) Start() {
 		// Send the updated node info with tower file bytes
 		if err := c.failoverStream.Encode(); err != nil {
 			c.logger.Error().Err(err).Msgf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
+			if wentPassive {
+				c.logger.Error().Msg(
+					"CRITICAL: tower sync failed after this node switched to passive — " +
+						"the passive node has not changed identity; check gossip and intervene manually if needed",
+				)
+				if c.rollback.ToActive.ResolvedCmd != "" {
+					c.logger.Error().Msgf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
+				}
+			}
 			return
 		}
 	}
@@ -252,10 +266,44 @@ func (c *Client) Start() {
 	err = c.failoverStream.Decode()
 	if err != nil {
 		c.logger.Error().Err(err).Msg("failed to decode failover stream")
+		if wentPassive {
+			// The connection dropped after this node switched to passive.
+			// We cannot know whether the server successfully set its identity — do NOT
+			// auto-rollback (risk of two active validators). Check gossip manually.
+			c.logger.Error().Msg(
+				"CRITICAL: connection lost after this node switched to passive — " +
+					"check gossip to determine cluster state and intervene manually if needed",
+			)
+			if c.rollback.ToActive.ResolvedCmd != "" {
+				c.logger.Error().Msgf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
+			}
+		}
 		return
 	}
 
-	// send a message to the server to confirm we're proceeding
+	// Check for explicit rollback signal from server
+	if c.failoverStream.GetRollbackRequired() {
+		c.logger.Error().Msg("server signalled rollback required — failover failed on the passive node")
+		if c.rollback.Enabled && wentPassive {
+			c.logger.Warn().Msg("rollback enabled: reverting this node to active")
+			if rbErr := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{
+				isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
+				isPostFailover:   true,
+			}), c.failoverStream.GetIsDryRunFailover(), c.logger); rbErr != nil {
+				c.logger.Error().Err(rbErr).Msg("rollback to active FAILED — manual intervention required")
+				if c.rollback.ToActive.ResolvedCmd != "" {
+					c.logger.Error().Msgf("to recover this node: %s", c.rollback.ToActive.ResolvedCmd)
+				}
+			}
+		} else {
+			c.logger.Error().Msg("rollback disabled — this node is currently passive; manual intervention required")
+			if c.rollback.ToActive.ResolvedCmd != "" {
+				c.logger.Error().Msgf("to revert this node to active: %s", c.rollback.ToActive.ResolvedCmd)
+			}
+		}
+		return
+	}
+
 	if !c.failoverStream.GetIsSuccessfullyCompleted() {
 		c.logger.Error().Msgf("server failed to complete failover: %s", c.failoverStream.GetErrorMessage())
 		return

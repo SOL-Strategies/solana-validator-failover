@@ -46,6 +46,7 @@ type ServerConfig struct {
 	MonitorConfig     MonitorConfig
 	SkipTowerSync     bool
 	AutoConfirm       bool
+	Rollback          hooks.RollbackConfig
 	// TLSConfig is an optional mTLS config. When non-nil, the server requires
 	// connecting clients to present a certificate signed by the configured CA.
 	// When nil, an ephemeral self-signed certificate is used (no client auth).
@@ -74,6 +75,7 @@ type Server struct {
 	monitorConfig     MonitorConfig
 	skipTowerSync     bool
 	autoConfirm       bool
+	rollback          hooks.RollbackConfig
 	mtlsEnabled       bool
 }
 
@@ -113,6 +115,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		monitorConfig:    config.MonitorConfig,
 		skipTowerSync:    config.SkipTowerSync,
 		autoConfirm:      config.AutoConfirm,
+		rollback:         config.Rollback,
 	}
 
 	if s.port == 0 {
@@ -322,7 +325,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 
 	s.logger.Info().Msgf("%s connected from %s - failover plan:", s.failoverStream.GetActiveNodeInfo().Hostname, s.activeConn.RemoteAddr())
 
-	if err := s.failoverStream.ConfirmFailover(s.hooks, activeRPCURL, passiveRPCURL, s.autoConfirm); err != nil {
+	if err := s.failoverStream.ConfirmFailover(s.hooks, s.rollback, activeRPCURL, passiveRPCURL, s.autoConfirm); err != nil {
 		s.logger.Error().Err(err).Msg("failover cancelled")
 
 		// Send error message to client before exiting
@@ -483,7 +486,27 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		LogDebug:     s.logger.Debug().Enabled(),
 	})
 	if err != nil {
-		s.logger.Fatal().Err(err).Msgf("failed to set identity to active with command: %s", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
+		s.logger.Error().Err(err).Msgf("failed to set identity to active with command: %s", s.failoverStream.GetPassiveNodeInfo().SetIdentityCommand)
+		if s.rollback.Enabled {
+			s.logger.Warn().Msg("rollback enabled: signalling client to rollback, then running server rollback to passive")
+			s.failoverStream.SetRollbackRequired(true)
+			// best-effort — client may already be gone; ignore encode error
+			_ = s.failoverStream.Encode()
+			// server re-asserts passive identity
+			if rbErr := RunRollbackToPassive(s.rollback, s.getHookEnvMap(hookEnvMapParams{
+				isDryRunFailover: s.isDryRunFailover,
+				isPostFailover:   true,
+			}), s.isDryRunFailover, s.logger); rbErr != nil {
+				s.logger.Error().Err(rbErr).Msg("rollback to passive FAILED — manual intervention required")
+			}
+		} else {
+			s.logger.Error().Msg("rollback disabled — this node is still passive; the peer has also switched to passive")
+			if s.rollback.ToPassive.ResolvedCmd != "" {
+				s.logger.Error().Msgf("to recover this node: %s", s.rollback.ToPassive.ResolvedCmd)
+			}
+		}
+		s.logger.Fatal().Err(err).Msgf("set identity to active failed — failover aborted")
+		return
 	}
 
 	s.failoverStream.SetPassiveNodeSetIdentityEndTime()
