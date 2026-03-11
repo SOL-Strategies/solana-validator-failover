@@ -56,8 +56,23 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		"FormatBytes": func(n int64) string {
 			return humanize.Bytes(uint64(n))
 		},
-		// hookSummary returns the hook portion of the Plan: summary line, or "" if none.
-		"hookSummary": func(h hooks.FailoverHooks) string {
+		// planSummaryLines builds the multi-line Plan: value. Each component
+		// (identity changes, tower sync, hooks) sits on its own line. Continuation
+		// lines are indented to align with the value start after "   Plan: ".
+		// The indent is 11 chars: 2 (template leading spaces) + 8 (label) + 1 (space).
+		"planSummaryLines": func(activeHostname, passiveHostname string, skipTowerSync bool, h hooks.FailoverHooks) string {
+			const indent = "           " // 11 spaces
+
+			identityLine := fmt.Sprintf("2 identity changes (%s %s, %s %s)",
+				activeHostname, style.RenderPassiveString("passive", false),
+				passiveHostname, style.RenderActiveString("active", false))
+
+			lines := []string{identityLine}
+
+			if !skipTowerSync {
+				lines = append(lines, "1 tower sync")
+			}
+
 			type entry struct {
 				label string
 				n     int
@@ -76,10 +91,11 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 					parts = append(parts, fmt.Sprintf("%d %s", e.n, e.label))
 				}
 			}
-			if total == 0 {
-				return ""
+			if total > 0 {
+				lines = append(lines, fmt.Sprintf("%d hooks (%s)", total, strings.Join(parts, ", ")))
 			}
-			return fmt.Sprintf(", %d hooks (%s)", total, strings.Join(parts, ", "))
+
+			return strings.Join(lines, "\n"+indent)
 		},
 		"RenderHooks": func(hooksList hooks.Hooks, nodeName string, hookType string) string {
 			if len(hooksList) == 0 {
@@ -125,9 +141,9 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 	// the → arrows align. truncPubkey always returns exactly 15 ASCII chars (8+...+4),
 	// and printf "%-15s" pads the role strings to the same width.
 	tpl, err := template.New("failoverPlan").Funcs(funcMap).Parse(`{{ if .Hooks.Pre.WhenActive }}
-  {{ Purple (printf "%d — %s pre-passive hooks" (Step) .ActiveNodeInfo.Hostname) }}
+  {{ Purple (printf "%d — run hooks %s pre-passive" (Step) .ActiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Pre.WhenActive .ActiveNodeInfo.Hostname "pre" }}{{- end }}
-  {{ Purple (printf "%d — %s assume PASSIVE identity" (Step) .ActiveNodeInfo.Hostname) }}
+  {{ $n := Step }}{{ Purple (printf "%d — set %s " $n .ActiveNodeInfo.Hostname) }}{{ Passive "passive" false }}
       {{ Warning "~" }} role      = {{ Active (printf "%-15s" "active") false }}  →  {{ Passive (printf "%-15s" "passive") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
       {{ Warning "~" }} identity  = {{ Active (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Active.PubKey)) false }}  →  {{ Passive (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Passive.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
         ip        = {{ LightGrey .ActiveNodeInfo.PublicIP }}
@@ -135,15 +151,15 @@ func RenderFailoverPlan(data PlanData) (string, error) {
         cmd       = {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }}
 
-  {{ Purple (printf "%d — tower file sync" (Step)) }}
+  {{ Purple (printf "%d — sync tower file" (Step)) }}
         source      = {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
       {{ Active "+" false }} destination = {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.TowerFile) }}{{ if gt .ActiveNodeInfo.TowerFileSizeBytes 0 }}
         size        = {{ LightGrey (FormatBytes .ActiveNodeInfo.TowerFileSizeBytes) }}{{ end }}
 {{- end }}
 {{ if .Hooks.Pre.WhenPassive }}
-  {{ Purple (printf "%d — %s pre-active hooks" (Step) .PassiveNodeInfo.Hostname) }}
+  {{ Purple (printf "%d — run hooks %s pre-active" (Step) .PassiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Pre.WhenPassive .PassiveNodeInfo.Hostname "pre" }}{{- end }}
-  {{ Purple (printf "%d — %s assume ACTIVE identity" (Step) .PassiveNodeInfo.Hostname) }}
+  {{ $n := Step }}{{ Purple (printf "%d — set %s " $n .PassiveNodeInfo.Hostname) }}{{ Active "active" false }}
       {{ Warning "~" }} role      = {{ Passive (printf "%-15s" "passive") false }}  →  {{ Active (printf "%-15s" "active") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
       {{ Warning "~" }} identity  = {{ Passive (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Passive.PubKey)) false }}  →  {{ Active (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Active.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
         ip        = {{ LightGrey .PassiveNodeInfo.PublicIP }}
@@ -151,14 +167,14 @@ func RenderFailoverPlan(data PlanData) (string, error) {
         cmd       = {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
 {{- if .Hooks.Post.WhenActive }}
 
-  {{ Purple (printf "%d — %s post-active hooks" (Step) .PassiveNodeInfo.Hostname) }}
+  {{ Purple (printf "%d — run hooks %s post-active" (Step) .PassiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Post.WhenActive .PassiveNodeInfo.Hostname "post" }}{{- end }}{{- if .Hooks.Post.WhenPassive }}
-  {{ Purple (printf "%d — %s post-passive hooks" (Step) .ActiveNodeInfo.Hostname) }}
+  {{ Purple (printf "%d — run hooks %s post-passive" (Step) .ActiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Post.WhenPassive .ActiveNodeInfo.Hostname "post" }}{{- end }}
   {{ HRule }}
-  {{ Purple "Plan:" }} 2 identity changes{{ if not .SkipTowerSync }}, 1 tower sync{{ end }}{{ hookSummary .Hooks }}.
+  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks }}
   {{ Purple "Version:" }} {{ LightGrey .AppVersion }}
-  {{ if .IsDryRun }}{{ Blue "Note:" }} dry run — re-run with {{ LightGrey "--not-a-drill" }} on the passive node to do for realsies.{{ else }}{{ Warning "Warning:" }} This is a real failover — identities will be changed on both nodes.{{ end }}
+  {{ if .IsDryRun }}{{ Blue "   Note:" }} dry run — re-run with {{ LightGrey "--not-a-drill" }} on the passive node to do for realsies.{{ else }}{{ Warning "Warning:" }} This is a real failover — identities will be changed on both nodes.{{ end }}
   {{ HRule }}
 `)
 	if err != nil {

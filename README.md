@@ -359,5 +359,4 @@ make build-compose
 
 ## Laundry/wish list
 
-- [ ] Refactor to make e2e testing easier - current setup not optimal
 - [ ] Rollbacks (to the extent it's possible)
