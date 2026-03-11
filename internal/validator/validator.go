@@ -70,6 +70,7 @@ type Validator struct {
 	SetIdentityPassiveCommand      string
 	TowerFile                      string
 	TowerFileAutoDeleteWhenPassive bool
+	Rollback                       hooks.RollbackConfig
 
 	logger          zerolog.Logger
 	solanaRPCClient solana.ClientInterface
@@ -140,6 +141,12 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 
 	// configure hooks
 	err = v.configureHooks(cfg.Failover)
+	if err != nil {
+		return err
+	}
+
+	// configure rollback
+	err = v.configureRollback(cfg.Failover)
 	if err != nil {
 		return err
 	}
@@ -469,6 +476,53 @@ func (v *Validator) configureHooks(cfg FailoverConfig) (err error) {
 	return nil
 }
 
+// configureRollback resolves rollback command templates and stores the fully-expanded
+// rollback commands alongside any configured rollback hooks.
+// If a cmd_template is empty, it falls back to the corresponding set-identity command.
+func (v *Validator) configureRollback(cfg FailoverConfig) error {
+	v.Rollback.Enabled = cfg.Rollback.Enabled
+	v.Rollback.ToActive.Hooks = cfg.Rollback.ToActive.Hooks
+	v.Rollback.ToPassive.Hooks = cfg.Rollback.ToPassive.Hooks
+
+	// resolve to-active rollback command
+	if cfg.Rollback.ToActive.CmdTemplate == "" {
+		v.Rollback.ToActive.ResolvedCmd = v.SetIdentityActiveCommand
+	} else {
+		tpl, err := template.New("rollback_to_active_cmd").Parse(cfg.Rollback.ToActive.CmdTemplate)
+		if err != nil {
+			return fmt.Errorf("failed to parse rollback.to_active.cmd_template: %w", err)
+		}
+		var buf strings.Builder
+		if err := tpl.Execute(&buf, v); err != nil {
+			return fmt.Errorf("failed to execute rollback.to_active.cmd_template: %w", err)
+		}
+		v.Rollback.ToActive.ResolvedCmd = buf.String()
+	}
+
+	// resolve to-passive rollback command
+	if cfg.Rollback.ToPassive.CmdTemplate == "" {
+		v.Rollback.ToPassive.ResolvedCmd = v.SetIdentityPassiveCommand
+	} else {
+		tpl, err := template.New("rollback_to_passive_cmd").Parse(cfg.Rollback.ToPassive.CmdTemplate)
+		if err != nil {
+			return fmt.Errorf("failed to parse rollback.to_passive.cmd_template: %w", err)
+		}
+		var buf strings.Builder
+		if err := tpl.Execute(&buf, v); err != nil {
+			return fmt.Errorf("failed to execute rollback.to_passive.cmd_template: %w", err)
+		}
+		v.Rollback.ToPassive.ResolvedCmd = buf.String()
+	}
+
+	v.logger.Debug().
+		Bool("enabled", v.Rollback.Enabled).
+		Str("to_active_cmd", v.Rollback.ToActive.ResolvedCmd).
+		Str("to_passive_cmd", v.Rollback.ToPassive.ResolvedCmd).
+		Msg("rollback configured")
+
+	return nil
+}
+
 // configurePeers ensures the peers are valid and sets them
 func (v *Validator) configurePeers(cfg PeersConfig) (err error) {
 	if len(cfg) == 0 {
@@ -734,6 +788,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		RPCURL:           v.RPCAddress,
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
+		Rollback:         v.Rollback,
 		SkipTowerSync:    params.SkipTowerSync,
 		AutoConfirm:      params.AutoConfirm,
 		TLSConfig:        v.serverTLSConfig,
@@ -803,6 +858,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			RPCAddress:                     v.RPCAddress,
 		},
 		Hooks:     v.Hooks,
+		Rollback:  v.Rollback,
 		TLSConfig: v.clientTLSConfig,
 	})
 	if err != nil {

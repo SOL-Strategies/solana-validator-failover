@@ -54,6 +54,36 @@ func (h FailoverHooks) HasPreHooksWhenPassive() bool {
 	return len(h.Pre.WhenPassive) > 0
 }
 
+// RollbackHooksConfig holds hooks to run after a rollback set-identity command.
+// Pre hooks are intentionally omitted: a pre hook with must_succeed could block the
+// rollback set-identity command from running, defeating the purpose of rollback.
+type RollbackHooksConfig struct {
+	Post Hooks `mapstructure:"post"`
+}
+
+// RollbackDirectionConfig configures one rollback direction (to_active or to_passive).
+type RollbackDirectionConfig struct {
+	// CmdTemplate is a Go template string for the set-identity rollback command.
+	// When empty, it defaults to the corresponding normal set-identity command
+	// (resolved during validator startup and stored in ResolvedCmd).
+	CmdTemplate string              `mapstructure:"cmd_template"`
+	Hooks       RollbackHooksConfig `mapstructure:"hooks"`
+	// ResolvedCmd is populated during validator configuration (not read from YAML).
+	// It holds the fully-expanded command string that will be run on rollback.
+	ResolvedCmd string `mapstructure:"-"`
+}
+
+// RollbackConfig is the full rollback configuration under failover.rollback.
+type RollbackConfig struct {
+	// Enabled controls whether automatic rollback runs when a failover fails mid-way.
+	// Default: false.
+	Enabled bool `mapstructure:"enabled"`
+	// ToActive is used by the active node (which switched to passive) to revert to active.
+	ToActive RollbackDirectionConfig `mapstructure:"to_active"`
+	// ToPassive is used by the passive node (which failed to become active) to re-assert passive.
+	ToPassive RollbackDirectionConfig `mapstructure:"to_passive"`
+}
+
 // HookTemplateData is the data structure available for hook templates
 type HookTemplateData struct {
 	// Failover state

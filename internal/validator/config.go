@@ -31,14 +31,15 @@ type TowerConfig struct {
 
 // FailoverConfig is the configuration for a failover
 type FailoverConfig struct {
-	SetIdentityPassiveCmdTemplate string              `mapstructure:"set_identity_passive_cmd_template"`
-	SetIdentityActiveCmdTemplate  string              `mapstructure:"set_identity_active_cmd_template"`
-	Hooks                         hooks.FailoverHooks `mapstructure:"hooks"`
-	MinimumTimeToLeaderSlot       string              `mapstructure:"min_time_to_leader_slot"`
-	Monitor                       MonitorConfig       `mapstructure:"monitor"`
-	Peers                         PeersConfig         `mapstructure:"peers"`
-	Server                        ServerConfig        `mapstructure:"server"`
-	TLS                           TLSConfig           `mapstructure:"tls"`
+	SetIdentityPassiveCmdTemplate string               `mapstructure:"set_identity_passive_cmd_template"`
+	SetIdentityActiveCmdTemplate  string               `mapstructure:"set_identity_active_cmd_template"`
+	Hooks                         hooks.FailoverHooks  `mapstructure:"hooks"`
+	Rollback                      hooks.RollbackConfig `mapstructure:"rollback"`
+	MinimumTimeToLeaderSlot       string               `mapstructure:"min_time_to_leader_slot"`
+	Monitor                       MonitorConfig        `mapstructure:"monitor"`
+	Peers                         PeersConfig          `mapstructure:"peers"`
+	Server                        ServerConfig         `mapstructure:"server"`
+	TLS                           TLSConfig            `mapstructure:"tls"`
 	IsDryRun                      bool
 }
 

@@ -24,6 +24,12 @@ while [[ $# -gt 0 ]]; do
             # --require-tower means setting to active; absence means passive.
             if [ -n "${MOCK_SOLANA_URL:-}" ] && [ -n "${VALIDATOR_NAME:-}" ]; then
                 if echo "$@" | grep -q -- "--require-tower"; then
+                    # Check if this set-identity-to-active call should be simulated as failing.
+                    FAIL_CHECK=$(curl -sf "${MOCK_SOLANA_URL}/fail-check?validator=${VALIDATOR_NAME}&action=set_active" 2>/dev/null || echo '{"fail":false}')
+                    if echo "$FAIL_CHECK" | grep -q '"fail":true'; then
+                        echo "agave-validator-mock set-identity: SIMULATED FAILURE for ${VALIDATOR_NAME} (fail_next_set_active was set)" >&2
+                        exit 1
+                    fi
                     ACTION="set_active"
                 else
                     ACTION="set_passive"

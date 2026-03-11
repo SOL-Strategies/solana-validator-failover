@@ -25,3 +25,11 @@ validator:
       credit_samples:
         count: 2
         interval: 1s
+    rollback:
+      enabled: true
+      to_passive:
+        hooks:
+          post:
+            - name: rollback-done
+              command: echo
+              args: ["[london] rollback to passive complete"]

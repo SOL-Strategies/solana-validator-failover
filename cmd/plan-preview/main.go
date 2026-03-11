@@ -7,6 +7,7 @@
 //	go run ./cmd/plan-preview --hooks      # include example pre/post hooks
 //	go run ./cmd/plan-preview --skip-tower # omit tower file sync step
 //	go run ./cmd/plan-preview --real       # render as a real failover (not dry run)
+//	go run ./cmd/plan-preview --rollback   # include example rollback configuration
 package main
 
 import (
@@ -24,6 +25,7 @@ func main() {
 	withHooks := flag.Bool("hooks", false, "include example pre/post hooks")
 	skipTower := flag.Bool("skip-tower", false, "skip tower file sync step")
 	real := flag.Bool("real", false, "render as a real failover (not a dry run)")
+	withRollback := flag.Bool("rollback", false, "include example rollback configuration")
 	flag.Parse()
 
 	activeNode := failover.NodeInfo{
@@ -73,6 +75,24 @@ func main() {
 		}
 	}
 
+	var exampleRollback hooks.RollbackConfig
+	if *withRollback {
+		exampleRollback = hooks.RollbackConfig{
+			Enabled: true,
+			ToActive: hooks.RollbackDirectionConfig{
+				ResolvedCmd: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json --require-tower",
+				Hooks: hooks.RollbackHooksConfig{
+					Post: hooks.Hooks{
+						{Name: "notify-rollback", Command: "curl", Args: []string{"-X", "POST", "https://hooks.slack.com/rollback"}},
+					},
+				},
+			},
+			ToPassive: hooks.RollbackDirectionConfig{
+				ResolvedCmd: "agave-validator --ledger /mnt/ledger set-identity /home/solana/passive-2-identity.json",
+			},
+		}
+	}
+
 	data := failover.PlanData{
 		IsDryRun:        !*real,
 		SkipTowerSync:   *skipTower,
@@ -80,6 +100,7 @@ func main() {
 		PassiveNodeInfo: passiveNode,
 		AppVersion:      "dev",
 		Hooks:           exampleHooks,
+		Rollback:        exampleRollback,
 	}
 
 	rendered, err := failover.RenderFailoverPlan(data)
