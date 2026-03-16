@@ -30,6 +30,7 @@ type FailoverParams struct {
 	NoMinTimeToLeaderSlot bool
 	MinTimeToLeaderSlot   time.Duration
 	SkipTowerSync         bool
+	Yes                   bool
 }
 
 // Peers is a map of peers
@@ -626,7 +627,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
 	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
 		log.Warn().Msgf("Tower file exists %s", v.TowerFile)
-		confirm, err := confirm("Delete tower file and proceed?")
+		confirm, err := confirm("Delete tower file and proceed?", params.Yes)
 		if err != nil {
 			return err
 		}
@@ -659,6 +660,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		IsDryRunFailover: !params.NotADrill,
 		Hooks:            v.Hooks,
 		SkipTowerSync:    params.SkipTowerSync,
+		Yes:              params.Yes,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -798,7 +800,12 @@ func (v *Validator) selectPassivePeer() (selectedPeer Peer, err error) {
 	return v.Peers[selectedPeerName], nil
 }
 
-func confirm(title string) (confirm bool, err error) {
+func confirm(title string, skipPrompt bool) (confirm bool, err error) {
+	// if skipPrompt is true, automatically return true
+	if skipPrompt {
+		return true, nil
+	}
+
 	// ask to proceed
 	form := huh.NewForm(
 		huh.NewGroup(
