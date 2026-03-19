@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/log"
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,8 @@ func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 	client := &Client{
 		localRPCClient:      localMock,
 		networkRPCClient:    networkMock,
+		loggerLocal:         log.With("rpc_client", "local"),
+		loggerNetwork:       log.With("rpc_client", "network"),
 		averageSlotDuration: 400 * time.Millisecond,
 	}
 
@@ -958,6 +961,8 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_CustomSlotTime(t *testing
 	client := &Client{
 		localRPCClient:      localMock,
 		networkRPCClient:    networkMock,
+		loggerLocal:         log.With("rpc_client", "local"),
+		loggerNetwork:       log.With("rpc_client", "network"),
 		averageSlotDuration: 200 * time.Millisecond,
 	}
 

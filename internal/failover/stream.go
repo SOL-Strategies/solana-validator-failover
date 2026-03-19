@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
+	"github.com/charmbracelet/log"
 	"github.com/quic-go/quic-go"
-	"github.com/rs/zerolog/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/solana"
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
@@ -44,7 +44,7 @@ func NewFailoverStream(stream *quic.Stream) *Stream {
 func (s *Stream) Encode() error {
 	err := s.encoder.Encode(s.message)
 	if err != nil {
-		log.Err(err).Msg("failed to encode failover message")
+		log.Error("failed to encode failover message", "err", err)
 		return err
 	}
 	return nil
@@ -54,7 +54,7 @@ func (s *Stream) Encode() error {
 func (s *Stream) Decode() error {
 	err := s.decoder.Decode(&s.message)
 	if err != nil {
-		log.Err(err).Msg("failed to decode failover message")
+		log.Error("failed to decode failover message", "err", err)
 		return err
 	}
 	return nil
@@ -87,7 +87,7 @@ func (s *Stream) SetErrorMessagef(format string, a ...any) {
 
 // LogErrorWithSetMessagef logs an error with a formatted string and sets the error message
 func (s *Stream) LogErrorWithSetMessagef(format string, a ...any) {
-	log.Error().Msgf(format, a...)
+	log.Errorf(format, a...)
 	s.SetErrorMessagef(format, a...)
 }
 
@@ -278,7 +278,7 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hoo
 	fmt.Println()
 
 	if autoConfirm {
-		log.Warn().Msg("--yes flag set, automatically proceeding with failover")
+		log.Warn("--yes flag set, automatically proceeding with failover")
 		return nil
 	}
 
@@ -451,7 +451,7 @@ func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.Cli
 			time.Sleep(interval)
 			sp.Title(fmt.Sprintf("Pulled vote credit sample %d of %d - credits: %d, rank: %d...", sampleCount, nSamples, sample.Credits, sample.VoteRank))
 		}
-		log.Debug().Msgf("Pulled %d vote credit samples", sampleCount)
+		log.Debugf("Pulled %d vote credit samples", sampleCount)
 		return nil
 	})
 	return sp.Run()

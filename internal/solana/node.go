@@ -3,8 +3,8 @@ package solana
 import (
 	"strings"
 
+	"github.com/charmbracelet/log"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/rs/zerolog/log"
 )
 
 // Node represents a gossip node
@@ -19,7 +19,7 @@ func (n *Node) IP() string {
 
 // Pubkey returns the pubkey of the gossip node - prefer its PascalCase counterpart PubKey
 func (n *Node) Pubkey() string {
-	log.Warn().Msg("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
+	log.Warn("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
 	return n.PubKey()
 }
 

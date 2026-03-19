@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/pkg/constants"
 )
 
@@ -50,7 +50,7 @@ func PrintWarningIfAvailable(ch chan string) {
 	select {
 	case latest, ok := <-ch:
 		if ok && latest != "" {
-			log.Warn().Msgf(
+			log.Warnf(
 				"update available: v%s → %s/releases/latest",
 				latest,
 				constants.GitHubRepoURL,

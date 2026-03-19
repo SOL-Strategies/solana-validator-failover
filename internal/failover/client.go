@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh/spinner"
+	"github.com/charmbracelet/log"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/quic-go/quic-go"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/constants"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/solana"
@@ -46,7 +45,7 @@ type Client struct {
 	Conn                           *quic.Conn
 	ctx                            context.Context
 	cancel                         context.CancelFunc
-	logger                         zerolog.Logger
+	logger                         *log.Logger
 	activeNodeInfo                 *NodeInfo
 	failoverStream                 *Stream
 	hooks                          hooks.FailoverHooks
@@ -74,7 +73,7 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	}
 
 	client = &Client{
-		logger:                         log.With().Logger(),
+		logger:                         log.Default(),
 		ctx:                            ctx,
 		cancel:                         cancel,
 		activeNodeInfo:                 config.ActiveNodeInfo,
@@ -97,38 +96,38 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
-	client.logger.Debug().Msgf("Connected to %s", style.RenderPassiveString(config.ServerName, false))
+	client.logger.Debugf("Connected to %s", style.RenderPassiveString(config.ServerName, false))
 
 	return client, nil
 }
 
 // Start starts the QUIC client
 func (c *Client) Start() {
-	c.logger.Debug().Msg("Starting QUIC client")
+	c.logger.Debug("Starting QUIC client")
 	var wentPassive bool
 
 	// open a bidirectional stream to the server
 	stream, err := c.Conn.OpenStreamSync(c.ctx)
 	if err != nil {
-		c.logger.Error().Err(err).Msg("Failed to open stream")
+		c.logger.Error("Failed to open stream", "err", err)
 		return
 	}
 
-	c.logger.Debug().Msg("Opened stream to server")
+	c.logger.Debug("Opened stream to server")
 
 	// send FailoverInitiateRequest
 	c.failoverStream = NewFailoverStream(stream)
 
 	// Send message type first
 	if _, err := c.failoverStream.Stream.Write([]byte{MessageTypeFailoverInitiateRequest}); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to send message type")
+		c.logger.Error("Failed to send message type", "err", err)
 		return
 	}
 
 	// Send wire protocol version before any gob encoding so the server can
 	// verify compatibility before attempting to decode the gob payload.
 	if err := writeWireVersion(stream); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to send wire protocol version")
+		c.logger.Error("Failed to send wire protocol version", "err", err)
 		return
 	}
 
@@ -140,7 +139,7 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Debug().Msg("Sent message type")
+	c.logger.Debug("Sent message type")
 
 	// wait for failover signal from server before proceeding
 	sp := spinner.New().Title(fmt.Sprintf("Connected to %s, waiting for failover signal...", style.RenderPassiveString(c.serverName, false)))
@@ -154,7 +153,7 @@ func (c *Client) Start() {
 	})
 	err = sp.Run()
 	if err != nil {
-		c.logger.Fatal().Err(err).Msg("failed to wait for failover signal")
+		c.logger.Fatal("failed to wait for failover signal", "err", err)
 		return
 	}
 
@@ -162,13 +161,13 @@ func (c *Client) Start() {
 	serverVersion := c.failoverStream.GetPassiveNodeInfo().SolanaValidatorFailoverVersion
 	clientVersion := pkgconstants.AppVersion
 	if serverVersion != clientVersion {
-		c.logger.Fatal().Msgf("server is running a different version of this program: %s (them) != %s (us)", serverVersion, clientVersion)
+		c.logger.Fatalf("server is running a different version of this program: %s (them) != %s (us)", serverVersion, clientVersion)
 		return
 	}
 
 	// see if the server says can proceed, else show error message and exit
 	if !c.failoverStream.GetCanProceed() {
-		c.logger.Fatal().Msg(c.failoverStream.GetErrorMessage())
+		c.logger.Fatal(c.failoverStream.GetErrorMessage())
 		return
 	}
 
@@ -178,7 +177,7 @@ func (c *Client) Start() {
 	// wait until the next leader slot is at least the minimum time to leader slot
 	err = c.waitMinTimeToLeaderSlot()
 	if err != nil {
-		c.logger.Fatal().Err(err).Msg("failed to wait for next leader slot")
+		c.logger.Fatal("failed to wait for next leader slot", "err", err)
 		return
 	}
 
@@ -188,17 +187,17 @@ func (c *Client) Start() {
 		isPreFailover:    true,
 	}))
 	if err != nil {
-		c.logger.Fatal().Err(err).Msg("failed to run pre hooks when active")
+		c.logger.Fatal("failed to run pre hooks when active", "err", err)
 		return
 	}
 
-	c.logger.Info().Msg("Failover started")
+	c.logger.Info("Failover started")
 
 	// wait until the next slot starts so we switch right at the beginning of the next slot
 	// this ensures we're early in the slot when we start the switch
 	slot, err := c.waitUntilStartOfNextSlot()
 	if err != nil {
-		c.logger.Fatal().Err(err).Msgf("failed to wait for next slot to start")
+		c.logger.Fatal("failed to wait for next slot to start", "err", err)
 		return
 	}
 
@@ -210,53 +209,54 @@ func (c *Client) Start() {
 	if c.failoverStream.GetIsDryRunFailover() {
 		dryRunPrefix = " (dry run) "
 	}
-	c.logger.Info().
-		Str("command", c.failoverStream.GetActiveNodeInfo().SetIdentityCommand).
-		Msgf("%sSetting identity to %s - %s",
+	c.logger.Info(
+		fmt.Sprintf("%sSetting identity to %s - %s",
 			dryRunPrefix,
 			style.RenderPassiveString(strings.ToUpper(constants.NodeRolePassive), false),
 			style.RenderPassiveString(c.failoverStream.GetActiveNodeInfo().Identities.Passive.PubKey(), false),
-		)
+		),
+		"command", c.failoverStream.GetActiveNodeInfo().SetIdentityCommand,
+	)
 
 	c.failoverStream.SetActiveNodeSetIdentityStartTime()
 
 	err = utils.RunCommand(utils.RunCommandParams{
 		CommandSlice: strings.Split(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, " "),
 		DryRun:       c.failoverStream.GetIsDryRunFailover(),
-		LogDebug:     c.logger.Debug().Enabled(),
+		LogDebug:     c.logger.GetLevel() <= log.DebugLevel,
 	})
 	if err != nil {
-		c.logger.Error().Err(err).Msgf("failed to set identity to passive")
+		c.logger.Error("failed to set identity to passive", "err", err)
 		return
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
 
 	if skipTowerSync {
-		c.logger.Info().Msg("Skipping tower file sync")
+		c.logger.Info("Skipping tower file sync")
 		// Don't send anything - server won't wait for tower file when skipTowerSync is true
 	} else {
-		c.logger.Info().Msgf("Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
+		c.logger.Infof("Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
 
 		// Read the tower file into TowerFileBytes
 		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
 		err = c.failoverStream.GetActiveNodeInfo().SetTowerFileBytes()
 		if err != nil {
-			c.logger.Error().Err(err).Msgf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
+			c.logger.Error(fmt.Sprintf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
 			return
 		}
 		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
 
 		// Send the updated node info with tower file bytes
 		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error().Err(err).Msgf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile)
+			c.logger.Error(fmt.Sprintf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
 			if wentPassive {
-				c.logger.Error().Msg(
+				c.logger.Error(
 					"CRITICAL: tower sync failed after this node switched to passive — " +
 						"the passive node has not changed identity; check gossip and intervene manually if needed",
 				)
 				if c.rollback.ToActive.ResolvedCmd != "" {
-					c.logger.Error().Msgf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
+					c.logger.Errorf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
 				}
 			}
 			return
@@ -266,17 +266,17 @@ func (c *Client) Start() {
 	// wait for confirmation from server that failover is complete
 	err = c.failoverStream.Decode()
 	if err != nil {
-		c.logger.Error().Err(err).Msg("failed to decode failover stream")
+		c.logger.Error("failed to decode failover stream", "err", err)
 		if wentPassive {
 			// The connection dropped after this node switched to passive.
 			// We cannot know whether the server successfully set its identity — do NOT
 			// auto-rollback (risk of two active validators). Check gossip manually.
-			c.logger.Error().Msg(
+			c.logger.Error(
 				"CRITICAL: connection lost after this node switched to passive — " +
 					"check gossip to determine cluster state and intervene manually if needed",
 			)
 			if c.rollback.ToActive.ResolvedCmd != "" {
-				c.logger.Error().Msgf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
+				c.logger.Errorf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
 			}
 		}
 		return
@@ -284,33 +284,33 @@ func (c *Client) Start() {
 
 	// Check for explicit rollback signal from server
 	if c.failoverStream.GetRollbackRequired() {
-		c.logger.Error().Msg("server signalled rollback required — failover failed on the passive node")
+		c.logger.Error("server signalled rollback required — failover failed on the passive node")
 		if c.rollback.Enabled && wentPassive {
-			c.logger.Warn().Msg("rollback enabled: reverting this node to active")
+			c.logger.Warn("rollback enabled: reverting this node to active")
 			if rbErr := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{
 				isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
 				isPostFailover:   true,
 			}), c.failoverStream.GetIsDryRunFailover(), c.logger); rbErr != nil {
-				c.logger.Error().Err(rbErr).Msg("rollback to active FAILED — manual intervention required")
+				c.logger.Error("rollback to active FAILED — manual intervention required", "err", rbErr)
 				if c.rollback.ToActive.ResolvedCmd != "" {
-					c.logger.Error().Msgf("to recover this node: %s", c.rollback.ToActive.ResolvedCmd)
+					c.logger.Errorf("to recover this node: %s", c.rollback.ToActive.ResolvedCmd)
 				}
 			}
 		} else {
-			c.logger.Error().Msg("rollback disabled — this node is currently passive; manual intervention required")
+			c.logger.Error("rollback disabled — this node is currently passive; manual intervention required")
 			if c.rollback.ToActive.ResolvedCmd != "" {
-				c.logger.Error().Msgf("to revert this node to active: %s", c.rollback.ToActive.ResolvedCmd)
+				c.logger.Errorf("to revert this node to active: %s", c.rollback.ToActive.ResolvedCmd)
 			}
 		}
 		return
 	}
 
 	if !c.failoverStream.GetIsSuccessfullyCompleted() {
-		c.logger.Error().Msgf("server failed to complete failover: %s", c.failoverStream.GetErrorMessage())
+		c.logger.Errorf("server failed to complete failover: %s", c.failoverStream.GetErrorMessage())
 		return
 	}
 
-	c.logger.Info().Msg("Failover complete")
+	c.logger.Info("Failover complete")
 
 	// run post hooks now this is passive and active node says all is peachy
 	c.hooks.RunPostWhenPassive(c.getHookEnvMap(hookEnvMapParams{
@@ -325,7 +325,7 @@ func (c *Client) Start() {
 // which naturally gets us well within the first half of the new slot
 // should get us in within the first 50-100ms of the next slot
 func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
-	c.logger.Debug().Msg("Waiting until start of next slot")
+	c.logger.Debug("Waiting until start of next slot")
 
 	// Get the current slot number
 	currentSlot, err := c.solanaRPCClient.GetCurrentSlot()
@@ -340,17 +340,14 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 		slot, err := c.solanaRPCClient.GetCurrentSlot()
 		if err != nil {
 			// If RPC fails, retry after a short delay
-			c.logger.Debug().Err(err).Msg("Failed to get slot, retrying")
+			c.logger.Debug("Failed to get slot, retrying", "err", err)
 			time.Sleep(pollInterval)
 			continue
 		}
 
 		// Slot has changed, we're now in the next slot
 		if slot > currentSlot {
-			c.logger.Debug().
-				Uint64("old_slot", currentSlot).
-				Uint64("new_slot", slot).
-				Msg("Slot transition detected, proceeding")
+			c.logger.Debug("Slot transition detected, proceeding", "old_slot", currentSlot, "new_slot", slot)
 			return slot, nil
 		}
 
@@ -362,11 +359,11 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 // waitMinTimeToLeaderSlot waits until the next leader slot is at least the minimum time to leader slot
 func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 	if !c.waitMinTimeToLeaderSlotEnabled {
-		c.logger.Debug().Msg("Waiting for min time to leader slot is disabled, skipping")
+		c.logger.Debug("Waiting for min time to leader slot is disabled, skipping")
 		return nil
 	}
 
-	c.logger.Debug().Msgf("Ensuring next leader slot is at least %s in the future", c.minTimeToLeaderSlot.String())
+	c.logger.Debugf("Ensuring next leader slot is at least %s in the future", c.minTimeToLeaderSlot.String())
 	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title("Checking next leader slot...")
 	maxRetries := 10
 	var calculatedTimeToNextLeaderSlot time.Duration
@@ -385,7 +382,7 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 				if remainingRetries == 0 {
 					return fmt.Errorf("failed to get time to next leader slot: %w", err)
 				}
-				log.Debug().Err(err).Msgf("failed to get time to next leader slot")
+				log.Debug("failed to get time to next leader slot", "err", err)
 				sp.Title(style.RenderErrorStringf(
 					"Failed to get time to next leader slot, retrying in %s (%d retries left): %s",
 					sleepDuration.String(),
@@ -434,9 +431,9 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 	}
 
 	if calculatedTimeToNextLeaderSlot > 0 {
-		c.logger.Info().Msgf("Time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
+		c.logger.Infof("Time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
 	} else {
-		c.logger.Info().Msg("No upcoming leader slots found")
+		c.logger.Info("No upcoming leader slots found")
 	}
 
 	return nil
@@ -526,13 +523,13 @@ func (c *Client) connectToServer() error {
 func (c *Client) tryQUICConnection() error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", c.serverAddress)
 	if err != nil {
-		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("failed to resolve server address")
+		c.logger.Debug("failed to resolve server address", "err", err, "address", c.serverAddress)
 		return err
 	}
 
 	wrapped, err := newBasicPacketConn(":0")
 	if err != nil {
-		c.logger.Debug().Err(err).Msg("failed to create UDP socket")
+		c.logger.Debug("failed to create UDP socket", "err", err)
 		return err
 	}
 
@@ -551,12 +548,12 @@ func (c *Client) tryQUICConnection() error {
 		tr.Close()
 		if isALPNMismatch(err) {
 			// Fatal logs and calls os.Exit(1) — the spinner will not retry.
-			c.logger.Fatal().Msg(
+			c.logger.Fatal(
 				"passive node rejected connection: incompatible wire protocol version — " +
 					"ensure both nodes run the same version of solana-validator-failover",
 			)
 		}
-		c.logger.Debug().Err(err).Str("address", c.serverAddress).Msg("QUIC server not ready, retrying...")
+		c.logger.Debug("QUIC server not ready, retrying...", "err", err, "address", c.serverAddress)
 		return err
 	}
 
@@ -564,12 +561,12 @@ func (c *Client) tryQUICConnection() error {
 		tlsState := conn.ConnectionState().TLS
 		if len(tlsState.PeerCertificates) > 0 {
 			peer := tlsState.PeerCertificates[0]
-			c.logger.Info().
-				Str("remote_addr", conn.RemoteAddr().String()).
-				Str("subject", peer.Subject.String()).
-				Str("issuer", peer.Issuer.String()).
-				Time("expires", peer.NotAfter).
-				Msg("mTLS: server certificate verified")
+			c.logger.Info("mTLS: server certificate verified",
+				"remote_addr", conn.RemoteAddr().String(),
+				"subject", peer.Subject.String(),
+				"issuer", peer.Issuer.String(),
+				"expires", peer.NotAfter,
+			)
 		}
 	}
 

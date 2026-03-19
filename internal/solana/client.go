@@ -8,11 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/log"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/gagliardetto/solana-go/rpc/jsonrpc"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 // jsonRPCMethodNotFound is the standard JSON-RPC 2.0 error code for "Method not found".
@@ -58,8 +57,8 @@ type ClientInterface interface {
 type Client struct {
 	localRPCClient      RPCClientInterface
 	networkRPCClient    RPCClientInterface
-	loggerLocal         zerolog.Logger
-	loggerNetwork       zerolog.Logger
+	loggerLocal         *log.Logger
+	loggerNetwork       *log.Logger
 	averageSlotDuration time.Duration
 }
 
@@ -79,8 +78,8 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 	return &Client{
 		localRPCClient:      rpc.New(params.LocalRPCURL),
 		networkRPCClient:    rpc.New(params.ClusterRPCURL),
-		loggerLocal:         log.Logger.With().Str("rpc_client", "local").Logger(),
-		loggerNetwork:       log.Logger.With().Str("rpc_client", "network").Logger(),
+		loggerLocal:         log.With("rpc_client", "local"),
+		loggerNetwork:       log.With("rpc_client", "network"),
 		averageSlotDuration: avgSlotDuration,
 	}
 }
@@ -98,12 +97,12 @@ func (c *Client) GetLocalNodeHealth() (string, error) {
 func (c *Client) IsLocalNodeHealthy() bool {
 	result, err := c.GetLocalNodeHealth()
 	if err != nil {
-		c.loggerLocal.Debug().Err(err).Msg("failed to get local node health")
+		c.loggerLocal.Debug("failed to get local node health", "err", err)
 		return false
 	}
 	isHealthy := result == rpc.HealthOk
 	if !isHealthy {
-		c.loggerLocal.Debug().Str("result", result).Msg("local node health")
+		c.loggerLocal.Debug("local node health", "result", result)
 	}
 	return isHealthy
 }
@@ -281,11 +280,11 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 		return false, time.Duration(0), fmt.Errorf("failed to get epoch info: %w", err)
 	}
 
-	c.loggerNetwork.Debug().
-		Uint64("epoch", epochInfo.Epoch).
-		Uint64("slotIndex", epochInfo.SlotIndex).
-		Uint64("absoluteSlot", epochInfo.AbsoluteSlot).
-		Msg("Epoch info retrieved")
+	c.loggerNetwork.Debug("Epoch info retrieved",
+		"epoch", epochInfo.Epoch,
+		"slotIndex", epochInfo.SlotIndex,
+		"absoluteSlot", epochInfo.AbsoluteSlot,
+	)
 
 	// get the leader schedule - returns a map of pubkey:[]uint64 - where values are a slice of slot indexes
 	// relaative to the first slot of epochInfo result
@@ -299,11 +298,11 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 
 	// pubkey not in leader schedule
 	if !ok {
-		c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Msg("Pubkey not found in leader schedule")
+		c.loggerNetwork.Debug("Pubkey not found in leader schedule", "pubkey", pubkey.String())
 		return false, time.Duration(0), nil
 	}
 
-	c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Int("slotsCount", len(leaderSlotIndexes)).Msg("Found slots in leader schedule")
+	c.loggerNetwork.Debug("Found slots in leader schedule", "pubkey", pubkey.String(), "slotsCount", len(leaderSlotIndexes))
 
 	// calculate the first slot of the epoch (zero-based indexing)
 	// epochInfo.AbsoluteSlot is the "current" slot for when we fetched the epoch info
@@ -314,12 +313,12 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 	for _, leaderSlotIndex := range leaderSlotIndexes {
 		leaderSlot := firstSlotOfEpoch + leaderSlotIndex
 
-		c.loggerNetwork.Debug().
-			Uint64("leaderSlotIndex", leaderSlotIndex).
-			Uint64("leaderSlot", leaderSlot).
-			Uint64("currentSlot", epochInfo.AbsoluteSlot).
-			Str("pubkey", pubkey.String()).
-			Msg("Checking slot")
+		c.loggerNetwork.Debug("Checking slot",
+			"leaderSlotIndex", leaderSlotIndex,
+			"leaderSlot", leaderSlot,
+			"currentSlot", epochInfo.AbsoluteSlot,
+			"pubkey", pubkey.String(),
+		)
 
 		if leaderSlot >= epochInfo.AbsoluteSlot {
 			nextLeaderSlot = leaderSlot
@@ -329,7 +328,7 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 
 	// didn't find future slots for the pubkey
 	if nextLeaderSlot == 0 {
-		c.loggerNetwork.Debug().Str("pubkey", pubkey.String()).Msg("No future leader slots found for pubkey")
+		c.loggerNetwork.Debug("No future leader slots found for pubkey", "pubkey", pubkey.String())
 		return false, time.Duration(0), nil
 	}
 
@@ -337,10 +336,11 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 	slotDifference := nextLeaderSlot - epochInfo.AbsoluteSlot
 	timeToNextLeaderSlot = time.Duration(slotDifference) * c.averageSlotDuration
 
-	c.loggerNetwork.Debug().
-		Uint64("nextLeaderSlot", nextLeaderSlot).
-		Uint64("currentSlot", epochInfo.AbsoluteSlot).
-		Msgf("Next leader slot in %s", timeToNextLeaderSlot.String())
+	c.loggerNetwork.Debug("Next leader slot",
+		"duration", timeToNextLeaderSlot.String(),
+		"nextLeaderSlot", nextLeaderSlot,
+		"currentSlot", epochInfo.AbsoluteSlot,
+	)
 
 	return true, timeToNextLeaderSlot, nil
 }

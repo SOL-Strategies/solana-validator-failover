@@ -3,7 +3,7 @@ package identities
 import (
 	"fmt"
 
-	"github.com/rs/zerolog/log"
+	"github.com/charmbracelet/log"
 )
 
 // Identities holds the information for the identities
@@ -16,22 +16,18 @@ type Identities struct {
 // Each identity can be loaded from a keypair file or from a base58 pubkey string.
 // Keypair file takes precedence if both are provided.
 func NewFromConfig(cfg *Config) (identities *Identities, err error) {
-	logger := log.With().Str("component", "identities").Logger()
+	logger := log.WithPrefix("identities")
 	identities = &Identities{}
 
 	// load active identity
 	if cfg.Active != "" {
-		logger.Debug().
-			Str("file", cfg.Active).
-			Msg("loading active identity from keypair file")
+		logger.Debug("loading active identity from keypair file", "file", cfg.Active)
 		identities.Active, err = NewIdentityFromFile(cfg.Active)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load active identity: %w", err)
 		}
 	} else if cfg.ActivePubkey != "" {
-		logger.Debug().
-			Str("pubkey", cfg.ActivePubkey).
-			Msg("loading active identity from pubkey string")
+		logger.Debug("loading active identity from pubkey string", "pubkey", cfg.ActivePubkey)
 		identities.Active, err = NewIdentityFromPubkey(cfg.ActivePubkey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load active identity: %w", err)
@@ -42,17 +38,13 @@ func NewFromConfig(cfg *Config) (identities *Identities, err error) {
 
 	// load passive identity
 	if cfg.Passive != "" {
-		logger.Debug().
-			Str("file", cfg.Passive).
-			Msg("loading passive identity from keypair file")
+		logger.Debug("loading passive identity from keypair file", "file", cfg.Passive)
 		identities.Passive, err = NewIdentityFromFile(cfg.Passive)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load passive identity: %w", err)
 		}
 	} else if cfg.PassivePubkey != "" {
-		logger.Debug().
-			Str("pubkey", cfg.PassivePubkey).
-			Msg("loading passive identity from pubkey string")
+		logger.Debug("loading passive identity from pubkey string", "pubkey", cfg.PassivePubkey)
 		identities.Passive, err = NewIdentityFromPubkey(cfg.PassivePubkey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load passive identity: %w", err)
