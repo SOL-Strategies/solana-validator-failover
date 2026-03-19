@@ -11,15 +11,18 @@ import (
 	"github.com/sol-strategies/solana-validator-failover/internal/config"
 	internalconstants "github.com/sol-strategies/solana-validator-failover/internal/constants"
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
+	"github.com/sol-strategies/solana-validator-failover/internal/updater"
 	"github.com/sol-strategies/solana-validator-failover/pkg/constants"
 	"github.com/spf13/cobra"
 )
 
 var (
 	// Validator available to all commands
-	configPath string
-	logLevel   string
-	rootCmd    = &cobra.Command{
+	configPath      string
+	logLevel        string
+	noUpdateCheck   bool
+	updateCh        chan string
+	rootCmd         = &cobra.Command{
 		Aliases: []string{},
 		Use:     style.RenderPurpleString(constants.AppName),
 		Version: constants.AppVersion,
@@ -48,6 +51,10 @@ func Execute() {
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", config.DefaultConfigPath, "path to config file")
 	// log level flag
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "log level")
+	// update check flag
+	rootCmd.PersistentFlags().BoolVarP(&noUpdateCheck, "no-update-check", "n", false, "skip update check")
+
+	updateCh = updater.StartBackgroundCheck(constants.AppVersion)
 
 	// execute
 	if err := rootCmd.Execute(); err != nil {
@@ -114,6 +121,10 @@ func persistentPreRun(cmd *cobra.Command, args []string) (err error) {
 		return fmt.Errorf("invalid log level %q: %w", logLevel, err)
 	}
 	zerolog.SetGlobalLevel(logLevel)
+
+	if !noUpdateCheck {
+		updater.PrintWarningIfAvailable(updateCh)
+	}
 
 	return nil
 }
