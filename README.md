@@ -69,6 +69,7 @@ By default, `run` executes in **dry-run mode**: the tower file is synced and all
 | ------------------------- | ------------------------------------------------------------ | --------------------------------------------- |
 | `-c, --config <path>`     | `~/solana-validator-failover/solana-validator-failover.yaml` | Path to config file.                          |
 | `-l, --log-level <level>` | `info`                                                       | Log level (`debug`, `info`, `warn`, `error`). |
+| `-n, --no-update-check`   | `false`                                                      | Skip the startup update check. Overrides `update.check_on_startup` in the config file. |
 
 ### Peer selection
 
@@ -383,6 +384,13 @@ validator:
             - name: notify-rollback-to-passive
               command: ./scripts/notify_rollback.sh
               args: ["to-passive"]
+
+# update check configuration
+update:
+  # check for a new release on startup and print a warning if one is available
+  # default: true
+  # override with the --no-update-check CLI flag
+  check_on_startup: true
 ```
 
 ## Rollback
