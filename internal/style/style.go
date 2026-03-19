@@ -48,6 +48,8 @@ var (
 	TableCellStyle = lipgloss.NewStyle().Padding(0, 1).Align(lipgloss.Center)
 	// ColorMessage is the color for message text (matches charmbracelet/log message style)
 	ColorMessage = lipgloss.Color("213")
+	// ColorMuted is a dull off-white for plan/summary body text — readable but not distracting
+	ColorMuted = lipgloss.Color("252")
 	// SpinnerTitleStyle is the style for spinner titles
 	SpinnerTitleStyle = lipgloss.NewStyle()
 	// MessageStyle is the style for messages
@@ -71,6 +73,7 @@ func TemplateFuncMap() template.FuncMap {
 		"DarkPurple":   RenderDarkPurpleString,
 		"Message":      RenderMessageString,
 		"Pink":         RenderPinkString,
+		"Muted":        RenderMutedString,
 		"Grey":         RenderGreyString,
 		"LightGrey":    RenderLightGreyString,
 		"Join":         strings.Join,
@@ -191,6 +194,11 @@ func RenderLightGreyString(message string) string {
 // RenderPinkString renders a string in the message/pink color
 func RenderPinkString(message string) string {
 	return lipgloss.NewStyle().Foreground(ColorMessage).Render(message)
+}
+
+// RenderMutedString renders a string in a dull off-white for plan/summary body text
+func RenderMutedString(message string) string {
+	return lipgloss.NewStyle().Foreground(ColorMuted).Render(message)
 }
 
 // RenderMessageString renders a string in the message style

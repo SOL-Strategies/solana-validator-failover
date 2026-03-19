@@ -450,16 +450,16 @@ func (v *Validator) configureHooks(cfg FailoverConfig) (err error) {
 		"post_when_passive", len(v.Hooks.Post.WhenPassive),
 	)
 	for _, h := range v.Hooks.Pre.WhenActive {
-		v.logger.Debug("  pre hook (when active)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
+		v.logger.Debug("pre hook (when active)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
 	}
 	for _, h := range v.Hooks.Pre.WhenPassive {
-		v.logger.Debug("  pre hook (when passive)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
+		v.logger.Debug("pre hook (when passive)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
 	}
 	for _, h := range v.Hooks.Post.WhenActive {
-		v.logger.Debug("  post hook (when active)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
+		v.logger.Debug("post hook (when active)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
 	}
 	for _, h := range v.Hooks.Post.WhenPassive {
-		v.logger.Debug("  post hook (when passive)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
+		v.logger.Debug("post hook (when passive)", "name", h.Name, "command", h.Command, "args", h.Args, "must_succeed", h.MustSucceed)
 	}
 	return nil
 }
@@ -705,7 +705,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 	}
 
 	log.Info(
-		fmt.Sprintf("This validator is currently %s", style.RenderPassiveString(strings.ToUpper(constants.NodeRolePassive), false)),
+		style.RenderPinkString("this validator is currently ")+style.RenderPassiveString(constants.NodeRolePassive, false),
 		"public_ip", v.PublicIP,
 		"pubkey", v.Identities.Passive.PubKey(),
 	)
@@ -799,7 +799,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 	}
 
 	log.Info(
-		fmt.Sprintf("This validator is currently %s", style.RenderActiveString(strings.ToUpper(constants.NodeRoleActive), false)),
+		style.RenderPinkString("this validator is currently ")+style.RenderActiveString(constants.NodeRoleActive, false),
 		"public_ip", v.PublicIP,
 		"pubkey", v.Identities.Active.PubKey(),
 	)
@@ -873,12 +873,7 @@ func (v *Validator) waitUntilHealthy() (err error) {
 				continue
 			}
 
-			sp.Title(
-				style.RenderActiveStringf(
-					"validator is healthy and synced - elapsed time %s",
-					time.Since(startTime).String(),
-				),
-			)
+			sp.Title(style.RenderPinkString(fmt.Sprintf("validator is healthy and synced - elapsed time %s", time.Since(startTime).String())))
 			return nil
 		}
 	})

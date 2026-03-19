@@ -274,7 +274,7 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hoo
 		return err
 	}
 
-	fmt.Print(style.RenderMessageString(strings.Trim(rendered, "\n")))
+	fmt.Print(style.RenderMessageString(strings.TrimLeft(rendered, "\n")))
 	fmt.Println()
 
 	if autoConfirm {
@@ -424,16 +424,16 @@ func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.Cli
 
 	// multiple samples may take some time so show a spinner to keep you patient
 	var sp *spinner.Spinner
-	sp = spinner.New().Title(fmt.Sprintf("Pulling %d vote credit samples %s apart...", nSamples, interval))
+	sp = spinner.New().Title(style.RenderPinkString(fmt.Sprintf("pulling %d vote credit samples %s apart...", nSamples, interval)))
 
 	sampleCount := 0
 	sp.ActionWithErr(func(ctx context.Context) error {
 		for range make([]struct{}, nSamples) {
 			sampleCount++
-			sp.Title(fmt.Sprintf("Pulling vote credit sample %d of %d...", sampleCount, nSamples))
+			sp.Title(style.RenderPinkString(fmt.Sprintf("pulling vote credit sample %d of %d...", sampleCount, nSamples)))
 			err := s.PullActiveIdentityVoteCreditsSample(solanaRPCClient)
 			if err != nil {
-				sp.Title(fmt.Sprintf("Failed to pull vote credits sample: %s", err))
+				sp.Title(style.RenderErrorStringf("failed to pull vote credits sample: %s", err))
 				continue
 			}
 			sample := s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()][len(s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()])-1]
@@ -442,14 +442,14 @@ func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.Cli
 				previousSample := s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()][len(s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()])-2]
 				if sample.Credits <= previousSample.Credits {
 					sp.Title(style.RenderWarningStringf(
-						"Vote credits are not increasing between samples %d and %d - this is not good",
+						"vote credits are not increasing between samples %d and %d - this is not good",
 						sampleCount-1,
 						sampleCount,
 					))
 				}
 			}
 			time.Sleep(interval)
-			sp.Title(fmt.Sprintf("Pulled vote credit sample %d of %d - credits: %d, rank: %d...", sampleCount, nSamples, sample.Credits, sample.VoteRank))
+			sp.Title(style.RenderPinkString(fmt.Sprintf("pulled vote credit sample %d of %d - credits: %d, rank: %d...", sampleCount, nSamples, sample.Credits, sample.VoteRank)))
 		}
 		log.Debugf("Pulled %d vote credit samples", sampleCount)
 		return nil
