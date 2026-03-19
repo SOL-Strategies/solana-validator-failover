@@ -68,7 +68,15 @@ func init() {
 func persistentPreRun(cmd *cobra.Command, args []string) error {
 	logging.Configure(logLevel)
 
-	if !noUpdateCheck {
+	// --no-update-check flag always wins; otherwise defer to config (default: true).
+	checkUpdate := !noUpdateCheck
+	if checkUpdate {
+		if cfg, err := config.NewFromFile(configPath); err == nil {
+			checkUpdate = cfg.Update.CheckOnStartup
+		}
+	}
+
+	if checkUpdate {
 		updater.PrintWarningIfAvailable(updateCh)
 	}
 

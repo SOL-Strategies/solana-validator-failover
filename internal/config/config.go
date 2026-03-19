@@ -54,9 +54,15 @@ var (
 	DefaultConfigPath = filepath.Join("~", constants.AppName, constants.AppName+".yaml")
 )
 
+// UpdateConfig holds update-check settings
+type UpdateConfig struct {
+	CheckOnStartup bool `mapstructure:"check_on_startup"`
+}
+
 // SolanaValidatorFailover is the configuration for the program
 type SolanaValidatorFailover struct {
 	Validator validator.Config `mapstructure:"validator"`
+	Update    UpdateConfig     `mapstructure:"update"`
 }
 
 // NewFromFile creates a new SolanaValidatorFailover configuration from a config file
@@ -102,6 +108,7 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("validator.failover.set_identity_active_cmd_template", DefaultSetIdentityActiveCmdTemplate)
 	v.SetDefault("validator.failover.set_identity_passive_cmd_template", DefaultSetIdentityPassiveCmdTemplate)
 	v.SetDefault("validator.tower.file_name_template", DefaultTowerFileNameTemplate)
+	v.SetDefault("update.check_on_startup", true)
 
 	// Read config file
 	logger.Debug("loading", "config_file", loadConfigPath)
