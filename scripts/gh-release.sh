@@ -28,19 +28,7 @@ gh_create_release() {
     fi
 
     log_info "creating release notes"
-    cat > release-notes.md <<EOF
-${AUTO_NOTES}
-
----
-
-### Installation
-Download the appropriate binary for your platform and extract it:
-\`\`\`bash
-wget https://github.com/sol-strategies/solana-validator-failover/releases/download/${REPO_TAG}/solana-validator-failover-${APP_VERSION}-<platform>.gz
-gunzip solana-validator-failover-${APP_VERSION}-<platform>.gz
-chmod +x solana-validator-failover-${APP_VERSION}-<platform>
-\`\`\`
-EOF
+    printf '%s\n' "${AUTO_NOTES}" > release-notes.md
 
     log_info "creating GitHub release"
     gh release create ${REPO_TAG} \
