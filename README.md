@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Simple p2p Solana validator failovers. This tool helps automate _planned_ failovers. To automate _unexpected_ failovers, see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
+Simple p2p Solana validator failovers. This tool helps automate **planned** failovers. To automate **unexpected** failovers see [solana-validator-ha](https://github.com/SOL-Strategies/solana-validator-ha).
 
 ![solana-validator-failover](docs/failover.png)
 
@@ -395,10 +395,10 @@ Rollback is only triggered by an **explicit signal** from the passive node. Spec
 
 ### What it does
 
-| Node                                             | Rollback action                                                                   |
-| ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Active node (was active, became passive)         | Runs `set-identity-to-active` command → `rollback.to_active` post-hooks           |
-| Passive node (tried and failed to become active) | Runs `set-identity-to-passive` command → `rollback.to_passive` post-hooks         |
+| Node                                             | Rollback action                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| Active node (was active, became passive)         | Runs `set-identity-to-active` command → `rollback.to_active` post-hooks   |
+| Passive node (tried and failed to become active) | Runs `set-identity-to-passive` command → `rollback.to_passive` post-hooks |
 
 Post-hooks always run even if the set-identity command fails. Pre hooks are intentionally not supported for rollback: a pre hook with `must_succeed: true` could block the rollback set-identity command from running, which would defeat the purpose of rollback.
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/rs/zerolog/log"
+	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 	"github.com/sol-strategies/solana-validator-failover/internal/validator"
 	"github.com/sol-strategies/solana-validator-failover/pkg/constants"
@@ -73,7 +73,7 @@ func NewFromFile(configPath string) (s *SolanaValidatorFailover, err error) {
 
 // LoadFromConfigFile loads the config from a config file
 func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err error) {
-	logger := log.With().Str("component", "config").Logger()
+	logger := log.WithPrefix("config")
 	v := viper.New()
 
 	loadConfigPath := DefaultConfigPath
@@ -104,7 +104,7 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("validator.tower.file_name_template", DefaultTowerFileNameTemplate)
 
 	// Read config file
-	logger.Debug().Str("config_file", loadConfigPath).Msg("loading")
+	logger.Debug("loading", "config_file", loadConfigPath)
 	err = v.ReadInConfig()
 	if err != nil {
 		return

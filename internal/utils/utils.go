@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/constants"
 )
 
@@ -69,7 +69,7 @@ func IsValidURLWithPort(urlIn string) bool {
 
 // GetPublicIP returns the public IP address of the current machine
 func GetPublicIP() (string, error) {
-	log.Debug().Msg("getting public IP...")
+	log.Debug("getting public IP...")
 
 	// Multiple IP services for redundancy
 	services := []string{
@@ -88,19 +88,16 @@ func GetPublicIP() (string, error) {
 		ip, err := getIPFromService(client, service)
 		if err != nil {
 			lastErr = err
-			log.Debug().Err(err).Str("service", service).Msg("failed to get IP from service")
+			log.Debug("failed to get IP from service", "err", err, "service", service)
 			continue
 		}
 
 		if isValidIP(ip) {
-			log.Debug().
-				Str("ip", ip).
-				Str("service", service).
-				Msg("public IP collected")
+			log.Debug("public IP collected", "ip", ip, "service", service)
 			return ip, nil
 		}
 
-		log.Debug().Str("ip", ip).Str("service", service).Msg("invalid IP received")
+		log.Debug("invalid IP received", "ip", ip, "service", service)
 	}
 
 	return "", fmt.Errorf("failed to get public IP from all services: %w", lastErr)
@@ -171,30 +168,28 @@ type RunCommandParams struct {
 // RunCommand runs a command and returns the output
 func RunCommand(params RunCommandParams) error {
 	if params.DryRun {
-		log.Debug().Msgf("dry run: %s", strings.Join(params.CommandSlice, " "))
+		log.Debugf("dry run: %s", strings.Join(params.CommandSlice, " "))
 		return nil
 	}
 
 	// don't use up cycles unless we need to so that commands run faster
 	if params.LogDebug {
-		log.Debug().
-			Str("command", strings.Join(params.CommandSlice, " ")).
-			Msgf("running command")
+		log.Debug("running command", "command", strings.Join(params.CommandSlice, " "))
 	}
 
 	cmd := exec.Command(params.CommandSlice[0], params.CommandSlice[1:]...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Error().
-			Str("command", strings.Join(params.CommandSlice, " ")).
-			Str("output", string(output)).
-			Err(err).
-			Msgf("command failed")
+		log.Error("command failed",
+			"command", strings.Join(params.CommandSlice, " "),
+			"output", string(output),
+			"err", err,
+		)
 		return err
 	}
 
-	log.Debug().Msgf("output: %s", string(output))
+	log.Debugf("output: %s", string(output))
 	return nil
 }
 

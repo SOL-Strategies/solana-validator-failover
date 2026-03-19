@@ -1,7 +1,7 @@
 package solanavalidatorfailover
 
 import (
-	"github.com/rs/zerolog/log"
+	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/config"
 	"github.com/sol-strategies/solana-validator-failover/internal/validator"
 	"github.com/spf13/cobra"
@@ -23,12 +23,12 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			cfg, err := config.NewFromFile(configPath)
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to load config")
+				log.Fatal("failed to load config", "err", err)
 			}
 
 			v, err := validator.NewFromConfig(&cfg.Validator)
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to create validator")
+				log.Fatal("failed to create validator", "err", err)
 			}
 
 			err = v.Failover(validator.FailoverParams{
@@ -41,7 +41,7 @@ var (
 				ToPeer:                toPeer,
 			})
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to failover")
+				log.Fatal("failed to failover", "err", err)
 			}
 		},
 	}

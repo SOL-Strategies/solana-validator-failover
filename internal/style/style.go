@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/rs/zerolog"
 )
 
 var (
@@ -26,19 +25,19 @@ var (
 	// ColorLightGrey is the color for light grey
 	ColorLightGrey = lipgloss.Color("#999999")
 	// ColorDebug is the color for debug
-	ColorDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	ColorDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
 	// ColorInfo is the color for info
-	ColorInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	ColorInfo = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 	// ColorWarn is the color for warn
-	ColorWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("184"))
+	ColorWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("226"))
 	// ColorWarning is the color for warning
-	ColorWarning = lipgloss.Color("184")
+	ColorWarning = lipgloss.Color("226")
 	// ColorErrorValue is the color value for error
-	ColorErrorValue = lipgloss.Color("204")
+	ColorErrorValue = lipgloss.Color("196")
 	// ColorError is the style for error
 	ColorError = lipgloss.NewStyle().Foreground(ColorErrorValue)
 	// ColorFatal is the color for fatal
-	ColorFatal = lipgloss.NewStyle().Foreground(lipgloss.Color("134"))
+	ColorFatal = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
 	// ColorPanic is the color for panic
 	ColorPanic = ColorFatal
 	// ColorOrange is the color for orange
@@ -47,8 +46,8 @@ var (
 	TableHeaderStyle = lipgloss.NewStyle().Foreground(ColorPurple).Bold(true).Align(lipgloss.Center)
 	// TableCellStyle is the style for table cells
 	TableCellStyle = lipgloss.NewStyle().Padding(0, 1).Align(lipgloss.Center)
-	// ColorMessage is the color for message
-	ColorMessage = lipgloss.Color("245")
+	// ColorMessage is the color for message text (matches charmbracelet/log message style)
+	ColorMessage = lipgloss.Color("213")
 	// SpinnerTitleStyle is the style for spinner titles
 	SpinnerTitleStyle = lipgloss.NewStyle()
 	// MessageStyle is the style for messages
@@ -56,16 +55,6 @@ var (
 			Align(lipgloss.Left).
 			Width(150).
 			Padding(1, 1, 0, 1)
-
-	// LogLevels styles - stolen from https://github.com/charmbracelet/log/blob/main/styles.go
-	LogLevels = map[string]lipgloss.Style{
-		zerolog.DebugLevel.String(): ColorDebug,
-		zerolog.InfoLevel.String():  ColorInfo,
-		zerolog.WarnLevel.String():  ColorWarn,
-		zerolog.ErrorLevel.String(): ColorError,
-		zerolog.FatalLevel.String(): ColorFatal,
-		zerolog.PanicLevel.String(): ColorPanic,
-	}
 )
 
 // TemplateFuncMap returns a template.FuncMap with the style functions
@@ -81,6 +70,7 @@ func TemplateFuncMap() template.FuncMap {
 		"Purple":       RenderPurpleString,
 		"DarkPurple":   RenderDarkPurpleString,
 		"Message":      RenderMessageString,
+		"Pink":         RenderPinkString,
 		"Grey":         RenderGreyString,
 		"LightGrey":    RenderLightGreyString,
 		"Join":         strings.Join,
@@ -196,6 +186,11 @@ func RenderLightGreyString(message string) string {
 	return lipgloss.NewStyle().
 		Foreground(ColorLightGrey).
 		Render(message)
+}
+
+// RenderPinkString renders a string in the message/pink color
+func RenderPinkString(message string) string {
+	return lipgloss.NewStyle().Foreground(ColorMessage).Render(message)
 }
 
 // RenderMessageString renders a string in the message style

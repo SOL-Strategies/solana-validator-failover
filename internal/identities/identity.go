@@ -5,8 +5,8 @@ import (
 	"encoding/gob"
 	"fmt"
 
+	"github.com/charmbracelet/log"
 	"github.com/gagliardetto/solana-go"
-	"github.com/rs/zerolog/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 )
 
@@ -21,7 +21,7 @@ type Identity struct {
 
 // NewIdentityFromFile creates an Identity from a keypair file
 func NewIdentityFromFile(keyFile string) (identity *Identity, err error) {
-	logger := log.With().Str("component", "identities").Logger()
+	logger := log.WithPrefix("identities")
 	// resolve path
 	keyFileAbsolutePath, err := utils.ResolvePath(keyFile)
 	if err != nil {
@@ -32,9 +32,7 @@ func NewIdentityFromFile(keyFile string) (identity *Identity, err error) {
 		KeyFile: keyFileAbsolutePath,
 	}
 
-	logger.Debug().
-		Str("file", keyFileAbsolutePath).
-		Msg("reading solana keygen file")
+	logger.Debug("reading solana keygen file", "file", keyFileAbsolutePath)
 
 	identity.Key, err = solana.PrivateKeyFromSolanaKeygenFile(keyFileAbsolutePath)
 	if err != nil {
@@ -44,10 +42,7 @@ func NewIdentityFromFile(keyFile string) (identity *Identity, err error) {
 
 	identity.PubKeyStr = identity.Key.PublicKey().String()
 
-	logger.Debug().
-		Str("pubkey", identity.PubKeyStr).
-		Str("file", keyFileAbsolutePath).
-		Msg("parsed solana keygen file")
+	logger.Debug("parsed solana keygen file", "pubkey", identity.PubKeyStr, "file", keyFileAbsolutePath)
 
 	return identity, nil
 }
@@ -55,7 +50,7 @@ func NewIdentityFromFile(keyFile string) (identity *Identity, err error) {
 // NewIdentityFromPubkey creates an Identity from a base58 public key string.
 // The identity operates in pubkey-only mode: no keypair file, no private key.
 func NewIdentityFromPubkey(pubkey string) (identity *Identity, err error) {
-	logger := log.With().Str("component", "identities").Logger()
+	logger := log.WithPrefix("identities")
 
 	if _, err := solana.PublicKeyFromBase58(pubkey); err != nil {
 		return nil, fmt.Errorf("failed to parse pubkey as base58 public key: %w", err)
@@ -65,16 +60,14 @@ func NewIdentityFromPubkey(pubkey string) (identity *Identity, err error) {
 		PubKeyStr: pubkey,
 	}
 
-	logger.Debug().
-		Str("pubkey", pubkey).
-		Msg("loaded identity from pubkey string (pubkey-only mode)")
+	logger.Debug("loaded identity from pubkey string (pubkey-only mode)", "pubkey", pubkey)
 
 	return identity, nil
 }
 
 // Pubkey returns the public key of the identity - prefer its PascalCase counterpart PubKey
 func (i *Identity) Pubkey() string {
-	log.Warn().Msg("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
+	log.Warn("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
 	return i.PubKey()
 }
 

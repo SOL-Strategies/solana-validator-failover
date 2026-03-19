@@ -149,27 +149,27 @@ func RenderFailoverPlan(data PlanData) (string, error) {
   {{ Purple (printf "%d — run hooks %s pre-passive" (Step) .ActiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Pre.WhenActive .ActiveNodeInfo.Hostname "pre" }}{{- end }}
   {{ $n := Step }}{{ Purple (printf "%d — set %s " $n .ActiveNodeInfo.Hostname) }}{{ Passive "passive" false }}
-      {{ Warning "~" }} role      = {{ Active (printf "%-15s" "active") false }}  →  {{ Passive (printf "%-15s" "passive") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
-      {{ Warning "~" }} identity  = {{ Active (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Active.PubKey)) false }}  →  {{ Passive (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Passive.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
-        ip        = {{ LightGrey .ActiveNodeInfo.PublicIP }}
-        version   = {{ LightGrey .ActiveNodeInfo.ClientVersion }}
-        cmd       = {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
+      {{ Warning "~" }} {{ Pink "role      =" }} {{ Active (printf "%-15s" "active") false }}  {{ Pink "→" }}  {{ Passive (printf "%-15s" "passive") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
+      {{ Warning "~" }} {{ Pink "identity  =" }} {{ Active (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Active.PubKey)) false }}  {{ Pink "→" }}  {{ Passive (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Passive.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
+        {{ Pink "ip        =" }} {{ LightGrey .ActiveNodeInfo.PublicIP }}
+        {{ Pink "version   =" }} {{ LightGrey .ActiveNodeInfo.ClientVersion }}
+        {{ Pink "cmd       =" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }}
 
   {{ Purple (printf "%d — sync tower file" (Step)) }}
-        source      = {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
-      {{ Active "+" false }} destination = {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.TowerFile) }}{{ if gt .ActiveNodeInfo.TowerFileSizeBytes 0 }}
-        size        = {{ LightGrey (FormatBytes .ActiveNodeInfo.TowerFileSizeBytes) }}{{ end }}
+        {{ Pink "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
+      {{ Active "+" false }} {{ Pink "destination =" }} {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.TowerFile) }}{{ if gt .ActiveNodeInfo.TowerFileSizeBytes 0 }}
+        {{ Pink "size        =" }} {{ LightGrey (FormatBytes .ActiveNodeInfo.TowerFileSizeBytes) }}{{ end }}
 {{- end }}
 {{ if .Hooks.Pre.WhenPassive }}
   {{ Purple (printf "%d — run hooks %s pre-active" (Step) .PassiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Pre.WhenPassive .PassiveNodeInfo.Hostname "pre" }}{{- end }}
   {{ $n := Step }}{{ Purple (printf "%d — set %s " $n .PassiveNodeInfo.Hostname) }}{{ Active "active" false }}
-      {{ Warning "~" }} role      = {{ Passive (printf "%-15s" "passive") false }}  →  {{ Active (printf "%-15s" "active") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
-      {{ Warning "~" }} identity  = {{ Passive (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Passive.PubKey)) false }}  →  {{ Active (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Active.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
-        ip        = {{ LightGrey .PassiveNodeInfo.PublicIP }}
-        version   = {{ LightGrey .PassiveNodeInfo.ClientVersion }}
-        cmd       = {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
+      {{ Warning "~" }} {{ Pink "role      =" }} {{ Passive (printf "%-15s" "passive") false }}  {{ Pink "→" }}  {{ Active (printf "%-15s" "active") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
+      {{ Warning "~" }} {{ Pink "identity  =" }} {{ Passive (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Passive.PubKey)) false }}  {{ Pink "→" }}  {{ Active (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Active.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
+        {{ Pink "ip        =" }} {{ LightGrey .PassiveNodeInfo.PublicIP }}
+        {{ Pink "version   =" }} {{ LightGrey .PassiveNodeInfo.ClientVersion }}
+        {{ Pink "cmd       =" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
 {{- if .Hooks.Post.WhenActive }}
 
   {{ Purple (printf "%d — run hooks %s post-active" (Step) .PassiveNodeInfo.Hostname) }}
@@ -178,14 +178,14 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 {{ RenderHooks .Hooks.Post.WhenPassive .ActiveNodeInfo.Hostname "post" }}{{- end }}
 {{- if .Rollback.Enabled }}
 
-  {{ Warning "Rollback" }} if failover fails:
-      {{ Warning "!" }} {{ Purple .ActiveNodeInfo.Hostname }} → {{ Active "active" false }}: {{ LightGrey .Rollback.ToActive.ResolvedCmd }}
-      {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} → {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
+  {{ Warning "Rollback" }} {{ Pink "if failover fails:" }}
+      {{ Warning "!" }} {{ Purple .ActiveNodeInfo.Hostname }} {{ Pink "→" }} {{ Active "active" false }}: {{ LightGrey .Rollback.ToActive.ResolvedCmd }}
+      {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} {{ Pink "→" }} {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
 {{- end }}
   {{ HRule }}
   {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ LightGrey .AppVersion }}
-  {{ if .IsDryRun }}{{ Blue "   Note:" }} dry run — re-run with {{ LightGrey "--not-a-drill" }} on the passive node to do for realsies.{{ else }}{{ Warning "Warning:" }} This is a real failover — identities will be changed on both nodes.{{ end }}
+  {{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Pink "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Pink "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Pink "This is a real failover — identities will be changed on both nodes." }}{{ end }}
   {{ HRule }}
 `)
 	if err != nil {
