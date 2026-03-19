@@ -77,6 +77,9 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 			if n == 0 {
 				return ", same slot"
 			}
+			if n == 1 {
+				return ", over 1 slot"
+			}
 			return fmt.Sprintf(", over %s slots", humanize.Comma(int64(n)))
 		},
 		// PadRight pads s with trailing spaces to the given width (ASCII labels only).
@@ -98,24 +101,24 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 
 	tpl, err := template.New("failoverSummary").Funcs(funcMap).Parse(`
   {{ Passive .OrigActiveNode.Hostname true }}
-        {{ Pink "role     =" }} {{ Passive "passive" false }}
-        {{ Pink "identity =" }} {{ Passive (truncPubkey .OrigActiveNode.Identities.Passive.PubKey) false }}
-        {{ Pink "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
-        {{ Pink "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
-        {{ Pink "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
+        {{ Muted "role     =" }} {{ Passive "passive" false }}
+        {{ Muted "identity =" }} {{ Passive (truncPubkey .OrigActiveNode.Identities.Passive.PubKey) false }}
+        {{ Muted "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
+        {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
 {{ if not .SkipTowerSync }}
   {{ LightGrey "tower" }}
-        {{ Pink "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
-        {{ Pink "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
+        {{ Muted "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
 {{ end }}
   {{ Active .OrigPassiveNode.Hostname true }}
-        {{ Pink "role     =" }} {{ Active "active" false }}
-        {{ Pink "identity =" }} {{ Active (truncPubkey .OrigPassiveNode.Identities.Active.PubKey) false }}
-        {{ Pink "ip       =" }} {{ LightGrey .OrigPassiveNode.PublicIP }}
-        {{ Pink "took     =" }} {{ LightGrey (FormatDuration .OrigPassiveSetIdentityDuration) }}
-        {{ Pink "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverEndSlot) }}
+        {{ Muted "role     =" }} {{ Active "active" false }}
+        {{ Muted "identity =" }} {{ Active (truncPubkey .OrigPassiveNode.Identities.Active.PubKey) false }}
+        {{ Muted "ip       =" }} {{ LightGrey .OrigPassiveNode.PublicIP }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigPassiveSetIdentityDuration) }}
+        {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverEndSlot) }}
 {{ if .HasVoteRankData }}
-  {{ Purple "Vote credits:" }} {{ Pink "rank" }} {{ if gt .VoteRankDiff 0 }}{{ Active (printf "improved by +%d" .VoteRankDiff) false }}{{ else if lt .VoteRankDiff 0 }}{{ Passive (printf "worsened by %d" .VoteRankDiff) false }}{{ else }}{{ LightGrey "unchanged" }}{{ end }} {{ Pink (printf "(%d → %d)" .VoteRankFirst .VoteRankLast) }}
+  {{ Purple "Vote credits:" }} {{ Muted "rank" }} {{ if gt .VoteRankDiff 0 }}{{ Active (printf "improved by +%d" .VoteRankDiff) false }}{{ else if lt .VoteRankDiff 0 }}{{ Passive (printf "worsened by %d" .VoteRankDiff) false }}{{ else }}{{ LightGrey "unchanged" }}{{ end }} {{ Muted (printf "(%d → %d)" .VoteRankFirst .VoteRankLast) }}
 {{ end }}
   {{ if .IsDryRun }}{{ Blue (printf "✓ Dry run complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) }}{{ else }}{{ Active (printf "✓ Failover complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) false }}{{ end }}
 `)

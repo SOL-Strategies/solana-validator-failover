@@ -19,7 +19,7 @@ func (n *Node) IP() string {
 
 // Pubkey returns the pubkey of the gossip node - prefer its PascalCase counterpart PubKey
 func (n *Node) Pubkey() string {
-	log.Warn("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
+	log.Warn("pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
 	return n.PubKey()
 }
 

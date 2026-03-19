@@ -96,38 +96,38 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
-	client.logger.Debugf("Connected to %s", style.RenderPassiveString(config.ServerName, false))
+	client.logger.Debugf("connected to %s", style.RenderPassiveString(config.ServerName, false))
 
 	return client, nil
 }
 
 // Start starts the QUIC client
 func (c *Client) Start() {
-	c.logger.Debug("Starting QUIC client")
+	c.logger.Debug("starting QUIC client")
 	var wentPassive bool
 
 	// open a bidirectional stream to the server
 	stream, err := c.Conn.OpenStreamSync(c.ctx)
 	if err != nil {
-		c.logger.Error("Failed to open stream", "err", err)
+		c.logger.Error("failed to open stream", "err", err)
 		return
 	}
 
-	c.logger.Debug("Opened stream to server")
+	c.logger.Debug("opened stream to server")
 
 	// send FailoverInitiateRequest
 	c.failoverStream = NewFailoverStream(stream)
 
 	// Send message type first
 	if _, err := c.failoverStream.Stream.Write([]byte{MessageTypeFailoverInitiateRequest}); err != nil {
-		c.logger.Error("Failed to send message type", "err", err)
+		c.logger.Error("failed to send message type", "err", err)
 		return
 	}
 
 	// Send wire protocol version before any gob encoding so the server can
 	// verify compatibility before attempting to decode the gob payload.
 	if err := writeWireVersion(stream); err != nil {
-		c.logger.Error("Failed to send wire protocol version", "err", err)
+		c.logger.Error("failed to send wire protocol version", "err", err)
 		return
 	}
 
@@ -139,10 +139,10 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Debug("Sent message type")
+	c.logger.Debug("sent message type")
 
 	// wait for failover signal from server before proceeding
-	sp := spinner.New().Title(fmt.Sprintf("Connected to %s, waiting for failover signal...", style.RenderPassiveString(c.serverName, false)))
+	sp := spinner.New().Title(style.RenderPinkString("connected to ") + style.RenderPassiveString(c.serverName, false) + style.RenderPinkString(", waiting for failover signal..."))
 	sp.ActionWithErr(func(ctx context.Context) error {
 		// Read the server's wire protocol version before any gob decoding.
 		// A mismatch here means the passive node is running an incompatible version.
@@ -191,7 +191,7 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Info("Failover started")
+	c.logger.Info("failover started")
 
 	// wait until the next slot starts so we switch right at the beginning of the next slot
 	// this ensures we're early in the slot when we start the switch
@@ -205,18 +205,14 @@ func (c *Client) Start() {
 	c.failoverStream.SetFailoverStartSlot(slot)
 
 	// set identity to passive
-	dryRunPrefix := " "
+	dryRunPrefix := ""
 	if c.failoverStream.GetIsDryRunFailover() {
-		dryRunPrefix = " (dry run) "
+		dryRunPrefix = style.RenderLightGreyString("(dry run)") + " "
 	}
-	c.logger.Info(
-		fmt.Sprintf("%sSetting identity to %s - %s",
-			dryRunPrefix,
-			style.RenderPassiveString(strings.ToUpper(constants.NodeRolePassive), false),
-			style.RenderPassiveString(c.failoverStream.GetActiveNodeInfo().Identities.Passive.PubKey(), false),
-		),
-		"command", c.failoverStream.GetActiveNodeInfo().SetIdentityCommand,
-	)
+	c.logger.Info(dryRunPrefix +
+		style.RenderPinkString("changing to ") +
+		style.RenderPassiveString(constants.NodeRolePassive, false) +
+		style.RenderPinkString(" identity"))
 
 	c.failoverStream.SetActiveNodeSetIdentityStartTime()
 
@@ -233,10 +229,10 @@ func (c *Client) Start() {
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
 
 	if skipTowerSync {
-		c.logger.Info("Skipping tower file sync")
+		c.logger.Info("skipping tower file sync")
 		// Don't send anything - server won't wait for tower file when skipTowerSync is true
 	} else {
-		c.logger.Infof("Sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
+		c.logger.Infof("sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
 
 		// Read the tower file into TowerFileBytes
 		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
@@ -291,7 +287,7 @@ func (c *Client) Start() {
 				isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
 				isPostFailover:   true,
 			}), c.failoverStream.GetIsDryRunFailover(), c.logger); rbErr != nil {
-				c.logger.Error("rollback to active FAILED — manual intervention required", "err", rbErr)
+				c.logger.Error("rollback to active failed — manual intervention required", "err", rbErr)
 				if c.rollback.ToActive.ResolvedCmd != "" {
 					c.logger.Errorf("to recover this node: %s", c.rollback.ToActive.ResolvedCmd)
 				}
@@ -310,7 +306,7 @@ func (c *Client) Start() {
 		return
 	}
 
-	c.logger.Info("Failover complete")
+	c.logger.Info("failover complete")
 
 	// run post hooks now this is passive and active node says all is peachy
 	c.hooks.RunPostWhenPassive(c.getHookEnvMap(hookEnvMapParams{
@@ -325,7 +321,7 @@ func (c *Client) Start() {
 // which naturally gets us well within the first half of the new slot
 // should get us in within the first 50-100ms of the next slot
 func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
-	c.logger.Debug("Waiting until start of next slot")
+	c.logger.Debug("waiting until start of next slot")
 
 	// Get the current slot number
 	currentSlot, err := c.solanaRPCClient.GetCurrentSlot()
@@ -340,14 +336,14 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 		slot, err := c.solanaRPCClient.GetCurrentSlot()
 		if err != nil {
 			// If RPC fails, retry after a short delay
-			c.logger.Debug("Failed to get slot, retrying", "err", err)
+			c.logger.Debug("failed to get slot, retrying", "err", err)
 			time.Sleep(pollInterval)
 			continue
 		}
 
 		// Slot has changed, we're now in the next slot
 		if slot > currentSlot {
-			c.logger.Debug("Slot transition detected, proceeding", "old_slot", currentSlot, "new_slot", slot)
+			c.logger.Debug("slot transition detected, proceeding", "old_slot", currentSlot, "new_slot", slot)
 			return slot, nil
 		}
 
@@ -363,8 +359,8 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 		return nil
 	}
 
-	c.logger.Debugf("Ensuring next leader slot is at least %s in the future", c.minTimeToLeaderSlot.String())
-	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title("Checking next leader slot...")
+	c.logger.Debugf("ensuring next leader slot is at least %s in the future", c.minTimeToLeaderSlot.String())
+	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title(style.RenderPinkString("checking next leader slot..."))
 	maxRetries := 10
 	var calculatedTimeToNextLeaderSlot time.Duration
 	sp.ActionWithErr(func(ctx context.Context) error {
@@ -395,7 +391,7 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 			}
 
 			if !isOnLeaderSchedule {
-				sp.Title(style.RenderActiveString("This validator is not on the leader schedule, skipping wait for next leader slot to pass", false))
+				sp.Title(style.RenderPinkString("this validator is not on the leader schedule, skipping wait for next leader slot to pass"))
 				return nil
 			}
 
@@ -403,23 +399,13 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 
 			if timeToNextLeaderSlot < c.minTimeToLeaderSlot {
 				// show duration as human readable time until leader slot
-				sp.Title(style.RenderActiveString(
-					fmt.Sprintf("Next leader slot in %s, waiting for it before proceeding...",
-						stringTimeToNextLeaderSlot),
-					false,
-				))
+				sp.Title(style.RenderPinkString(fmt.Sprintf("next leader slot in %s, waiting for it before proceeding...", stringTimeToNextLeaderSlot)))
 				time.Sleep(sleepDuration)
 				continue
 			}
 
 			calculatedTimeToNextLeaderSlot = timeToNextLeaderSlot
-			sp.Title(style.RenderActiveString(
-				fmt.Sprintf("Next leader slot in %s > %s, proceeding...",
-					stringTimeToNextLeaderSlot,
-					stringMinTimeToLeaderSlot,
-				),
-				false,
-			))
+			sp.Title(style.RenderPinkString(fmt.Sprintf("next leader slot in %s > %s, proceeding...", stringTimeToNextLeaderSlot, stringMinTimeToLeaderSlot)))
 			time.Sleep(sleepDuration)
 			return nil
 		}
@@ -431,9 +417,9 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 	}
 
 	if calculatedTimeToNextLeaderSlot > 0 {
-		c.logger.Infof("Time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
+		c.logger.Infof("time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
 	} else {
-		c.logger.Info("No upcoming leader slots found")
+		c.logger.Info("no upcoming leader slots found")
 	}
 
 	return nil
@@ -482,10 +468,11 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 // This allows the client to start independet of the server being ready to accept connections and latches
 // onto the server as soon as it is ready
 func (c *Client) connectToServer() error {
-	sp := spinner.New().Title(fmt.Sprintf("Waiting for %s at %s...",
-		style.RenderPassiveString(c.serverName, false),
-		style.RenderGreyString(c.serverAddress, false),
-	))
+	sp := spinner.New().Title(style.RenderPinkString("waiting for ") +
+		style.RenderPassiveString(c.serverName, false) +
+		style.RenderPinkString(" at ") +
+		style.RenderGreyString(c.serverAddress, false) +
+		style.RenderPinkString("..."))
 	sp.ActionWithErr(func(spinnerCtx context.Context) error {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()

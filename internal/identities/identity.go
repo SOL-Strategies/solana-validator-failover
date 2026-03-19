@@ -67,7 +67,7 @@ func NewIdentityFromPubkey(pubkey string) (identity *Identity, err error) {
 
 // Pubkey returns the public key of the identity - prefer its PascalCase counterpart PubKey
 func (i *Identity) Pubkey() string {
-	log.Warn("Pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
+	log.Warn("pubkey is deprecated (but still works) in favour of PubKey - using it for you...")
 	return i.PubKey()
 }
 
