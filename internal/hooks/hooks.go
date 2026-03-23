@@ -281,7 +281,9 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Stream stdout and stderr in real-time using hookLogger
+	// Stream stdout and stderr in real-time.
+	// Use the base logger (no prefix) since styledStreamOutputString already
+	// embeds the full "hooks:<type>:[N/N name]:" prefix in the message.
 	go func() {
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
@@ -289,7 +291,7 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				styledOutput := styledStreamOutputString("stdout", line, h.Name, hookType, hookIndex, totalHooks)
-				hookLogger.Info(styledOutput)
+				log.Info(styledOutput)
 			}
 		}
 	}()
@@ -301,7 +303,7 @@ func (h Hook) Run(envMap map[string]string, hookType string, hookIndex int, tota
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				styledOutput := styledStreamOutputString("stderr", line, h.Name, hookType, hookIndex, totalHooks)
-				hookLogger.Info(styledOutput)
+				log.Info(styledOutput)
 			}
 		}
 	}()
