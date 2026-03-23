@@ -99,6 +99,7 @@ type HookTemplateData struct {
 	ThisNodePassiveIdentityPubkey  string
 	ThisNodePassiveIdentityKeyFile string
 	ThisNodeClientVersion          string
+	ThisNodeClientVersionLocalRPC  string
 	ThisNodeRPCAddress             string
 
 	// Peer node info
@@ -107,6 +108,7 @@ type HookTemplateData struct {
 	PeerNodeActiveIdentityPubkey  string
 	PeerNodePassiveIdentityPubkey string
 	PeerNodeClientVersion         string
+	PeerNodeClientVersionLocalRPC string
 }
 
 // newHookTemplateData creates a HookTemplateData from an envMap
@@ -130,6 +132,7 @@ func newHookTemplateData(envMap map[string]string) HookTemplateData {
 	data.ThisNodePassiveIdentityPubkey = envMap["THIS_NODE_PASSIVE_IDENTITY_PUBKEY"]
 	data.ThisNodePassiveIdentityKeyFile = envMap["THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE"]
 	data.ThisNodeClientVersion = envMap["THIS_NODE_CLIENT_VERSION"]
+	data.ThisNodeClientVersionLocalRPC = envMap["THIS_NODE_CLIENT_VERSION_LOCAL_RPC"]
 	data.ThisNodeRPCAddress = envMap["THIS_NODE_RPC_ADDRESS"]
 
 	// Parse peer node info
@@ -138,6 +141,7 @@ func newHookTemplateData(envMap map[string]string) HookTemplateData {
 	data.PeerNodeActiveIdentityPubkey = envMap["PEER_NODE_ACTIVE_IDENTITY_PUBKEY"]
 	data.PeerNodePassiveIdentityPubkey = envMap["PEER_NODE_PASSIVE_IDENTITY_PUBKEY"]
 	data.PeerNodeClientVersion = envMap["PEER_NODE_CLIENT_VERSION"]
+	data.PeerNodeClientVersionLocalRPC = envMap["PEER_NODE_CLIENT_VERSION_LOCAL_RPC"]
 
 	return data
 }

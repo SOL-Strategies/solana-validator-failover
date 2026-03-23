@@ -19,6 +19,7 @@ type NodeInfo struct {
 	TowerFileHash                  string
 	SetIdentityCommand             string
 	ClientVersion                  string
+	ClientVersionRPC               string
 	SolanaValidatorFailoverVersion string
 	RPCAddress                     string
 }

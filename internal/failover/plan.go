@@ -143,6 +143,16 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 			return result.String()
 		},
 	}
+	// FormatVersion renders the version line for a node. If the local RPC version differs from
+	// the gossip-reported version (e.g. jito/firedancer clients), both are shown so the operator
+	// can spot the discrepancy. When they match, only the gossip version is shown.
+	funcMap["FormatVersion"] = func(gossip, localRPC string) string {
+		if localRPC == "" || localRPC == gossip {
+			return gossip
+		}
+		return fmt.Sprintf("%s (%s)", gossip, localRPC)
+	}
+
 	maps.Copy(funcMap, style.TemplateFuncMap())
 
 	// The LHS of role and identity lines is padded to the same width (15 chars) so
@@ -155,7 +165,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
       {{ Warning "~" }} {{ Muted "role      =" }} {{ Active (printf "%-15s" "active") false }}  {{ Muted "→" }}  {{ Passive (printf "%-15s" "passive") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
       {{ Warning "~" }} {{ Muted "identity  =" }} {{ Active (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Active.PubKey)) false }}  {{ Muted "→" }}  {{ Passive (printf "%-15s" (truncPubkey .ActiveNodeInfo.Identities.Passive.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
         {{ Muted "ip        =" }} {{ LightGrey .ActiveNodeInfo.PublicIP }}
-        {{ Muted "version   =" }} {{ LightGrey .ActiveNodeInfo.ClientVersion }}
+        {{ Muted "version   =" }} {{ LightGrey (FormatVersion .ActiveNodeInfo.ClientVersion .ActiveNodeInfo.ClientVersionRPC) }}
         {{ Muted "cmd       =" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }}
 
@@ -171,7 +181,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
       {{ Warning "~" }} {{ Muted "role      =" }} {{ Passive (printf "%-15s" "passive") false }}  {{ Muted "→" }}  {{ Active (printf "%-15s" "active") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
       {{ Warning "~" }} {{ Muted "identity  =" }} {{ Passive (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Passive.PubKey)) false }}  {{ Muted "→" }}  {{ Active (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Active.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
         {{ Muted "ip        =" }} {{ LightGrey .PassiveNodeInfo.PublicIP }}
-        {{ Muted "version   =" }} {{ LightGrey .PassiveNodeInfo.ClientVersion }}
+        {{ Muted "version   =" }} {{ LightGrey (FormatVersion .PassiveNodeInfo.ClientVersion .PassiveNodeInfo.ClientVersionRPC) }}
         {{ Muted "cmd       =" }} {{ LightGrey .PassiveNodeInfo.SetIdentityCommand }}
 {{- if .Hooks.Post.WhenActive }}
 

@@ -274,6 +274,7 @@ validator:
     # {{ .ThisNodePassiveIdentityPubkey }}       - string: pubkey this node uses when passive
     # {{ .ThisNodePassiveIdentityKeyFile }}      - string: path to keyfile from validator.identities.passive
     # {{ .ThisNodeClientVersion }}               - string: gossip-reported solana validator client semantic version for this node
+    # {{ .ThisNodeClientVersionLocalRPC }}       - string: solana-core version from local validator getVersion RPC for this node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
     # {{ .ThisNodeRPCAddress }}                  - string: local validator RPC URL from config (validator.rpc_address)
     # {{ .PeerNodeRole }}                        - string: "active" or "passive"
     # {{ .PeerNodeName }}                        - string: hostname of peer node
@@ -281,6 +282,7 @@ validator:
     # {{ .PeerNodeActiveIdentityPubkey }}        - string: pubkey peer uses when active
     # {{ .PeerNodePassiveIdentityPubkey }}       - string: pubkey peer uses when passive
     # {{ .PeerNodeClientVersion }}               - string: gossip-reported solana validator client semantic version for peer node
+    # {{ .PeerNodeClientVersionLocalRPC }}       - string: solana-core version from local validator getVersion RPC for peer node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
     #
     # Standard environment variables passed to hook commands (SOLANA_VALIDATOR_FAILOVER_*):
     # ------------------------------------------------------------------------------------------------------------
@@ -293,6 +295,7 @@ validator:
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey this node uses when passive
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_PASSIVE_IDENTITY_KEYPAIR_FILE = path to keyfile from validator.identities.passive
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_CLIENT_VERSION                = gossip-reported solana validator client semantic version for this node
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_CLIENT_VERSION_LOCAL_RPC     = solana-core version from local validator getVersion RPC for this node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
     # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_RPC_ADDRESS                   = local validator RPC URL from config (validator.rpc_address)
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_ROLE                          = "active|passive"
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_NAME                          = hostname of peer
@@ -300,6 +303,7 @@ validator:
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_ACTIVE_IDENTITY_PUBKEY        = pubkey peer uses when active
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey peer uses when passive
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_VERSION                = gossip-reported solana validator client semantic version for peer node
+    # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_VERSION_LOCAL_RPC     = solana-core version from local validator getVersion RPC for peer node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
     hooks:
       # hooks to run before failover - errors in pre hooks optionally abort failover
       pre:

@@ -8,6 +8,7 @@
 //	go run ./cmd/plan-preview --skip-tower # omit tower file sync step
 //	go run ./cmd/plan-preview --real       # render as a real failover (not dry run)
 //	go run ./cmd/plan-preview --rollback   # include example rollback configuration
+//	go run ./cmd/plan-preview --jito       # simulate jito-solana where gossip and local RPC versions differ
 package main
 
 import (
@@ -26,12 +27,25 @@ func main() {
 	skipTower := flag.Bool("skip-tower", false, "skip tower file sync step")
 	real := flag.Bool("real", false, "render as a real failover (not a dry run)")
 	withRollback := flag.Bool("rollback", false, "include example rollback configuration")
+	jito := flag.Bool("jito", false, "simulate jito-solana where gossip and local RPC versions differ")
 	flag.Parse()
+
+	activeClientVersion := "2.1.14"
+	activeClientVersionRPC := ""
+	passiveClientVersion := "2.1.14"
+	passiveClientVersionRPC := ""
+	if *jito {
+		activeClientVersion = "4.32768.2"
+		activeClientVersionRPC = "4.0.0-beta.2"
+		passiveClientVersion = "4.32768.2"
+		passiveClientVersionRPC = "4.0.0-beta.2"
+	}
 
 	activeNode := failover.NodeInfo{
 		Hostname:           "sol-validator-1",
 		PublicIP:           "203.0.113.10",
-		ClientVersion:      "2.1.14",
+		ClientVersion:      activeClientVersion,
+		ClientVersionRPC:   activeClientVersionRPC,
 		SetIdentityCommand: "agave-validator --ledger /mnt/ledger set-identity /home/solana/passive-1-identity.json",
 		TowerFile:          "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
 		TowerFileSizeBytes: 121856,
@@ -44,7 +58,8 @@ func main() {
 	passiveNode := failover.NodeInfo{
 		Hostname:           "sol-validator-2",
 		PublicIP:           "203.0.113.20",
-		ClientVersion:      "2.1.14",
+		ClientVersion:      passiveClientVersion,
+		ClientVersionRPC:   passiveClientVersionRPC,
 		SetIdentityCommand: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json --require-tower",
 		TowerFile:          "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
 		Identities: &identities.Identities{

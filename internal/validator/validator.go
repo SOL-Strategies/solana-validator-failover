@@ -683,6 +683,17 @@ func (v *Validator) configureTLS(cfg TLSConfig) error {
 	return nil
 }
 
+// getLocalNodeVersion returns the solana-core version from the local validator RPC (best-effort).
+// Returns an empty string if the call fails, so callers can treat it as "not available".
+func (v *Validator) getLocalNodeVersion() string {
+	version, err := v.solanaRPCClient.GetLocalNodeVersion()
+	if err != nil {
+		v.logger.Warn("failed to get local node version from RPC - ClientVersionRPC will be empty", "error", err)
+		return ""
+	}
+	return version
+}
+
 // configureGossipNode ensures the gossip node is valid and sets it
 func (v *Validator) configureGossipNode() (err error) {
 	v.GossipNode, err = v.solanaRPCClient.NodeFromIP(v.PublicIP)
@@ -764,6 +775,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 			TowerFile:                      v.TowerFile,
 			SetIdentityCommand:             v.SetIdentityActiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
+			ClientVersionRPC:               v.getLocalNodeVersion(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
 			RPCAddress:                     v.RPCAddress,
 		},
@@ -838,6 +850,7 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			TowerFileSizeBytes:             utils.FileSize(v.TowerFile),
 			SetIdentityCommand:             v.SetIdentityPassiveCommand,
 			ClientVersion:                  v.GossipNode.Version(),
+			ClientVersionRPC:               v.getLocalNodeVersion(),
 			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
 			RPCAddress:                     v.RPCAddress,
 		},

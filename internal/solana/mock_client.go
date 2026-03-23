@@ -29,6 +29,9 @@ type MockClient struct {
 
 	// Leader schedule methods
 	getTimeToNextLeaderSlotForPubkey func(pubkey solana.PublicKey) (bool, time.Duration, error)
+
+	// Version methods
+	getLocalNodeVersion func() (string, error)
 }
 
 // NewMockClient creates a new mock client with default behaviors
@@ -96,6 +99,12 @@ func (m *MockClient) WithGetCurrentSlot(fn func() (uint64, error)) *MockClient {
 // WithGetTimeToNextLeaderSlotForPubkey sets a custom GetTimeToNextLeaderSlotForPubkey function
 func (m *MockClient) WithGetTimeToNextLeaderSlotForPubkey(fn func(pubkey solana.PublicKey) (bool, time.Duration, error)) *MockClient {
 	m.getTimeToNextLeaderSlotForPubkey = fn
+	return m
+}
+
+// WithGetLocalNodeVersion sets a custom GetLocalNodeVersion function
+func (m *MockClient) WithGetLocalNodeVersion(fn func() (string, error)) *MockClient {
+	m.getLocalNodeVersion = fn
 	return m
 }
 
@@ -170,6 +179,15 @@ func (m *MockClient) IsLocalNodeHealthy() bool {
 		return m.isLocalNodeHealthy()
 	}
 	return m.healthStatus
+}
+
+// GetLocalNodeVersion implements ClientInterface.GetLocalNodeVersion
+func (m *MockClient) GetLocalNodeVersion() (string, error) {
+	if m.getLocalNodeVersion != nil {
+		return m.getLocalNodeVersion()
+	}
+	// Default: return the same version as the gossip node so tests that don't care see no mismatch
+	return m.mockNode.Version(), nil
 }
 
 // Helper function to create a string pointer
