@@ -49,6 +49,11 @@ func (m *MockRPCClient) GetEpochInfo(ctx context.Context, commitment rpc.Commitm
 	return args.Get(0).(*rpc.GetEpochInfoResult), args.Error(1)
 }
 
+func (m *MockRPCClient) GetVersion(ctx context.Context) (*rpc.GetVersionResult, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(*rpc.GetVersionResult), args.Error(1)
+}
+
 // createTestClient creates a test client with mock RPC clients
 func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 	localMock := &MockRPCClient{}

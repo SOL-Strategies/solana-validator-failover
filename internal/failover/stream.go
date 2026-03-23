@@ -204,6 +204,7 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.ThisNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
 	data.ThisNodePassiveIdentityKeyFile = s.message.ActiveNodeInfo.Identities.Passive.KeyFile
 	data.ThisNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
+	data.ThisNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
 
 	// Peer node (passive)
@@ -212,6 +213,7 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.PeerNodeActiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Active.PubKey()
 	data.PeerNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
+	data.PeerNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
 
 	return data
 }
@@ -238,6 +240,7 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.ThisNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
 	data.ThisNodePassiveIdentityKeyFile = s.message.PassiveNodeInfo.Identities.Passive.KeyFile
 	data.ThisNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
+	data.ThisNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
 
 	// Peer node (active)
@@ -246,6 +249,7 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.PeerNodeActiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Active.PubKey()
 	data.PeerNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
+	data.PeerNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
 
 	return data
 }

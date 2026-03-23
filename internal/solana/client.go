@@ -26,6 +26,7 @@ type RPCClientInterface interface {
 	GetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error)
 	GetHealth(ctx context.Context) (string, error)
 	GetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error)
+	GetVersion(ctx context.Context) (*rpc.GetVersionResult, error)
 }
 
 // ClientInterface defines the interface for solana rpc operations - just simple wrappers around the rpc client
@@ -51,6 +52,10 @@ type ClientInterface interface {
 	GetLocalNodeHealth() (string, error)
 	// IsLocalNodeHealthy returns true if the local node is healthy
 	IsLocalNodeHealthy() bool
+	// GetLocalNodeVersion returns the solana-core version string from the local validator's getVersion RPC call.
+	// This may differ from the gossip-reported version for clients like jito-solana or firedancer.
+	// Returns an empty string and an error if the call fails.
+	GetLocalNodeVersion() (string, error)
 }
 
 // Client implements Interface using an RPC client
@@ -105,6 +110,15 @@ func (c *Client) IsLocalNodeHealthy() bool {
 		c.loggerLocal.Debug("local node health", "result", result)
 	}
 	return isHealthy
+}
+
+// GetLocalNodeVersion returns the solana-core version string from the local validator's getVersion RPC call.
+func (c *Client) GetLocalNodeVersion() (string, error) {
+	result, err := c.localRPCClient.GetVersion(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("failed to get local node version: %w", err)
+	}
+	return result.SolanaCore, nil
 }
 
 // NodeFromIP returns a Node from an IP address
