@@ -358,8 +358,21 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 
 // waitMinTimeToLeaderSlot waits until the next leader slot is at least the minimum time to leader slot
 func (c *Client) waitMinTimeToLeaderSlot() (err error) {
+	pubkey, err := solanago.PublicKeyFromBase58(c.activeNodeInfo.Identities.Active.PubKey())
+	if err != nil {
+		return fmt.Errorf("failed to parse active identity pubkey: %w", err)
+	}
+
 	if !c.waitMinTimeToLeaderSlotEnabled {
-		c.logger.Debug("Waiting for min time to leader slot is disabled, skipping")
+		c.logger.Debug("min time to leader slot check disabled, skipping wait")
+		isOnSchedule, timeToNext, queryErr := c.solanaRPCClient.GetTimeToNextLeaderSlotForPubkey(pubkey)
+		if queryErr != nil {
+			c.logger.Warn("could not query next leader slot", "err", queryErr)
+		} else if !isOnSchedule {
+			c.logger.Info("not on leader schedule")
+		} else {
+			c.logger.Infof("next leader slot in %s", timeToNext.Round(time.Second))
+		}
 		return nil
 	}
 
@@ -367,17 +380,14 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 	sp := spinner.New().TitleStyle(style.SpinnerTitleStyle).Title(style.RenderPinkString("checking next leader slot..."))
 	maxRetries := 10
 	var calculatedTimeToNextLeaderSlot time.Duration
+	var isOnLeaderSchedule bool
 	sp.ActionWithErr(func(ctx context.Context) error {
 		sleepDuration := 2 * time.Second
-		pubkey, err := solanago.PublicKeyFromBase58(c.activeNodeInfo.Identities.Active.PubKey())
-		if err != nil {
-			return fmt.Errorf("failed to parse active identity pubkey: %w", err)
-		}
 		remainingRetries := maxRetries
 		stringMinTimeToLeaderSlot := c.minTimeToLeaderSlot.Round(time.Second).String()
 
 		for {
-			isOnLeaderSchedule, timeToNextLeaderSlot, err := c.solanaRPCClient.GetTimeToNextLeaderSlotForPubkey(pubkey)
+			onSchedule, timeToNextLeaderSlot, err := c.solanaRPCClient.GetTimeToNextLeaderSlotForPubkey(pubkey)
 			if err != nil {
 				if remainingRetries == 0 {
 					return fmt.Errorf("failed to get time to next leader slot: %w", err)
@@ -394,15 +404,15 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 				continue
 			}
 
-			if !isOnLeaderSchedule {
-				sp.Title(style.RenderPinkString("this validator is not on the leader schedule, skipping wait for next leader slot to pass"))
+			if !onSchedule {
+				sp.Title(style.RenderPinkString("not on leader schedule, skipping wait"))
 				return nil
 			}
 
+			isOnLeaderSchedule = true
 			stringTimeToNextLeaderSlot := timeToNextLeaderSlot.Round(time.Second).String()
 
 			if timeToNextLeaderSlot < c.minTimeToLeaderSlot {
-				// show duration as human readable time until leader slot
 				sp.Title(style.RenderPinkString(fmt.Sprintf("next leader slot in %s, waiting for it before proceeding...", stringTimeToNextLeaderSlot)))
 				time.Sleep(sleepDuration)
 				continue
@@ -419,10 +429,10 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 		return fmt.Errorf("failed to wait for next leader slot: %w", err)
 	}
 
-	if calculatedTimeToNextLeaderSlot > 0 {
-		c.logger.Infof("time to next leader slot %s", calculatedTimeToNextLeaderSlot.Round(time.Second).String())
+	if !isOnLeaderSchedule {
+		c.logger.Info("not on leader schedule")
 	} else {
-		c.logger.Info("no upcoming leader slots found")
+		c.logger.Infof("next leader slot in %s", calculatedTimeToNextLeaderSlot.Round(time.Second))
 	}
 
 	return nil
