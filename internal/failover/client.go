@@ -410,7 +410,6 @@ func (c *Client) waitMinTimeToLeaderSlot() (err error) {
 
 			calculatedTimeToNextLeaderSlot = timeToNextLeaderSlot
 			sp.Title(style.RenderPinkString(fmt.Sprintf("next leader slot in %s > %s, proceeding...", stringTimeToNextLeaderSlot, stringMinTimeToLeaderSlot)))
-			time.Sleep(sleepDuration)
 			return nil
 		}
 	})
