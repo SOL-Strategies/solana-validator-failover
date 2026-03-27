@@ -318,8 +318,8 @@ func (c *Client) Start() {
 // waitUntilStartOfNextSlot waits until the start of the next slot
 // this is important to try to start a failover early in the slot to avoid missing it
 // It polls getSlot() to detect when the slot changes and returns the new slot number,
-// which naturally gets us well within the first half of the new slot
-// should get us in within the first 50-100ms of the next slot
+// which naturally gets us well within the first few milliseconds of the new slot
+// should get us in within the first 10ms of the next slot on average
 func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 	c.logger.Debug("waiting until start of next slot")
 
@@ -329,15 +329,19 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 		return 0, fmt.Errorf("failed to get current slot: %w", err)
 	}
 
-	// Poll getSlot() to detect when the slot changes
-	// This is fast and accurate - getSlot() is a lightweight RPC call
-	pollInterval := 50 * time.Millisecond // poll every 50ms
+	// Poll getSlot() to detect when the slot changes.
+	// getSlot() is a lightweight local RPC call so 10ms polling is cheap and gives
+	// ~5ms average detection lag vs ~25ms at the previous 50ms interval.
+	// On RPC error use a longer back-off to avoid hammering a struggling local node.
+	const (
+		pollInterval      = 10 * time.Millisecond
+		errorRetryInterval = 50 * time.Millisecond
+	)
 	for {
 		slot, err := c.solanaRPCClient.GetCurrentSlot()
 		if err != nil {
-			// If RPC fails, retry after a short delay
 			c.logger.Debug("failed to get slot, retrying", "err", err)
-			time.Sleep(pollInterval)
+			time.Sleep(errorRetryInterval)
 			continue
 		}
 
