@@ -45,6 +45,7 @@ type ServerConfig struct {
 	Hooks             hooks.FailoverHooks
 	MonitorConfig     MonitorConfig
 	SkipTowerSync     bool
+	SkipVoteCreditsCheck bool
 	AutoConfirm       bool
 }
 
@@ -69,6 +70,7 @@ type Server struct {
 	hooks             hooks.FailoverHooks
 	monitorConfig     MonitorConfig
 	skipTowerSync     bool
+	skipVoteCreditsCheck bool
 	autoConfirm       bool
 }
 
@@ -100,6 +102,7 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		hooks:            config.Hooks,
 		monitorConfig:    config.MonitorConfig,
 		skipTowerSync:    config.SkipTowerSync,
+		skipVoteCreditsCheck: config.SkipVoteCreditsCheck,
 		autoConfirm:      config.AutoConfirm,
 	}
 
@@ -303,15 +306,19 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	}
 
 	// take initial sample of vote credits and rank for the active key - use it to compare later
-	s.logger.Debug().Msg("Pulling pre-failover vote credits sample...")
-	err = s.failoverStream.PullActiveIdentityVoteCreditsSample(s.solanaRPCClient)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("failed to pull active identity vote credits sample")
-		s.failoverStream.SetErrorMessagef("server failed to pull active identity vote credits sample: %v", err)
-		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
-			s.logger.Error().Err(encodeErr).Msg("Failed to send error message to client")
+	if s.skipVoteCreditsCheck {
+		s.logger.Warn().Msg("--skip-vote-credits-check flag is set, skipping pre-failover vote credits check")
+	} else {
+		s.logger.Debug().Msg("Pulling pre-failover vote credits sample...")
+		err = s.failoverStream.PullActiveIdentityVoteCreditsSample(s.solanaRPCClient)
+		if err != nil {
+			s.logger.Error().Err(err).Msg("failed to pull active identity vote credits sample")
+			s.failoverStream.SetErrorMessagef("server failed to pull active identity vote credits sample: %v", err)
+			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+				s.logger.Error().Err(encodeErr).Msg("Failed to send error message to client")
+			}
+			return
 		}
-		return
 	}
 
 	// this is where the actual failover starts

@@ -31,6 +31,7 @@ type FailoverParams struct {
 	NoMinTimeToLeaderSlot bool
 	MinTimeToLeaderSlot   time.Duration
 	SkipTowerSync         bool
+	SkipVoteCreditsCheck  bool
 	AutoConfirm           bool   // -y/--yes: skip all interactive confirmations
 	ToPeer                string // --to-peer: auto-select peer by name or IP (active node only)
 }
