@@ -6,7 +6,7 @@ Simple p2p Solana validator failovers. This tool helps automate **planned** fail
 
 ![solana-validator-failover](docs/failover.png)
 
-A QUIC-based program that orchestrates safe, fast failovers between Solana validators. [This post](https://blog.solstrategies.io/quic-solana-validator-failovers-738d712ac737) covers the background in more detail. In summary, it coordinates three steps across both nodes:
+A QUIC-based program that orchestrates safe, fast failovers between Solana validators. [This post](https://solstrategies.io/blog/quic-solana-validator-failovers) covers the background in more detail. In summary, it coordinates three steps across both nodes:
 
 1. Active validator sets identity to passive
 2. Tower file synced from active to passive validator
