@@ -251,8 +251,8 @@ func (b *MockClientBuilder) WithVoteAccount(pubkey string, rank int, credits int
 		if p == pubkey {
 			return &rpc.VoteAccountsResult{
 				NodePubkey: solana.MustPublicKeyFromBase58(pubkey),
-				EpochCredits: [][]int64{
-					{1, credits, credits / 2},
+				EpochCredits: [][]uint64{
+					{1, uint64(credits), uint64(credits) / 2},
 				},
 			}, rank, nil
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -335,6 +336,22 @@ func findGossipNodeFromIPWithExpectedPubkey(nodes []*rpc.GetClusterNodesResult, 
 
 // GetCreditRankedVoteAccountFromPubkey returns the credit rank-sorted current vote accounts rank is the difference
 // between current epoch credits and total credits (descending)
+// epochCreditsDiff returns the credits earned in the most recent epoch
+// (current minus previous). Alpenglow vote accounts can carry math.MaxUint64
+// sentinel values in EpochCredits; those (and any underflow) are treated as 0
+// so the account sinks to the bottom of the credit ranking instead of overflowing.
+func epochCreditsDiff(account rpc.VoteAccountsResult) uint64 {
+	if len(account.EpochCredits) == 0 {
+		return 0
+	}
+	last := account.EpochCredits[len(account.EpochCredits)-1]
+	current, previous := last[1], last[2]
+	if current == math.MaxUint64 || previous == math.MaxUint64 || current < previous {
+		return 0
+	}
+	return current - previous
+}
+
 func (c *Client) GetCreditRankedVoteAccountFromPubkey(pubkey string) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
 	// fetch all vote accounts
 	voteAccounts, err := c.networkRPCClient.GetVoteAccounts(
@@ -352,21 +369,7 @@ func (c *Client) GetCreditRankedVoteAccountFromPubkey(pubkey string) (voteAccoun
 
 	// sort validators by the difference between current epoch credits and total credits (descending)
 	sort.SliceStable(currentVoteAccounts, func(i, j int) bool {
-		// calculate the difference between current epoch credits and total credits
-		var iDiff, jDiff int64
-		if len(currentVoteAccounts[i].EpochCredits) > 0 {
-			lastIndex := len(currentVoteAccounts[i].EpochCredits) - 1
-			currentCredits := currentVoteAccounts[i].EpochCredits[lastIndex][1]
-			totalCredits := currentVoteAccounts[i].EpochCredits[lastIndex][2]
-			iDiff = currentCredits - totalCredits
-		}
-		if len(currentVoteAccounts[j].EpochCredits) > 0 {
-			lastIndex := len(currentVoteAccounts[j].EpochCredits) - 1
-			currentCredits := currentVoteAccounts[j].EpochCredits[lastIndex][1]
-			totalCredits := currentVoteAccounts[j].EpochCredits[lastIndex][2]
-			jDiff = currentCredits - totalCredits
-		}
-		return iDiff > jDiff
+		return epochCreditsDiff(currentVoteAccounts[i]) > epochCreditsDiff(currentVoteAccounts[j])
 	})
 
 	for i, account := range currentVoteAccounts {

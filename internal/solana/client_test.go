@@ -686,13 +686,13 @@ func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_Success(t *testing.T)
 		Current: []rpc.VoteAccountsResult{
 			{
 				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 1000, 500}, // epoch, current credits, total credits
 				},
 			},
 			{
 				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 800, 400}, // lower credits, should be ranked lower
 				},
 			},
@@ -722,7 +722,7 @@ func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_NotFound(t *testing.T
 		Current: []rpc.VoteAccountsResult{
 			{
 				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 1000, 500},
 				},
 			},
@@ -771,19 +771,19 @@ func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_Sorting(t *testing.T)
 		Current: []rpc.VoteAccountsResult{
 			{
 				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 500, 1000}, // diff: 500 - 1000 = -500
 				},
 			},
 			{
 				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 800, 400}, // diff: 800 - 400 = 400 (highest, should be rank 1)
 				},
 			},
 			{
 				NodePubkey: createTestPublicKey(3),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 600, 300}, // diff: 600 - 300 = 300 (should be rank 2)
 				},
 			},
@@ -1030,13 +1030,13 @@ func BenchmarkGossipClient_GetCreditRankedVoteAccountFromPubkey(b *testing.B) {
 		Current: []rpc.VoteAccountsResult{
 			{
 				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 1000, 500},
 				},
 			},
 			{
 				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]int64{
+				EpochCredits: [][]uint64{
 					{1, 800, 400},
 				},
 			},
