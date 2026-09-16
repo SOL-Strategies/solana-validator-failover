@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/identities"
 	solanapkg "github.com/sol-strategies/solana-validator-failover/internal/solana"

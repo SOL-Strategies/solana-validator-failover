@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -398,14 +399,18 @@ func (s *Stream) PullActiveIdentityVoteCreditsSample(solanaRPCClient solana.Clie
 
 	// find compute credits
 	if len(voteAccount.EpochCredits) > 0 {
-		// Calculate credits as the difference between current and previous epoch credits
+		// Calculate credits as the difference between current and previous epoch credits.
+		// Alpenglow vote accounts can carry math.MaxUint64 sentinels; treat those (and
+		// any underflow) as 0 rather than overflowing the sample.
 		lastIndex := len(voteAccount.EpochCredits) - 1
 		currentCredits := voteAccount.EpochCredits[lastIndex][1]
-		previousCredits := int64(0)
+		previousCredits := uint64(0)
 		if lastIndex > 0 {
 			previousCredits = voteAccount.EpochCredits[lastIndex-1][1]
 		}
-		sample.Credits = int(currentCredits - previousCredits)
+		if currentCredits != math.MaxUint64 && previousCredits != math.MaxUint64 && currentCredits >= previousCredits {
+			sample.Credits = int(currentCredits - previousCredits)
+		}
 	}
 
 	// append sample to the identity's credit samples
