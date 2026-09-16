@@ -214,6 +214,9 @@ validator:
     # When disabled (the default), the connection uses an ephemeral self-signed
     # certificate — encrypted but unauthenticated.
     # When enabled, both nodes must present a certificate signed by the shared CA.
+    # Native Firedancer handoffs do not require application-level mTLS. When it
+    # is disabled, use a private authenticated connection such as Tailscale or
+    # WireGuard between failover peers.
     #
     # Certificate requirements:
     # - ca_cert: the same CA certificate must be present on both nodes
