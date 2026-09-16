@@ -1,5 +1,7 @@
 validator:
   bin: ./scripts/agave-validator-mock.sh
+  client:
+    family: agave
   cluster: mainnet-beta
   public_ip: 202.8.8.186 # don't set IRL
   name: validator-1
@@ -11,6 +13,11 @@ validator:
   tower:
     dir: ./local-test/validator-1/tower
   failover:
+    tls:
+      enabled: true
+      ca_cert: ./integration/test-tls/ca.crt
+      cert: ./integration/test-tls/node.crt
+      key: ./integration/test-tls/node.key
     peers:
       validator-2:
         address: localhost:9898

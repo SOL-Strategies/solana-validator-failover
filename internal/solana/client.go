@@ -57,6 +57,14 @@ type ClientInterface interface {
 	// This may differ from the gossip-reported version for clients like jito-solana or firedancer.
 	// Returns an empty string and an error if the call fails.
 	GetLocalNodeVersion() (string, error)
+	GetLocalIdentity(ctx context.Context) (string, error)
+	GetVoteAccountState(ctx context.Context, votePubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error)
+}
+
+// ContextVoteAccountClient is implemented by RPC clients that can bound
+// automatic vote-account discovery with a caller-provided deadline.
+type ContextVoteAccountClient interface {
+	GetCreditRankedVoteAccountFromPubkeyContext(context.Context, string) (*rpc.VoteAccountsResult, int, error)
 }
 
 // Client implements Interface using an RPC client
@@ -120,6 +128,52 @@ func (c *Client) GetLocalNodeVersion() (string, error) {
 		return "", fmt.Errorf("failed to get local node version: %w", err)
 	}
 	return result.SolanaCore, nil
+}
+
+// GetLocalIdentity returns the identity reported by the validator's local RPC.
+func (c *Client) GetLocalIdentity(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	identityClient, ok := c.localRPCClient.(interface {
+		GetIdentity(context.Context) (*rpc.GetIdentityResult, error)
+	})
+	if !ok {
+		return "", fmt.Errorf("local RPC client does not support getIdentity")
+	}
+	result, err := identityClient.GetIdentity(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get local identity: %w", err)
+	}
+	return result.Identity.String(), nil
+}
+
+// GetVoteAccountState returns one vote account from either local or network RPC.
+func (c *Client) GetVoteAccountState(ctx context.Context, votePubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	votePubkeyValue, err := solanago.PublicKeyFromBase58(votePubkey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid vote account pubkey %q: %w", votePubkey, err)
+	}
+	client := c.networkRPCClient
+	if local {
+		client = c.localRPCClient
+	}
+	accounts, err := client.GetVoteAccounts(ctx, &rpc.GetVoteAccountsOpts{
+		Commitment: commitment,
+		VotePubkey: &votePubkeyValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vote accounts: %w", err)
+	}
+	for _, account := range append(accounts.Current, accounts.Delinquent...) {
+		if account.VotePubkey.String() == votePubkey {
+			return &account, nil
+		}
+	}
+	return nil, fmt.Errorf("vote account not found: %s", votePubkey)
 }
 
 // NodeFromIP returns a Node from an IP address
@@ -353,9 +407,19 @@ func epochCreditsDiff(account rpc.VoteAccountsResult) uint64 {
 // GetCreditRankedVoteAccountFromPubkey returns the current vote account and its
 // rank by credits earned in the most recent epoch, highest first.
 func (c *Client) GetCreditRankedVoteAccountFromPubkey(pubkey string) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
+	return c.getCreditRankedVoteAccount(context.Background(), pubkey, false)
+}
+
+// GetCreditRankedVoteAccountFromPubkeyContext is the context-aware version of
+// GetCreditRankedVoteAccountFromPubkey used by time-bounded handoff setup.
+func (c *Client) GetCreditRankedVoteAccountFromPubkeyContext(ctx context.Context, pubkey string) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
+	return c.getCreditRankedVoteAccount(ctx, pubkey, true)
+}
+
+func (c *Client) getCreditRankedVoteAccount(ctx context.Context, pubkey string, includeDelinquent bool) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
 	// fetch all vote accounts
 	voteAccounts, err := c.networkRPCClient.GetVoteAccounts(
-		context.Background(),
+		ctx,
 		&rpc.GetVoteAccountsOpts{
 			Commitment: rpc.CommitmentConfirmed,
 		},
@@ -364,15 +428,30 @@ func (c *Client) GetCreditRankedVoteAccountFromPubkey(pubkey string) (voteAccoun
 		return nil, 0, fmt.Errorf("failed to get vote account from pubkey %s: %w", pubkey, err)
 	}
 
-	// select current (non-delinquent) vote accounts
-	currentVoteAccounts := voteAccounts.Current
+	if includeDelinquent {
+		// A native validator can be delinquent while still having a valid vote
+		// account, so discovery must search both RPC result sets. Multiple
+		// matches are unsafe because the metrics watermark identifies neither
+		// account, so force the operator to configure vote_account explicitly.
+		matches := make([]rpc.VoteAccountsResult, 0, 2)
+		for _, account := range append(voteAccounts.Current, voteAccounts.Delinquent...) {
+			if account.NodePubkey.String() == pubkey {
+				matches = append(matches, account)
+			}
+		}
+		if len(matches) != 1 {
+			return nil, 0, fmt.Errorf("expected exactly one vote account for node %s, found %d; configure validator.client.vote_account explicitly", pubkey, len(matches))
+		}
+		return &matches[0], 0, nil
+	}
 
-	// sort validators by the difference between current epoch credits and total credits (descending)
-	sort.SliceStable(currentVoteAccounts, func(i, j int) bool {
-		return epochCreditsDiff(currentVoteAccounts[i]) > epochCreditsDiff(currentVoteAccounts[j])
+	// Existing credit-ranking callers rank current validators only.
+	allVoteAccounts := voteAccounts.Current
+	sort.SliceStable(allVoteAccounts, func(i, j int) bool {
+		return epochCreditsDiff(allVoteAccounts[i]) > epochCreditsDiff(allVoteAccounts[j])
 	})
 
-	for i, account := range currentVoteAccounts {
+	for i, account := range allVoteAccounts {
 		if account.NodePubkey.String() == pubkey {
 			creditRank = i + 1 // rank is 1-indexed
 			return &account, creditRank, nil

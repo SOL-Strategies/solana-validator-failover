@@ -572,6 +572,15 @@ func TestConfigureHooks_Success(t *testing.T) {
 // Legacy tests for backward compatibility
 // ============================================================================
 
+func TestConfigureClientRequiresExplicitFamilyForFdctl(t *testing.T) {
+	v := &Validator{Bin: "fdctl", logger: log.WithPrefix("validator")}
+
+	err := v.configureClient(ClientConfig{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "validator.client.family explicitly")
+}
+
 func TestNewFromConfig_Success(t *testing.T) {
 	// Create temporary directories and files
 	tempDir := t.TempDir()

@@ -125,7 +125,38 @@ func (s Stream) GetIsDryRunFailover() bool {
 // SetSkipTowerSync sets the skip tower sync flag
 func (s *Stream) SetSkipTowerSync(skipTowerSync bool) {
 	s.message.SkipTowerSync = skipTowerSync
+	s.refreshTowerTransfer()
 }
+
+func (s *Stream) SetHandoffStrategy(strategy string) {
+	s.message.HandoffStrategy = strategy
+	s.refreshTowerTransfer()
+}
+
+func (s *Stream) refreshTowerTransfer() {
+	s.message.TowerFileWillBeTransferred = s.message.HandoffStrategy == HandoffStrategyTowerFile && !s.message.SkipTowerSync
+}
+
+func (s Stream) GetHandoffStrategy() string { return s.message.HandoffStrategy }
+
+func (s Stream) GetTowerFileWillBeTransferred() bool { return s.message.TowerFileWillBeTransferred }
+
+func (s *Stream) SetFrozenTowerSlot(slot uint64) { s.message.FrozenTowerSlot = slot }
+
+func (s Stream) GetFrozenTowerSlot() uint64 { return s.message.FrozenTowerSlot }
+
+func (s *Stream) SetReconciliationComplete(done bool) { s.message.ReconciliationComplete = done }
+
+func (s Stream) GetReconciliationComplete() bool { return s.message.ReconciliationComplete }
+
+func (s *Stream) SetRollbackCommands(active, passive string) {
+	s.message.ActiveRollbackCommand = active
+	s.message.PassiveRollbackCommand = passive
+}
+
+func (s Stream) GetActiveRollbackCommand() string { return s.message.ActiveRollbackCommand }
+
+func (s Stream) GetPassiveRollbackCommand() string { return s.message.PassiveRollbackCommand }
 
 // GetSkipTowerSync returns the skip tower sync flag
 func (s Stream) GetSkipTowerSync() bool {
@@ -207,6 +238,8 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.ThisNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
 	data.ThisNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
+	data.ThisNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ThisNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
 
 	// Peer node (passive)
 	data.PeerNodeName = s.message.PassiveNodeInfo.Hostname
@@ -215,6 +248,17 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.PeerNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
 	data.PeerNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
+	data.PeerNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.PeerNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ToNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.FromNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.HandoffStrategy = s.message.HandoffStrategy
+	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
+	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer
 
 	return data
 }
@@ -243,6 +287,8 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.ThisNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
 	data.ThisNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
+	data.ThisNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.ThisNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
 
 	// Peer node (active)
 	data.PeerNodeName = s.message.ActiveNodeInfo.Hostname
@@ -251,6 +297,17 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.PeerNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
 	data.PeerNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
+	data.PeerNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.PeerNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.FromNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ToNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.FromNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.HandoffStrategy = s.message.HandoffStrategy
+	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
+	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer
 
 	return data
 }
@@ -261,17 +318,19 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 // and tower file sync
 func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hooks.RollbackConfig, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
 	data := PlanData{
-		IsDryRun:            s.message.IsDryRunFailover,
-		SkipTowerSync:       s.message.SkipTowerSync,
-		ActiveNodeInfo:      s.message.ActiveNodeInfo,
-		PassiveNodeInfo:     s.message.PassiveNodeInfo,
-		AppVersion:          pkgconstants.AppVersion,
-		Hooks:               failoverHooks,
-		Rollback:            rollback,
-		ActivePreHookData:   s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
-		ActivePostHookData:  s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
-		PassivePreHookData:  s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
-		PassivePostHookData: s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
+		IsDryRun:                   s.message.IsDryRunFailover,
+		SkipTowerSync:              s.message.SkipTowerSync,
+		HandoffStrategy:            s.message.HandoffStrategy,
+		TowerFileWillBeTransferred: s.message.TowerFileWillBeTransferred,
+		ActiveNodeInfo:             s.message.ActiveNodeInfo,
+		PassiveNodeInfo:            s.message.PassiveNodeInfo,
+		AppVersion:                 pkgconstants.AppVersion,
+		Hooks:                      failoverHooks,
+		Rollback:                   rollback,
+		ActivePreHookData:          s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
+		ActivePostHookData:         s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
+		PassivePreHookData:         s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
+		PassivePostHookData:        s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
 	}
 
 	rendered, err := RenderFailoverPlan(data)
@@ -327,8 +386,9 @@ func (s *Stream) BuildSummaryData() SummaryData {
 		stateFileSize = s.message.ActiveNodeInfo.TowerFileSizeBytes
 	}
 	return SummaryData{
-		IsDryRun:      s.message.IsDryRunFailover,
-		SkipTowerSync: s.message.SkipTowerSync,
+		IsDryRun:                   s.message.IsDryRunFailover,
+		SkipTowerSync:              s.message.SkipTowerSync,
+		TowerFileWillBeTransferred: s.message.TowerFileWillBeTransferred,
 
 		OrigActiveNode:  s.message.ActiveNodeInfo,
 		OrigPassiveNode: s.message.PassiveNodeInfo,

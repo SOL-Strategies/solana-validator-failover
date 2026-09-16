@@ -51,8 +51,9 @@ func main() {
 	}
 
 	data := failover.SummaryData{
-		IsDryRun:      *isDryRun,
-		SkipTowerSync: *skipTower,
+		IsDryRun:                   *isDryRun,
+		SkipTowerSync:              *skipTower,
+		TowerFileWillBeTransferred: !*skipTower,
 
 		OrigActiveNode:  origActiveNode,
 		OrigPassiveNode: origPassiveNode,

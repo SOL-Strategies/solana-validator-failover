@@ -101,6 +101,8 @@ type HookTemplateData struct {
 	ThisNodeClientVersion          string
 	ThisNodeClientVersionLocalRPC  string
 	ThisNodeRPCAddress             string
+	ThisNodeClientFamily           string
+	ThisNodeIsNativeFiredancer     bool
 
 	// Peer node info
 	PeerNodeName                  string
@@ -109,6 +111,18 @@ type HookTemplateData struct {
 	PeerNodePassiveIdentityPubkey string
 	PeerNodeClientVersion         string
 	PeerNodeClientVersionLocalRPC string
+	PeerNodeClientFamily          string
+	PeerNodeIsNativeFiredancer    bool
+
+	FromNodeClientFamily            string
+	ToNodeClientFamily              string
+	FromNodeIsNativeFiredancer      bool
+	ToNodeIsNativeFiredancer        bool
+	FromNodeIsAgaveDerived          bool
+	ToNodeIsAgaveDerived            bool
+	HandoffStrategy                 string
+	TowerFileWillBeTransferred      bool
+	TowerFileAvailableAtDestination bool
 }
 
 // newHookTemplateData creates a HookTemplateData from an envMap
@@ -134,6 +148,8 @@ func newHookTemplateData(envMap map[string]string) HookTemplateData {
 	data.ThisNodeClientVersion = envMap["THIS_NODE_CLIENT_VERSION"]
 	data.ThisNodeClientVersionLocalRPC = envMap["THIS_NODE_CLIENT_VERSION_LOCAL_RPC"]
 	data.ThisNodeRPCAddress = envMap["THIS_NODE_RPC_ADDRESS"]
+	data.ThisNodeClientFamily = envMap["THIS_NODE_CLIENT_FAMILY"]
+	data.ThisNodeIsNativeFiredancer = envMap["THIS_NODE_IS_NATIVE_FIREDANCER"] == "true"
 
 	// Parse peer node info
 	data.PeerNodeName = envMap["PEER_NODE_NAME"]
@@ -142,6 +158,17 @@ func newHookTemplateData(envMap map[string]string) HookTemplateData {
 	data.PeerNodePassiveIdentityPubkey = envMap["PEER_NODE_PASSIVE_IDENTITY_PUBKEY"]
 	data.PeerNodeClientVersion = envMap["PEER_NODE_CLIENT_VERSION"]
 	data.PeerNodeClientVersionLocalRPC = envMap["PEER_NODE_CLIENT_VERSION_LOCAL_RPC"]
+	data.PeerNodeClientFamily = envMap["PEER_NODE_CLIENT_FAMILY"]
+	data.PeerNodeIsNativeFiredancer = envMap["PEER_NODE_IS_NATIVE_FIREDANCER"] == "true"
+	data.FromNodeClientFamily = envMap["FROM_NODE_CLIENT_FAMILY"]
+	data.ToNodeClientFamily = envMap["TO_NODE_CLIENT_FAMILY"]
+	data.FromNodeIsNativeFiredancer = envMap["FROM_NODE_IS_NATIVE_FIREDANCER"] == "true"
+	data.ToNodeIsNativeFiredancer = envMap["TO_NODE_IS_NATIVE_FIREDANCER"] == "true"
+	data.FromNodeIsAgaveDerived = envMap["FROM_NODE_IS_AGAVE_DERIVED"] == "true"
+	data.ToNodeIsAgaveDerived = envMap["TO_NODE_IS_AGAVE_DERIVED"] == "true"
+	data.HandoffStrategy = envMap["HANDOFF_STRATEGY"]
+	data.TowerFileWillBeTransferred = envMap["TOWER_FILE_WILL_BE_TRANSFERRED"] == "true"
+	data.TowerFileAvailableAtDestination = envMap["TOWER_FILE_AVAILABLE_AT_DESTINATION"] == "true"
 
 	return data
 }

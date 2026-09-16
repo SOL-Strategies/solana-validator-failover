@@ -24,6 +24,9 @@ const (
 	// MessageTypeFileTransfer is the message type for file transfer
 	MessageTypeFileTransfer byte = 2
 
+	HandoffStrategyTowerFile = "tower-file"
+	HandoffStrategyOnchain   = "onchain-reconcile"
+
 	// WireProtocolVersion is the binary framing version for QUIC streams.
 	// Bump this whenever the stream framing or gob types change in a
 	// backward-incompatible way (e.g. adding GobEncode/GobDecode to a type).

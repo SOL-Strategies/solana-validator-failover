@@ -20,10 +20,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         set-identity)
             shift
+            # Match native Firedancer's CLI contract: set-identity does not
+            # accept Agave's --force option.
+            if printf '%s\n' "$@" | grep -qx -- "--force"; then
+                echo "fdctl-mock set-identity: unknown option --force" >&2
+                exit 1
+            fi
             # Notify mock-solana of the identity change if MOCK_SOLANA_URL and VALIDATOR_NAME are set.
-            # --force means setting to active; absence means passive.
+            # The fixtures use distinct active/passive keypair file names.
             if [ -n "${MOCK_SOLANA_URL:-}" ] && [ -n "${VALIDATOR_NAME:-}" ]; then
-                if echo "$@" | grep -q -- "--force"; then
+                if printf '%s\n' "$@" | grep -q -- "active-identity"; then
                     # Check if this set-identity-to-active call should be simulated as failing.
                     FAIL_CHECK=$(curl -sf "${MOCK_SOLANA_URL}/fail-check?validator=${VALIDATOR_NAME}&action=set_active" 2>/dev/null || echo '{"fail":false}')
                     if echo "$FAIL_CHECK" | grep -q '"fail":true'; then

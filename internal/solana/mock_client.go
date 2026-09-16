@@ -1,6 +1,7 @@
 package solana
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -32,6 +33,8 @@ type MockClient struct {
 
 	// Version methods
 	getLocalNodeVersion func() (string, error)
+	getLocalIdentity    func() (string, error)
+	getVoteAccountState func(string, bool, rpc.CommitmentType) (*rpc.VoteAccountsResult, error)
 }
 
 // NewMockClient creates a new mock client with default behaviors
@@ -108,6 +111,16 @@ func (m *MockClient) WithGetLocalNodeVersion(fn func() (string, error)) *MockCli
 	return m
 }
 
+func (m *MockClient) WithGetLocalIdentity(fn func() (string, error)) *MockClient {
+	m.getLocalIdentity = fn
+	return m
+}
+
+func (m *MockClient) WithGetVoteAccountState(fn func(string, bool, rpc.CommitmentType) (*rpc.VoteAccountsResult, error)) *MockClient {
+	m.getVoteAccountState = fn
+	return m
+}
+
 // WithMockNode sets the mock node
 func (m *MockClient) WithMockNode(node *Node) *MockClient {
 	m.mockNode = node
@@ -144,6 +157,13 @@ func (m *MockClient) GetCreditRankedVoteAccountFromPubkey(pubkey string) (*rpc.V
 		return m.getCreditRankedVoteAccountFromPubkey(pubkey)
 	}
 	return nil, 0, nil
+}
+
+// GetCreditRankedVoteAccountFromPubkeyContext implements the context-aware
+// lookup used by native handoff setup. The mock callback remains synchronous;
+// production RPC clients enforce the supplied context.
+func (m *MockClient) GetCreditRankedVoteAccountFromPubkeyContext(_ context.Context, pubkey string) (*rpc.VoteAccountsResult, int, error) {
+	return m.GetCreditRankedVoteAccountFromPubkey(pubkey)
 }
 
 // GetCurrentSlot implements ClientInterface.GetCurrentSlot
@@ -188,6 +208,20 @@ func (m *MockClient) GetLocalNodeVersion() (string, error) {
 	}
 	// Default: return the same version as the gossip node so tests that don't care see no mismatch
 	return m.mockNode.Version(), nil
+}
+
+func (m *MockClient) GetLocalIdentity(_ context.Context) (string, error) {
+	if m.getLocalIdentity != nil {
+		return m.getLocalIdentity()
+	}
+	return m.mockNode.PubKey(), nil
+}
+
+func (m *MockClient) GetVoteAccountState(_ context.Context, pubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error) {
+	if m.getVoteAccountState != nil {
+		return m.getVoteAccountState(pubkey, local, commitment)
+	}
+	return nil, errors.New("vote account state not configured")
 }
 
 // Helper function to create a string pointer
