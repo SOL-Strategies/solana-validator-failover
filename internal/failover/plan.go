@@ -15,17 +15,19 @@ import (
 
 // PlanData holds all data needed to render the failover plan template.
 type PlanData struct {
-	IsDryRun            bool
-	SkipTowerSync       bool
-	ActiveNodeInfo      NodeInfo
-	PassiveNodeInfo     NodeInfo
-	AppVersion          string
-	Hooks               hooks.FailoverHooks
-	Rollback            hooks.RollbackConfig
-	ActivePreHookData   hooks.HookTemplateData
-	ActivePostHookData  hooks.HookTemplateData
-	PassivePreHookData  hooks.HookTemplateData
-	PassivePostHookData hooks.HookTemplateData
+	IsDryRun                   bool
+	SkipTowerSync              bool
+	HandoffStrategy            string
+	TowerFileWillBeTransferred bool
+	ActiveNodeInfo             NodeInfo
+	PassiveNodeInfo            NodeInfo
+	AppVersion                 string
+	Hooks                      hooks.FailoverHooks
+	Rollback                   hooks.RollbackConfig
+	ActivePreHookData          hooks.HookTemplateData
+	ActivePostHookData         hooks.HookTemplateData
+	PassivePreHookData         hooks.HookTemplateData
+	PassivePostHookData        hooks.HookTemplateData
 }
 
 // RenderFailoverPlan renders the failover confirmation plan to a string.
@@ -61,7 +63,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		// (identity changes, tower sync, hooks) sits on its own line. Continuation
 		// lines are indented to align with the value start after "   Plan: ".
 		// The indent is 11 chars: 2 (template leading spaces) + 8 (label) + 1 (space).
-		"planSummaryLines": func(activeHostname, passiveHostname string, skipTowerSync bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
+		"planSummaryLines": func(activeHostname, passiveHostname string, towerFileWillBeTransferred bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
 			const indent = "           " // 11 spaces
 
 			arrow := style.RenderMutedString("→")
@@ -73,7 +75,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 
 			lines := []string{identityLine}
 
-			if !skipTowerSync {
+			if towerFileWillBeTransferred {
 				lines = append(lines, style.RenderMutedString("1 tower sync"))
 			}
 
@@ -167,7 +169,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
         {{ Muted "ip        =" }} {{ LightGrey .ActiveNodeInfo.PublicIP }}
         {{ Muted "version   =" }} {{ LightGrey (FormatVersion .ActiveNodeInfo.ClientVersion .ActiveNodeInfo.ClientVersionRPC) }}
         {{ Muted "cmd       =" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
-{{- if not .SkipTowerSync }}
+{{- if .TowerFileWillBeTransferred }}
 
   {{ Purple (printf "%d — sync tower file" (Step)) }}
         {{ Muted "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
@@ -196,7 +198,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
       {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} {{ Muted "→" }} {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
 {{- end }}
   {{ HRule }}
-  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks .Rollback }}
+  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .TowerFileWillBeTransferred .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ Muted .AppVersion }}
   {{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
   {{ HRule }}
@@ -207,13 +209,15 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
-		"IsDryRun":        data.IsDryRun,
-		"SkipTowerSync":   data.SkipTowerSync,
-		"PassiveNodeInfo": data.PassiveNodeInfo,
-		"ActiveNodeInfo":  data.ActiveNodeInfo,
-		"AppVersion":      data.AppVersion,
-		"Hooks":           data.Hooks,
-		"Rollback":        data.Rollback,
+		"IsDryRun":                   data.IsDryRun,
+		"SkipTowerSync":              data.SkipTowerSync,
+		"HandoffStrategy":            data.HandoffStrategy,
+		"TowerFileWillBeTransferred": data.TowerFileWillBeTransferred,
+		"PassiveNodeInfo":            data.PassiveNodeInfo,
+		"ActiveNodeInfo":             data.ActiveNodeInfo,
+		"AppVersion":                 data.AppVersion,
+		"Hooks":                      data.Hooks,
+		"Rollback":                   data.Rollback,
 	}); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}

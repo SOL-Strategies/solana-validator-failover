@@ -17,6 +17,9 @@ import (
 type SummaryData struct {
 	IsDryRun      bool
 	SkipTowerSync bool
+	// TowerFileWillBeTransferred is the negotiated transfer decision. It is
+	// distinct from SkipTowerSync for native/on-chain handoffs.
+	TowerFileWillBeTransferred bool
 
 	// OrigActiveNode is the node that initiated the failover (was active, now passive).
 	// OrigPassiveNode is the node that received the failover (was passive, now active).
@@ -95,7 +98,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	// labelWidth is the display width of the widest section label so that the
 	// timing info on each header line aligns vertically.
 	labelWidth := max(len(data.OrigActiveNode.Hostname), len(data.OrigPassiveNode.Hostname))
-	if !data.SkipTowerSync {
+	if data.TowerFileWillBeTransferred {
 		labelWidth = max(labelWidth, len("> tower"))
 	}
 
@@ -106,7 +109,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
         {{ Muted "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
-{{ if not .SkipTowerSync }}
+{{ if .TowerFileWillBeTransferred }}
   {{ LightGrey "tower" }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
         {{ Muted "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
@@ -130,6 +133,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	if err := tpl.Execute(&buf, map[string]any{
 		"IsDryRun":                       data.IsDryRun,
 		"SkipTowerSync":                  data.SkipTowerSync,
+		"TowerFileWillBeTransferred":     data.TowerFileWillBeTransferred,
 		"OrigActiveNode":                 data.OrigActiveNode,
 		"OrigPassiveNode":                data.OrigPassiveNode,
 		"LabelWidth":                     labelWidth,

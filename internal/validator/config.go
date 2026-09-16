@@ -17,9 +17,20 @@ type Config struct {
 	Identities          identities.Config `mapstructure:"identities"`
 	RPCAddress          string            `mapstructure:"rpc_address"`
 	LedgerDir           string            `mapstructure:"ledger_dir"`
+	Client              ClientConfig      `mapstructure:"client"`
 	Tower               TowerConfig       `mapstructure:"tower"`
 	Name                string            `mapstructure:"name"`      // optional display name used in plans/logs; defaults to OS hostname
 	PublicIP            string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
+}
+
+// ClientConfig describes the validator implementation behind the operator's
+// identity commands. It is metadata only; commands remain operator supplied.
+type ClientConfig struct {
+	Family         string `mapstructure:"family"`
+	Consensus      string `mapstructure:"consensus"`
+	ConfigPath     string `mapstructure:"config_path"`
+	MetricsAddress string `mapstructure:"metrics_address"`
+	VoteAccount    string `mapstructure:"vote_account"`
 }
 
 // TowerConfig is the configuration for the towerfile
@@ -40,7 +51,16 @@ type FailoverConfig struct {
 	Peers                         PeersConfig          `mapstructure:"peers"`
 	Server                        ServerConfig         `mapstructure:"server"`
 	TLS                           TLSConfig            `mapstructure:"tls"`
+	Handoff                       HandoffConfig        `mapstructure:"handoff"`
 	IsDryRun                      bool
+}
+
+type HandoffConfig struct {
+	Commitment           string `mapstructure:"commitment"`
+	Timeout              string `mapstructure:"timeout"`
+	PollInterval         string `mapstructure:"poll_interval"`
+	TimeoutDuration      time.Duration
+	PollIntervalDuration time.Duration
 }
 
 // TLSConfig holds the optional mTLS configuration for the QUIC connection between validators.

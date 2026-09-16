@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -54,24 +55,56 @@ type BinMetadata struct {
 
 // Validator is a validator that uses the new QUIC protocol
 type Validator struct {
-	Bin                            string
-	BinMetadata                    BinMetadata
-	FailoverServerConfig           ServerConfig
-	MonitorConfig                  MonitorConfig
-	GossipNode                     *solana.Node
-	Hooks                          hooks.FailoverHooks
-	Hostname                       string
-	Identities                     *identities.Identities
-	LedgerDir                      string
-	MinimumTimeToLeaderSlot        time.Duration
-	Peers                          Peers
-	PublicIP                       string
-	RPCAddress                     string
-	SetIdentityActiveCommand       string
-	SetIdentityPassiveCommand      string
-	TowerFile                      string
-	TowerFileAutoDeleteWhenPassive bool
-	Rollback                       hooks.RollbackConfig
+	Bin                               string
+	BinMetadata                       BinMetadata
+	FailoverServerConfig              ServerConfig
+	MonitorConfig                     MonitorConfig
+	GossipNode                        *solana.Node
+	Hooks                             hooks.FailoverHooks
+	Hostname                          string
+	Identities                        *identities.Identities
+	LedgerDir                         string
+	MinimumTimeToLeaderSlot           time.Duration
+	Peers                             Peers
+	PublicIP                          string
+	RPCAddress                        string
+	SetIdentityActiveCommand          string
+	SetIdentityPassiveCommand         string
+	SetIdentityActiveCommandTemplate  string
+	SetIdentityPassiveCommandTemplate string
+	RollbackToActiveCommandTemplate   string
+	RollbackToPassiveCommandTemplate  string
+	ClientFamily                      string
+	ConsensusMode                     string
+	ClientConfigPath                  string
+	ClientMetricsAddress              string
+	VoteAccount                       string
+	ThisNodeClientFamily              string
+	PeerNodeClientFamily              string
+	FromNodeClientFamily              string
+	ToNodeClientFamily                string
+	ThisNodeIsNativeFiredancer        bool
+	PeerNodeIsNativeFiredancer        bool
+	FromNodeIsNativeFiredancer        bool
+	ToNodeIsNativeFiredancer          bool
+	FromNodeIsAgaveDerived            bool
+	ToNodeIsAgaveDerived              bool
+	FromNodeConsensus                 string
+	ToNodeConsensus                   string
+	FromNodeClientVersion             string
+	ToNodeClientVersion               string
+	HandoffStrategy                   string
+	TowerFileWillBeTransferred        bool
+	TowerFileAvailableAtDestination   bool
+	ActiveIdentityPubkey              string
+	VoteAccountPubkey                 string
+	IsDryRunFailover                  bool
+	HandoffCommitment                 string
+	HandoffTimeout                    time.Duration
+	HandoffPollInterval               time.Duration
+	TowerFile                         string
+	TowerFileAutoDeleteWhenPassive    bool
+	Rollback                          hooks.RollbackConfig
 
 	logger          *log.Logger
 	solanaRPCClient solana.ClientInterface
@@ -112,6 +145,15 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 
 	// ensure supplied validator binary exists
 	err = v.configureBin(cfg.Bin)
+	if err != nil {
+		return err
+	}
+
+	err = v.configureClient(cfg.Client)
+	if err != nil {
+		return err
+	}
+	err = v.configureHandoff(cfg.Failover.Handoff)
 	if err != nil {
 		return err
 	}
@@ -194,6 +236,93 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 		return err
 	}
 
+	return nil
+}
+
+func (v *Validator) configureClient(cfg ClientConfig) error {
+	family := strings.ToLower(strings.TrimSpace(cfg.Family))
+	if family == "" || family == "auto" {
+		bin := strings.ToLower(filepath.Base(strings.Fields(v.Bin)[0]))
+		switch {
+		case bin == "firedancer":
+			family = "firedancer"
+		case bin == "fdctl":
+			return fmt.Errorf("cannot infer validator.client.family from fdctl; set validator.client.family explicitly to firedancer or frankendancer")
+		case strings.Contains(bin, "frankendancer"):
+			family = "frankendancer"
+		case strings.Contains(bin, "jito"):
+			family = "jito-solana"
+		case strings.Contains(bin, "agave") || strings.Contains(bin, "solana-validator"):
+			family = "agave"
+		default:
+			// Preserve the legacy path for custom operator wrappers.
+			family = "unknown"
+		}
+	}
+	switch family {
+	case "agave", "jito-solana", "frankendancer", "firedancer", "unknown":
+	default:
+		return fmt.Errorf("invalid validator.client.family %q", family)
+	}
+	consensus := strings.ToLower(strings.TrimSpace(cfg.Consensus))
+	if consensus == "" || consensus == "auto" {
+		consensus = "tower"
+	}
+	if consensus != "tower" {
+		return fmt.Errorf("unsupported validator.client.consensus %q: only tower is supported", consensus)
+	}
+	v.ClientFamily = family
+	v.ConsensusMode = consensus
+	if cfg.ConfigPath != "" {
+		resolvedConfigPath, resolveErr := utils.ResolvePath(cfg.ConfigPath)
+		if resolveErr != nil {
+			return fmt.Errorf("failed to resolve validator.client.config_path: %w", resolveErr)
+		}
+		v.ClientConfigPath = resolvedConfigPath
+	} else {
+		v.ClientConfigPath = ""
+	}
+	v.ClientMetricsAddress = cfg.MetricsAddress
+	v.VoteAccount = cfg.VoteAccount
+	v.VoteAccountPubkey = cfg.VoteAccount
+	v.ThisNodeClientFamily = family
+	v.ThisNodeIsNativeFiredancer = family == "firedancer"
+	// Keep startup-resolved commands compatible with the legacy tower-file
+	// fallback. Negotiated commands are rendered again with the real strategy.
+	v.HandoffStrategy = failover.HandoffStrategyTowerFile
+	v.TowerFileWillBeTransferred = true
+	v.TowerFileAvailableAtDestination = true
+	v.logger.Debug("validator client metadata set", "family", family, "consensus", consensus)
+	return nil
+}
+
+func (v *Validator) configureHandoff(cfg HandoffConfig) error {
+	commitment := strings.ToLower(strings.TrimSpace(cfg.Commitment))
+	if commitment == "" {
+		commitment = "finalized"
+	}
+	if commitment != "finalized" && commitment != "confirmed" {
+		return fmt.Errorf("invalid validator.failover.handoff.commitment %q", commitment)
+	}
+	timeout := cfg.Timeout
+	if timeout == "" {
+		timeout = "2m"
+	}
+	timeoutDuration, err := time.ParseDuration(timeout)
+	if err != nil || timeoutDuration <= 0 {
+		return fmt.Errorf("invalid validator.failover.handoff.timeout %q", timeout)
+	}
+	poll := cfg.PollInterval
+	if poll == "" {
+		poll = "500ms"
+	}
+	pollDuration, err := time.ParseDuration(poll)
+	if err != nil || pollDuration <= 0 {
+		return fmt.Errorf("invalid validator.failover.handoff.poll_interval %q", poll)
+	}
+	v.HandoffCommitment = commitment
+	v.HandoffTimeout = timeoutDuration
+	v.HandoffPollInterval = pollDuration
 	return nil
 }
 
@@ -393,13 +522,16 @@ func (v *Validator) configureTowerFile(cfg TowerConfig) error {
 
 // configureSetIdenttiyCommands ensures the set identity commands are valid and sets them
 func (v *Validator) configureSetIdenttiyCommands(cfg FailoverConfig) (err error) {
+	v.SetIdentityActiveCommandTemplate = cfg.SetIdentityActiveCmdTemplate
+	v.SetIdentityPassiveCommandTemplate = cfg.SetIdentityPassiveCmdTemplate
 	var (
 		setIdentityActiveCmdBuf  strings.Builder
 		setIdentityPassiveCmdBuf strings.Builder
 	)
 
 	// parse active command template
-	setIdentityActiveCmdTemplate, err := template.New("set_identity_active_cmd").
+	funcMap := template.FuncMap{"neq": func(a, b any) bool { return !reflect.DeepEqual(a, b) }}
+	setIdentityActiveCmdTemplate, err := template.New("set_identity_active_cmd").Funcs(funcMap).
 		Parse(cfg.SetIdentityActiveCmdTemplate)
 	if err != nil {
 		return fmt.Errorf(
@@ -424,7 +556,7 @@ func (v *Validator) configureSetIdenttiyCommands(cfg FailoverConfig) (err error)
 	v.logger.Debug("set identity active command set", "command", v.SetIdentityActiveCommand)
 
 	// parse passive command template
-	setIdentityPassiveCmdTemplate, err := template.New("set_identity_passive_cmd").
+	setIdentityPassiveCmdTemplate, err := template.New("set_identity_passive_cmd").Funcs(funcMap).
 		Parse(cfg.SetIdentityPassiveCmdTemplate)
 	if err != nil {
 		return fmt.Errorf(
@@ -482,6 +614,8 @@ func (v *Validator) configureHooks(cfg FailoverConfig) (err error) {
 // rollback commands alongside any configured rollback hooks.
 // If a cmd_template is empty, it falls back to the corresponding set-identity command.
 func (v *Validator) configureRollback(cfg FailoverConfig) error {
+	v.RollbackToActiveCommandTemplate = cfg.Rollback.ToActive.CmdTemplate
+	v.RollbackToPassiveCommandTemplate = cfg.Rollback.ToPassive.CmdTemplate
 	v.Rollback.Enabled = cfg.Rollback.Enabled
 	v.Rollback.ToActive.Hooks = cfg.Rollback.ToActive.Hooks
 	v.Rollback.ToPassive.Hooks = cfg.Rollback.ToPassive.Hooks
@@ -490,7 +624,7 @@ func (v *Validator) configureRollback(cfg FailoverConfig) error {
 	if cfg.Rollback.ToActive.CmdTemplate == "" {
 		v.Rollback.ToActive.ResolvedCmd = v.SetIdentityActiveCommand
 	} else {
-		tpl, err := template.New("rollback_to_active_cmd").Parse(cfg.Rollback.ToActive.CmdTemplate)
+		tpl, err := template.New("rollback_to_active_cmd").Funcs(template.FuncMap{"neq": func(a, b any) bool { return !reflect.DeepEqual(a, b) }}).Parse(cfg.Rollback.ToActive.CmdTemplate)
 		if err != nil {
 			return fmt.Errorf("failed to parse rollback.to_active.cmd_template: %w", err)
 		}
@@ -505,7 +639,7 @@ func (v *Validator) configureRollback(cfg FailoverConfig) error {
 	if cfg.Rollback.ToPassive.CmdTemplate == "" {
 		v.Rollback.ToPassive.ResolvedCmd = v.SetIdentityPassiveCommand
 	} else {
-		tpl, err := template.New("rollback_to_passive_cmd").Parse(cfg.Rollback.ToPassive.CmdTemplate)
+		tpl, err := template.New("rollback_to_passive_cmd").Funcs(template.FuncMap{"neq": func(a, b any) bool { return !reflect.DeepEqual(a, b) }}).Parse(cfg.Rollback.ToPassive.CmdTemplate)
 		if err != nil {
 			return fmt.Errorf("failed to parse rollback.to_passive.cmd_template: %w", err)
 		}
@@ -746,61 +880,47 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		)
 	}
 
-	// delete the tower file if it exists and auto empty when passive is true
-	if v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
-		log.Debug("deleting tower file because validator.tower.auto_empty_when_passive is true",
-			"tower_file", v.TowerFile,
-		)
-
-		if err = utils.RemoveFile(v.TowerFile); err != nil {
-			return err
-		}
-	}
-
-	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
-	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
-		log.Warn("tower file exists", "tower_file", v.TowerFile)
-		if params.AutoConfirm {
-			log.Warn("--yes flag set, automatically deleting tower file", "tower_file", v.TowerFile)
-		} else {
-			confirmed, err := confirm("Delete tower file and proceed?")
-			if err != nil {
-				return err
-			}
-			if !confirmed {
-				return fmt.Errorf("cancelled")
-			}
-		}
-		// delete the tower file
-		if err = utils.RemoveFile(v.TowerFile); err != nil {
-			return err
-		}
-	}
-
 	// create a QUIC server that listens for the active node to connect and decide what to do
 	failoverServer, err := failover.NewServerFromConfig(failover.ServerConfig{
 		Port:              v.FailoverServerConfig.Port,
 		HeartbeatInterval: v.FailoverServerConfig.HeartbeatInterval,
 		StreamTimeout:     v.FailoverServerConfig.StreamTimeout,
 		PassiveNodeInfo: &failover.NodeInfo{
-			Hostname:                       v.Hostname,
-			PublicIP:                       v.PublicIP,
-			Identities:                     v.Identities,
-			TowerFile:                      v.TowerFile,
-			SetIdentityCommand:             v.SetIdentityActiveCommand,
-			ClientVersion:                  v.GossipNode.Version(),
-			ClientVersionRPC:               v.getLocalNodeVersion(),
-			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
-			RPCAddress:                     v.RPCAddress,
+			Bin:                               v.Bin,
+			LedgerDir:                         v.LedgerDir,
+			ClientConfigPath:                  v.ClientConfigPath,
+			Hostname:                          v.Hostname,
+			PublicIP:                          v.PublicIP,
+			Identities:                        v.Identities,
+			TowerFile:                         v.TowerFile,
+			SetIdentityCommand:                v.SetIdentityActiveCommand,
+			SetIdentityCommandTemplate:        v.SetIdentityActiveCommandTemplate,
+			SetIdentityActiveCommandTemplate:  v.SetIdentityActiveCommandTemplate,
+			SetIdentityPassiveCommandTemplate: v.SetIdentityPassiveCommandTemplate,
+			RollbackToActiveCommandTemplate:   v.RollbackToActiveCommandTemplate,
+			RollbackToPassiveCommandTemplate:  v.RollbackToPassiveCommandTemplate,
+			ClientVersion:                     v.GossipNode.Version(),
+			ClientVersionRPC:                  v.getLocalNodeVersion(),
+			ClientFamily:                      v.ClientFamily,
+			ConsensusMode:                     v.ConsensusMode,
+			IsNativeFiredancer:                v.ClientFamily == "firedancer",
+			VoteAccount:                       v.VoteAccount,
+			MetricsAddress:                    v.ClientMetricsAddress,
+			SolanaValidatorFailoverVersion:    pkgconstants.AppVersion,
+			RPCAddress:                        v.RPCAddress,
 		},
-		SolanaRPCClient:  v.solanaRPCClient,
-		RPCURL:           v.RPCAddress,
-		IsDryRunFailover: !params.NotADrill,
-		Hooks:            v.Hooks,
-		Rollback:         v.Rollback,
-		SkipTowerSync:    params.SkipTowerSync,
-		AutoConfirm:      params.AutoConfirm,
-		TLSConfig:        v.serverTLSConfig,
+		SolanaRPCClient:      v.solanaRPCClient,
+		RPCURL:               v.RPCAddress,
+		IsDryRunFailover:     !params.NotADrill,
+		Hooks:                v.Hooks,
+		Rollback:             v.Rollback,
+		SkipTowerSync:        params.SkipTowerSync,
+		AutoConfirm:          params.AutoConfirm,
+		TLSConfig:            v.serverTLSConfig,
+		HandoffTimeout:       v.HandoffTimeout,
+		HandoffPollInterval:  v.HandoffPollInterval,
+		HandoffCommitment:    v.HandoffCommitment,
+		AutoEmptyWhenPassive: v.TowerFileAutoDeleteWhenPassive,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
 				Count:            v.MonitorConfig.CreditSamples.Count,
@@ -832,13 +952,17 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 
 	log.Debug("failover active to passive")
 
-	// ensure tower file exists and is not empty
-	if !utils.FileExists(v.TowerFile) {
-		return fmt.Errorf("tower file does not exist: %s", v.TowerFile)
-	}
+	// Native Firedancer handoffs reconcile on-chain vote state and do not use
+	// an Agave tower file. Legacy clients still require the local tower before
+	// they can be demoted.
+	if !v.ThisNodeIsNativeFiredancer {
+		if !utils.FileExists(v.TowerFile) {
+			return fmt.Errorf("tower file does not exist: %s", v.TowerFile)
+		}
 
-	if utils.FileSize(v.TowerFile) == 0 {
-		return fmt.Errorf("tower file is empty: %s", v.TowerFile)
+		if utils.FileSize(v.TowerFile) == 0 {
+			return fmt.Errorf("tower file is empty: %s", v.TowerFile)
+		}
 	}
 
 	// select passive peer to connect to from declared peers
@@ -857,28 +981,52 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 		RPCURL:                         v.RPCAddress,
 		SkipTowerSync:                  params.SkipTowerSync,
 		ActiveNodeInfo: &failover.NodeInfo{
-			Hostname:                       v.Hostname,
-			PublicIP:                       v.PublicIP,
-			Identities:                     v.Identities,
-			TowerFile:                      v.TowerFile,
-			TowerFileSizeBytes:             utils.FileSize(v.TowerFile),
-			SetIdentityCommand:             v.SetIdentityPassiveCommand,
-			ClientVersion:                  v.GossipNode.Version(),
-			ClientVersionRPC:               v.getLocalNodeVersion(),
-			SolanaValidatorFailoverVersion: pkgconstants.AppVersion,
-			RPCAddress:                     v.RPCAddress,
+			Bin:                               v.Bin,
+			LedgerDir:                         v.LedgerDir,
+			ClientConfigPath:                  v.ClientConfigPath,
+			Hostname:                          v.Hostname,
+			PublicIP:                          v.PublicIP,
+			Identities:                        v.Identities,
+			TowerFile:                         v.TowerFile,
+			TowerFileSizeBytes:                towerFileSize(v),
+			SetIdentityCommand:                v.SetIdentityPassiveCommand,
+			SetIdentityCommandTemplate:        v.SetIdentityPassiveCommandTemplate,
+			SetIdentityActiveCommandTemplate:  v.SetIdentityActiveCommandTemplate,
+			SetIdentityPassiveCommandTemplate: v.SetIdentityPassiveCommandTemplate,
+			RollbackToActiveCommandTemplate:   v.RollbackToActiveCommandTemplate,
+			RollbackToPassiveCommandTemplate:  v.RollbackToPassiveCommandTemplate,
+			ClientVersion:                     v.GossipNode.Version(),
+			ClientVersionRPC:                  v.getLocalNodeVersion(),
+			ClientFamily:                      v.ClientFamily,
+			ConsensusMode:                     v.ConsensusMode,
+			IsNativeFiredancer:                v.ClientFamily == "firedancer",
+			VoteAccount:                       v.VoteAccount,
+			MetricsAddress:                    v.ClientMetricsAddress,
+			SolanaValidatorFailoverVersion:    pkgconstants.AppVersion,
+			RPCAddress:                        v.RPCAddress,
 		},
-		Hooks:     v.Hooks,
-		Rollback:  v.Rollback,
-		TLSConfig: v.clientTLSConfig,
+		Hooks:               v.Hooks,
+		Rollback:            v.Rollback,
+		TLSConfig:           v.clientTLSConfig,
+		HandoffTimeout:      v.HandoffTimeout,
+		HandoffPollInterval: v.HandoffPollInterval,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to peer %s: %w", selectedPassivePeer.Name, err)
 	}
 
-	failoverClient.Start()
+	if failoverErr := failoverClient.Start(); failoverErr != nil {
+		return fmt.Errorf("failover failed: %w", failoverErr)
+	}
 
 	return nil
+}
+
+func towerFileSize(v *Validator) int64 {
+	if v.ThisNodeIsNativeFiredancer {
+		return 0
+	}
+	return utils.FileSize(v.TowerFile)
 }
 
 // waitUntilHealthy waits until the validator is healthy and synced

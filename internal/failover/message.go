@@ -13,6 +13,12 @@ type Message struct {
 	IsDryRunFailover                 bool
 	IsSuccessfullyCompleted          bool
 	SkipTowerSync                    bool
+	HandoffStrategy                  string
+	TowerFileWillBeTransferred       bool
+	FrozenTowerSlot                  uint64
+	ReconciliationComplete           bool
+	ActiveRollbackCommand            string
+	PassiveRollbackCommand           string
 	RollbackRequired                 bool
 	ActiveRollbackEnabled            bool
 	ActiveNodeSetIdentityStartTime   time.Time

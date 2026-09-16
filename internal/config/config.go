@@ -43,10 +43,10 @@ const (
 	DefaultTowerFileNameTemplate = "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
 
 	// DefaultSetIdentityPassiveCmdTemplate is the default set identity passive command template for the validator
-	DefaultSetIdentityPassiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}"
+	DefaultSetIdentityPassiveCmdTemplate = "{{ if or .ThisNodeIsNativeFiredancer (eq .ThisNodeClientFamily \"frankendancer\") }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Passive.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}{{ end }}"
 
 	// DefaultSetIdentityActiveCmdTemplate is the default set identity active command template for the validator
-	DefaultSetIdentityActiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
+	DefaultSetIdentityActiveCmdTemplate = "{{ if or .ThisNodeIsNativeFiredancer (eq .ThisNodeClientFamily \"frankendancer\") }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Active.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}{{ if .TowerFileAvailableAtDestination }} --require-tower{{ end }}{{ end }}"
 )
 
 var (
@@ -100,6 +100,12 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("log.level", DefaultLogLevel)
 	v.SetDefault("log.format", DefaultLogFormat)
 	v.SetDefault("validator.bin", DefaultBin)
+	v.SetDefault("validator.client.family", "auto")
+	v.SetDefault("validator.client.consensus", "auto")
+	v.SetDefault("validator.client.metrics_address", "http://127.0.0.1:7999")
+	v.SetDefault("validator.failover.handoff.commitment", "finalized")
+	v.SetDefault("validator.failover.handoff.timeout", "2m")
+	v.SetDefault("validator.failover.handoff.poll_interval", "500ms")
 	v.SetDefault("validator.average_slot_duration", DefaultAverageSlotDuration)
 	v.SetDefault("validator.cluster", DefaultCluster)
 	v.SetDefault("validator.failover.min_time_to_leader_slot", DefaultFailoverMinimumTimeToLeaderSlot)

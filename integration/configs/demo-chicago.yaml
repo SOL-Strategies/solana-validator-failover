@@ -1,5 +1,7 @@
 validator:
   bin: ./scripts/agave-validator-mock.sh
+  client:
+    family: agave
   cluster: integration
   cluster_rpc_url: http://localhost:8899
   name: chicago
@@ -13,6 +15,11 @@ validator:
     dir: ./integration/test-towers/chicago
   average_slot_duration: 400ms
   failover:
+    tls:
+      enabled: true
+      ca_cert: ./integration/test-tls/ca.crt
+      cert: ./integration/test-tls/node.crt
+      key: ./integration/test-tls/node.key
     peers:
       london:
         address: localhost:9898

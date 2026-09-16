@@ -109,13 +109,14 @@ func main() {
 	}
 
 	data := failover.PlanData{
-		IsDryRun:        !*real,
-		SkipTowerSync:   *skipTower,
-		ActiveNodeInfo:  activeNode,
-		PassiveNodeInfo: passiveNode,
-		AppVersion:      "dev",
-		Hooks:           exampleHooks,
-		Rollback:        exampleRollback,
+		IsDryRun:                   !*real,
+		SkipTowerSync:              *skipTower,
+		TowerFileWillBeTransferred: !*skipTower,
+		ActiveNodeInfo:             activeNode,
+		PassiveNodeInfo:            passiveNode,
+		AppVersion:                 "dev",
+		Hooks:                      exampleHooks,
+		Rollback:                   exampleRollback,
 	}
 
 	rendered, err := failover.RenderFailoverPlan(data)

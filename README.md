@@ -135,6 +135,18 @@ validator:
   # default: agave-validator
   bin: agave-validator
 
+  # Optional client metadata used to select native Firedancer handoff safety.
+  # Commands remain fully operator-controlled. Auto recognizes common binaries;
+  # set family explicitly when validator.bin is a wrapper or script.
+  client:
+    # one of: auto, agave, jito-solana, frankendancer, firedancer
+    family: auto
+    # currently only tower is supported
+    consensus: auto
+    # config_path: /home/solana/firedancer/config.toml
+    # metrics_address: http://127.0.0.1:7999
+    # vote_account: <vote-account-pubkey>
+
   # (required) cluster this validator runs on
   #            well-known clusters: mainnet-beta, testnet, devnet, localnet
   #            any other value is treated as a custom cluster (requires cluster_rpc_url)
@@ -235,9 +247,27 @@ validator:
     # {{ .Identities }} - an object that has Active/Passive properties referencing
     #                     the loaded identities from validator.identities
     # {{ .LedgerDir }}  - a resolved absolute path to validator.ledger_dir
-    # defaults shown below
-    set_identity_active_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
-    set_identity_passive_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}"
+    # {{ .ClientConfigPath }} - resolved validator.client.config_path, when configured
+    # Directional fields are populated after the peer is negotiated:
+    # {{ .FromNodeIsNativeFiredancer }} / {{ .ToNodeIsNativeFiredancer }} - bools
+    # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - client family strings
+    # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
+    # {{ .TowerFileAvailableAtDestination }} - bool; safe condition for --require-tower
+    # For example:
+    #   {{ if .TowerFileAvailableAtDestination }}--require-tower{{ end }}
+    # Go templates use `not` or `ne`; for example:
+    #   {{ if not .FromNodeIsNativeFiredancer }}--require-tower{{ end }}
+    # defaults shown below; native Firedancer uses its set-identity syntax and
+    # tower-free handoffs, while Agave-derived clients retain the legacy form
+    set_identity_active_cmd_template: "{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Active.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}{{ if .TowerFileAvailableAtDestination }} --require-tower{{ end }}{{ end }}"
+    set_identity_passive_cmd_template: "{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Passive.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}{{ end }}"
+
+    # Native Firedancer handoffs do not transfer an Agave tower file. The
+    # finalized on-chain vote state is reconciled before this command runs.
+    handoff:
+      commitment: finalized # finalized or confirmed
+      timeout: 2m
+      poll_interval: 500ms
 
     # failover peers - keys are vanity names shown in program output and usable with --to-peer
     # configure one peer per passive validator you may want to fail over to
@@ -293,6 +323,12 @@ validator:
     # {{ .PeerNodePassiveIdentityPubkey }}       - string: pubkey peer uses when passive
     # {{ .PeerNodeClientVersion }}               - string: gossip-reported solana validator client semantic version for peer node
     # {{ .PeerNodeClientVersionLocalRPC }}       - string: solana-core version from local validator getVersion RPC for peer node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
+    # {{ .ThisNodeClientFamily }} / {{ .PeerNodeClientFamily }} - client family strings
+    # {{ .ThisNodeIsNativeFiredancer }} / {{ .PeerNodeIsNativeFiredancer }} - bools
+    # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - directional family strings
+    # {{ .FromNodeIsNativeFiredancer }} / {{ .ToNodeIsNativeFiredancer }} - directional bools
+    # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
+    # {{ .TowerFileWillBeTransferred }} - bool
     #
     # Standard environment variables passed to hook commands (SOLANA_VALIDATOR_FAILOVER_*):
     # ------------------------------------------------------------------------------------------------------------
@@ -314,6 +350,12 @@ validator:
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_PASSIVE_IDENTITY_PUBKEY       = pubkey peer uses when passive
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_VERSION                = gossip-reported solana validator client semantic version for peer node
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_VERSION_LOCAL_RPC     = solana-core version from local validator getVersion RPC for peer node (may differ from gossip for jito-solana/firedancer; empty if unavailable)
+    # SOLANA_VALIDATOR_FAILOVER_THIS_NODE_CLIENT_FAMILY                = client family
+    # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_FAMILY                = peer client family
+    # SOLANA_VALIDATOR_FAILOVER_FROM_NODE_IS_NATIVE_FIREDANCER         = "true|false"
+    # SOLANA_VALIDATOR_FAILOVER_TO_NODE_IS_NATIVE_FIREDANCER           = "true|false"
+    # SOLANA_VALIDATOR_FAILOVER_HANDOFF_STRATEGY                       = "tower-file|onchain-reconcile"
+    # SOLANA_VALIDATOR_FAILOVER_TOWER_FILE_WILL_BE_TRANSFERRED         = "true|false"
     hooks:
       # hooks to run before failover - errors in pre hooks optionally abort failover
       pre:

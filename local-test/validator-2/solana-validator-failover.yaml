@@ -1,5 +1,8 @@
 validator:
   bin: ./scripts/fdctl-mock.sh
+  client:
+    family: firedancer
+    metrics_address: http://127.0.0.1:7999
   cluster: mainnet-beta
   public_ip: 67.213.119.47 # don't set IRL
   name: validator-2
@@ -11,8 +14,13 @@ validator:
   tower:
     dir: ./local-test/validator-2/tower
   failover:
+    tls:
+      enabled: true
+      ca_cert: ./integration/test-tls/ca.crt
+      cert: ./integration/test-tls/node.crt
+      key: ./integration/test-tls/node.key
     # firedancer set identity commands
-    set_identity_active_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml --force {{ .Identities.Active.KeyFile }}"
+    set_identity_active_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml {{ .Identities.Active.KeyFile }}"
     set_identity_passive_cmd_template: "{{ .Bin }} set-identity --config /home/solana/config.toml {{ .Identities.Passive.KeyFile }}"
     peers:
       validator-1:

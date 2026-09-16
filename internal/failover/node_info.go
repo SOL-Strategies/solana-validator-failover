@@ -10,18 +10,31 @@ import (
 
 // NodeInfo represents the information about a node that is needed to perform a failover
 type NodeInfo struct {
-	PublicIP                       string
-	Hostname                       string
-	Identities                     *identities.Identities
-	TowerFile                      string
-	TowerFileSizeBytes             int64
-	TowerFileBytes                 []byte
-	TowerFileHash                  string
-	SetIdentityCommand             string
-	ClientVersion                  string
-	ClientVersionRPC               string
-	SolanaValidatorFailoverVersion string
-	RPCAddress                     string
+	Bin                               string
+	LedgerDir                         string
+	ClientConfigPath                  string
+	PublicIP                          string
+	Hostname                          string
+	Identities                        *identities.Identities
+	TowerFile                         string
+	TowerFileSizeBytes                int64
+	TowerFileBytes                    []byte
+	TowerFileHash                     string
+	SetIdentityCommand                string
+	SetIdentityCommandTemplate        string
+	SetIdentityActiveCommandTemplate  string
+	SetIdentityPassiveCommandTemplate string
+	RollbackToActiveCommandTemplate   string
+	RollbackToPassiveCommandTemplate  string
+	ClientVersion                     string
+	ClientVersionRPC                  string
+	ClientFamily                      string
+	ConsensusMode                     string
+	IsNativeFiredancer                bool
+	VoteAccount                       string
+	MetricsAddress                    string
+	SolanaValidatorFailoverVersion    string
+	RPCAddress                        string
 }
 
 // SetTowerFileBytes sets the tower file bytes
