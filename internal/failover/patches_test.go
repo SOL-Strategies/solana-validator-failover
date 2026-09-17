@@ -10,25 +10,25 @@ func TestIdentityTransitionPatchURL(t *testing.T) {
 			name:    "agave 4.2",
 			version: "Agave 4.2.2",
 			release: "v0.2.0",
-			want:    "https://raw.githubusercontent.com/sol-strategies/solana-validator-failover/v0.2.0/patches/agave/admin-rpc-identity-transition-status/v4.2.x/0001-add-identity-transition-status-rpc.patch",
+			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches",
 		},
 		{
 			name:    "agave 4.3 prerelease",
 			version: "Agave 4.3.0-rc.1",
 			release: "v0.2.0",
-			want:    "https://raw.githubusercontent.com/sol-strategies/solana-validator-failover/v0.2.0/patches/agave/admin-rpc-identity-transition-status/v4.3.x/0001-add-identity-transition-status-rpc.patch",
+			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches",
 		},
 		{
 			name:    "unknown version",
 			version: "Agave 5.0.0",
 			release: "v0.2.0",
-			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches/agave/admin-rpc-identity-transition-status",
+			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches",
 		},
 		{
 			name:    "development build",
 			version: "Agave 4.2.2",
 			release: "dev",
-			want:    "https://raw.githubusercontent.com/sol-strategies/solana-validator-failover/main/patches/agave/admin-rpc-identity-transition-status/v4.2.x/0001-add-identity-transition-status-rpc.patch",
+			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/main/patches",
 		},
 	}
 

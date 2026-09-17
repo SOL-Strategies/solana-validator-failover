@@ -264,7 +264,7 @@ validator:
     # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - client family strings
     # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
     # {{ .TowerFileAvailableAtDestination }} - bool; safe condition for --require-tower
-	# {{ .IdentityTransitionRPCPatchURL }} - URL for the hosted Agave/Jito identityTransitionStatus patch
+	# {{ .IdentityTransitionRPCPatchURL }} - URL for the hosted identityTransitionStatus patch index
     # For example:
     #   {{ if .TowerFileAvailableAtDestination }}--require-tower{{ end }}
     # Go templates use `not` or `ne`; for example:

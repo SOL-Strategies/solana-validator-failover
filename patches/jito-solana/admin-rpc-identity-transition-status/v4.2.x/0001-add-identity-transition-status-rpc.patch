@@ -1,0 +1,327 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 5219872..0356e77 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -386,6 +386,7 @@ dependencies = [
+  "agave-logger",
+  "agave-snapshots",
+  "agave-votor",
++ "agave-votor-messages",
+  "agave-xdp",
+  "arc-swap",
+  "assert_cmd",
+diff --git a/core/src/replay_stage.rs b/core/src/replay_stage.rs
+index c5a5f4d..fc96856 100644
+--- a/core/src/replay_stage.rs
++++ b/core/src/replay_stage.rs
+@@ -43,6 +43,7 @@ use {
+     },
+     agave_votor_messages::{
+         consensus_message::{Block, ConsensusMessage},
++        identity_transition_status,
+         migration::{GENESIS_VOTE_REFRESH, MigrationStatus},
+         vote::Vote,
+     },
+@@ -1397,6 +1398,16 @@ impl ReplayStage {
+                                 my_pubkey = identity_keypair.pubkey();
+                                 migration_status.set_pubkey(my_pubkey);
+ 
++                                // This branch is the voting-loop barrier: no
++                                // further vote can be signed by my_old_pubkey.
++                                identity_transition_status::complete(
++                                    my_old_pubkey,
++                                    my_pubkey,
++                                    "tower",
++                                    tower.last_voted_slot(),
++                                    tower.root(),
++                                );
++
+                                 // Load the new identity's tower
+                                 tower = match Self::load_tower(
+                                     tower_storage.as_ref(),
+diff --git a/rpc/src/rpc.rs b/rpc/src/rpc.rs
+index 1954e4e..8ac06cf 100644
+--- a/rpc/src/rpc.rs
++++ b/rpc/src/rpc.rs
+@@ -2791,6 +2791,12 @@ pub mod rpc_minimal {
+         #[rpc(meta, name = "getIdentity")]
+         fn get_identity(&self, meta: Self::Metadata) -> Result<RpcIdentity>;
+ 
++        #[rpc(meta, name = "identityTransitionStatus")]
++        fn identity_transition_status(
++            &self,
++            meta: Self::Metadata,
++        ) -> Result<agave_votor_messages::identity_transition_status::IdentityTransitionStatus>;
++
+         #[rpc(meta, name = "getSlot")]
+         fn get_slot(&self, meta: Self::Metadata, config: Option<RpcContextConfig>) -> Result<Slot>;
+ 
+@@ -2885,6 +2891,16 @@ pub mod rpc_minimal {
+             })
+         }
+ 
++        fn identity_transition_status(
++            &self,
++            meta: Self::Metadata,
++        ) -> Result<agave_votor_messages::identity_transition_status::IdentityTransitionStatus>
++        {
++            Ok(agave_votor_messages::identity_transition_status::get(
++                meta.cluster_info.id(),
++            ))
++        }
++
+         fn get_slot(&self, meta: Self::Metadata, config: Option<RpcContextConfig>) -> Result<Slot> {
+             debug!("get_slot rpc request received");
+             meta.get_slot(config.unwrap_or_default())
+diff --git a/validator/Cargo.toml b/validator/Cargo.toml
+index cc3d542..8c00b73 100644
+--- a/validator/Cargo.toml
++++ b/validator/Cargo.toml
+@@ -25,6 +25,7 @@ agave-feature-set = { workspace = true }
+ agave-logger = { workspace = true }
+ agave-snapshots = { workspace = true }
+ agave-votor = { workspace = true }
++agave-votor-messages = { workspace = true }
+ agave-xdp = { workspace = true }
+ arc-swap = { workspace = true }
+ bytesize = { workspace = true }
+diff --git a/validator/src/admin_rpc_service.rs b/validator/src/admin_rpc_service.rs
+index 6aa553c..602ceda 100644
+--- a/validator/src/admin_rpc_service.rs
++++ b/validator/src/admin_rpc_service.rs
+@@ -3,6 +3,7 @@ use {
+     agave_votor::{
+         event::VotorEvent, vote_history::VoteHistory, vote_history_storage::VoteHistoryStorage,
+     },
++    agave_votor_messages::identity_transition_status,
+     arc_swap::ArcSwap,
+     crossbeam_channel::Sender,
+     jsonrpc_core::{BoxFuture, Error, ErrorCode, MetaIoHandler, Metadata, Result},
+@@ -1152,14 +1153,21 @@ impl AdminRpcImpl {
+                 }
+             }
+ 
++            let old_identity = post_init.cluster_info.id();
++            let new_identity = identity_keypair.pubkey();
++            let transition_sequence = identity_transition_status::begin(
++                old_identity,
++                new_identity,
++                post_init.vote_account,
++            )
++            .map_err(jsonrpc_core::error::Error::invalid_params)?;
++
+             for (key, notifier) in &*post_init.notifies.read().unwrap() {
+                 if let Err(err) = notifier.update_key(&identity_keypair) {
+                     error!("Error updating network layer keypair: {err} on {key:?}");
+                 }
+             }
+ 
+-            let old_identity = post_init.cluster_info.id();
+-            let new_identity = identity_keypair.pubkey();
+             solana_metrics::set_host_id(new_identity.to_string());
+             // Emit the datapoint after updating metrics to emit the new pubkey
+             datapoint_info!(
+@@ -1174,10 +1182,13 @@ impl AdminRpcImpl {
+             post_init
+                 .votor_event_sender
+                 .send(VotorEvent::SetIdentity)
+-                .map_err(|err| jsonrpc_core::error::Error {
+-                    code: ErrorCode::InternalError,
+-                    message: format!("Failed to send SetIdentity event: {err}").to_string(),
+-                    data: None,
++                .map_err(|err| {
++                    identity_transition_status::fail(transition_sequence, err.to_string());
++                    jsonrpc_core::error::Error {
++                        code: ErrorCode::InternalError,
++                        message: format!("Failed to send SetIdentity event: {err}").to_string(),
++                        data: None,
++                    }
+                 })?;
+ 
+             warn!("Identity set to {new_identity}");
+diff --git a/votor-messages/src/lib.rs b/votor-messages/src/lib.rs
+index 162e674..ff0dfb6 100644
+--- a/votor-messages/src/lib.rs
++++ b/votor-messages/src/lib.rs
+@@ -13,6 +13,7 @@ pub mod certificate;
+ pub mod consensus_message;
+ pub mod finalized_slot;
+ pub mod fraction;
++pub mod identity_transition_status;
+ pub mod metric_types;
+ pub mod migration;
+ pub mod reward_certificate;
+diff --git a/votor/src/event_handler.rs b/votor/src/event_handler.rs
+index 6974af7..aabc092 100644
+--- a/votor/src/event_handler.rs
++++ b/votor/src/event_handler.rs
+@@ -20,8 +20,8 @@ use {
+         votor::SharedContext,
+     },
+     agave_votor_messages::{
+-        consensus_message::Block, metric_types::ConsensusMetricsEvent, migration::MigrationStatus,
+-        vote::Vote,
++        consensus_message::Block, identity_transition_status, metric_types::ConsensusMetricsEvent,
++        migration::MigrationStatus, vote::Vote,
+     },
+     crossbeam_channel::{RecvError, SendError, TrySendError, select},
+     parking_lot::RwLock,
+@@ -511,7 +511,11 @@ impl EventHandler {
+             // Operator called set identity make sure that our keypair is updated for voting
+             VotorEvent::SetIdentity => {
+                 info!("{my_pubkey}: SetIdentity");
++                let old_identity = *my_pubkey;
++                let last_vote_slot = vctx.vote_history.last_voted_slot();
++                let root_slot = vctx.vote_history.root();
+                 if let Err(e) = Self::handle_set_identity(my_pubkey, ctx, vctx) {
++                    identity_transition_status::fail_current(e.to_string());
+                     error!(
+                         "Unable to load new vote history when attempting to change identity from \
+                          {} to {} in voting loop, Exiting: {}",
+@@ -521,6 +525,13 @@ impl EventHandler {
+                     );
+                     return Err(EventLoopError::SetIdentityError(e));
+                 }
++                identity_transition_status::complete(
++                    old_identity,
++                    *my_pubkey,
++                    "alpenglow",
++                    last_vote_slot,
++                    root_slot,
++                );
+                 Self::send_vote_history_to_consensus_pool(my_pubkey, vctx)?;
+             }
+         }
+diff --git a/votor/src/vote_history.rs b/votor/src/vote_history.rs
+index bf61992..f3ec828 100644
+--- a/votor/src/vote_history.rs
++++ b/votor/src/vote_history.rs
+@@ -168,6 +168,10 @@ impl VoteHistory {
+         self.root
+     }
+ 
++    pub fn last_voted_slot(&self) -> Option<Slot> {
++        self.votes_cast.keys().max().copied()
++    }
++
+     /// Add a new vote to the voting history
+     pub fn add_vote(&mut self, vote: Vote) {
+         assert!(vote.slot() >= self.root);
+diff --git a/votor-messages/src/identity_transition_status.rs b/votor-messages/src/identity_transition_status.rs
+new file mode 100644
+index 0000000..fbff4d7
+--- /dev/null
++++ b/votor-messages/src/identity_transition_status.rs
+@@ -0,0 +1,112 @@
++//! Process-local identity transition state shared by validator services.
++#![allow(missing_docs)]
++
++use {
++    serde::{Deserialize, Serialize},
++    solana_clock::Slot,
++    solana_pubkey::Pubkey,
++    std::sync::{LazyLock, RwLock},
++};
++
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct IdentityTransitionStatus {
++    pub version: u64,
++    pub sequence: u64,
++    pub state: String,
++    pub consensus: String,
++    pub current_identity: String,
++    pub from_identity: String,
++    pub to_identity: String,
++    pub vote_account: String,
++    pub last_vote_slot: Option<Slot>,
++    pub tower_root_slot: Option<Slot>,
++    pub error: Option<String>,
++}
++
++static STATUS: LazyLock<RwLock<Option<IdentityTransitionStatus>>> =
++    LazyLock::new(|| RwLock::new(None));
++
++pub fn begin(
++    from_identity: Pubkey,
++    to_identity: Pubkey,
++    vote_account: Pubkey,
++) -> Result<u64, String> {
++    let mut status = STATUS.write().unwrap();
++    if matches!(status.as_ref(), Some(previous) if previous.state == "transitioning") {
++        return Err("an identity transition is already in progress".to_string());
++    }
++    let sequence = status.as_ref().map_or(1, |previous| previous.sequence + 1);
++    *status = Some(IdentityTransitionStatus {
++        version: 1,
++        sequence,
++        state: "transitioning".to_string(),
++        consensus: "pending".to_string(),
++        current_identity: from_identity.to_string(),
++        from_identity: from_identity.to_string(),
++        to_identity: to_identity.to_string(),
++        vote_account: vote_account.to_string(),
++        last_vote_slot: None,
++        tower_root_slot: None,
++        error: None,
++    });
++    Ok(sequence)
++}
++
++pub fn complete(
++    from_identity: Pubkey,
++    to_identity: Pubkey,
++    consensus: &str,
++    last_vote_slot: Option<Slot>,
++    root_slot: Slot,
++) {
++    if let Some(status) = STATUS.write().unwrap().as_mut()
++        && status.state == "transitioning"
++        && status.from_identity == from_identity.to_string()
++        && status.to_identity == to_identity.to_string()
++    {
++        status.state = "complete".to_string();
++        status.consensus = consensus.to_string();
++        status.current_identity = to_identity.to_string();
++        status.last_vote_slot = last_vote_slot;
++        status.tower_root_slot = Some(root_slot);
++    }
++}
++
++pub fn fail(sequence: u64, error: impl Into<String>) {
++    if let Some(status) = STATUS.write().unwrap().as_mut()
++        && status.sequence == sequence
++    {
++        status.state = "failed".to_string();
++        status.error = Some(error.into());
++    }
++}
++
++pub fn fail_current(error: impl Into<String>) {
++    if let Some(status) = STATUS.write().unwrap().as_mut()
++        && status.state == "transitioning"
++    {
++        status.state = "failed".to_string();
++        status.error = Some(error.into());
++    }
++}
++
++pub fn get(current_identity: Pubkey) -> IdentityTransitionStatus {
++    STATUS
++        .read()
++        .unwrap()
++        .clone()
++        .unwrap_or_else(|| IdentityTransitionStatus {
++            version: 1,
++            sequence: 0,
++            state: "idle".to_string(),
++            consensus: "unknown".to_string(),
++            current_identity: current_identity.to_string(),
++            from_identity: current_identity.to_string(),
++            to_identity: current_identity.to_string(),
++            vote_account: String::new(),
++            last_vote_slot: None,
++            tower_root_slot: None,
++            error: None,
++        })
++}
