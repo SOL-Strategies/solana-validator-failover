@@ -35,7 +35,9 @@ const (
 	// History:
 	//   1 = original (pre-v0.1.18) — no version byte, implicit
 	//   2 = version byte added after msg_type / before first gob frame (v0.1.18+)
-	WireProtocolVersion byte = 3
+	//   3 = native Firedancer negotiation and tower-free handoffs
+	//   4 = optional identity-transition capability negotiation and slot fallback
+	WireProtocolVersion byte = 4
 )
 
 // hookEnvMapParams is the parameters for the hook environment map

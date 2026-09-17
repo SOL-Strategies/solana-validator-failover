@@ -144,6 +144,24 @@ func (s *Stream) SetFrozenTowerSlot(slot uint64) { s.message.FrozenTowerSlot = s
 
 func (s Stream) GetFrozenTowerSlot() uint64 { return s.message.FrozenTowerSlot }
 
+func (s *Stream) SetIdentityTransitionRPCAvailable(v bool) {
+	s.message.IdentityTransitionRPCAvailable = v
+}
+func (s Stream) GetIdentityTransitionRPCAvailable() bool {
+	return s.message.IdentityTransitionRPCAvailable
+}
+func (s *Stream) SetSlotFallbackRequired(v bool)       { s.message.SlotFallbackRequired = v }
+func (s Stream) GetSlotFallbackRequired() bool         { return s.message.SlotFallbackRequired }
+func (s *Stream) SetFallbackWaitSlots(v uint64)        { s.message.FallbackWaitSlots = v }
+func (s Stream) GetFallbackWaitSlots() uint64          { return s.message.FallbackWaitSlots }
+func (s *Stream) SetHandoffWarning(v string)           { s.message.HandoffWarning = v }
+func (s *Stream) SetHandoffWarningf(format string, args ...any) {
+	s.message.HandoffWarning = fmt.Sprintf(format, args...)
+}
+func (s Stream) GetHandoffWarning() string             { return s.message.HandoffWarning }
+func (s *Stream) SetProbeIdentityTransitionRPC(v bool) { s.message.ProbeIdentityTransitionRPC = v }
+func (s Stream) GetProbeIdentityTransitionRPC() bool   { return s.message.ProbeIdentityTransitionRPC }
+
 func (s *Stream) SetReconciliationComplete(done bool) { s.message.ReconciliationComplete = done }
 
 func (s Stream) GetReconciliationComplete() bool { return s.message.ReconciliationComplete }
@@ -321,6 +339,9 @@ func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hoo
 		SkipTowerSync:              s.message.SkipTowerSync,
 		HandoffStrategy:            s.message.HandoffStrategy,
 		TowerFileWillBeTransferred: s.message.TowerFileWillBeTransferred,
+		HandoffWarning:             s.message.HandoffWarning,
+		FallbackWaitSlots:          s.message.FallbackWaitSlots,
+		SlotFallbackRequired:       s.message.SlotFallbackRequired,
 		ActiveNodeInfo:             s.message.ActiveNodeInfo,
 		PassiveNodeInfo:            s.message.PassiveNodeInfo,
 		AppVersion:                 pkgconstants.AppVersion,

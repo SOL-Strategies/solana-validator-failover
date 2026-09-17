@@ -55,8 +55,12 @@ type ServerConfig struct {
 	HandoffTimeout       time.Duration
 	HandoffPollInterval  time.Duration
 	HandoffCommitment    string
+	FallbackTimeout      time.Duration
+	FallbackWaitSlots    uint64
 	AutoEmptyWhenPassive bool
 }
+
+const nativeFallbackWaitSlots uint64 = 512
 
 // Server is the failover server - run by the passive node
 type Server struct {
@@ -85,6 +89,8 @@ type Server struct {
 	handoffTimeout       time.Duration
 	handoffPollInterval  time.Duration
 	handoffCommitment    string
+	fallbackTimeout      time.Duration
+	fallbackWaitSlots    uint64
 	autoEmptyWhenPassive bool
 }
 
@@ -126,6 +132,8 @@ func NewServerFromConfig(config ServerConfig) (*Server, error) {
 		handoffTimeout:       config.HandoffTimeout,
 		handoffPollInterval:  config.HandoffPollInterval,
 		handoffCommitment:    config.HandoffCommitment,
+		fallbackTimeout:      config.FallbackTimeout,
+		fallbackWaitSlots:    config.FallbackWaitSlots,
 		autoEmptyWhenPassive: config.AutoEmptyWhenPassive,
 		autoConfirm:          config.AutoConfirm,
 		rollback:             config.Rollback,
@@ -311,13 +319,58 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 			return
 		}
 	}
+	// Ask the active client to probe its own RPC only after the direction is
+	// known. This preserves the old tower-file path when the peer is not native.
 	if strategy == HandoffStrategyOnchain && passiveInfo.IsNativeFiredancer && !activeInfo.IsNativeFiredancer {
-		// An Agave-derived client exposes the highest landed vote through RPC,
-		// but that is not necessarily its highest locally signed tower vote. Do
-		// not demote it unless we can establish that local watermark.
-		s.failoverStream.SetErrorMessage("on-chain handoff from an Agave-derived source to native Firedancer is not supported: the source tower tip cannot be verified safely")
-		_ = s.failoverStream.Encode()
-		return
+		s.failoverStream.SetProbeIdentityTransitionRPC(true)
+	}
+	// Native Firedancer -> Agave can proceed without the extension, but warn
+	// that a later fast failback in the opposite direction will not be possible.
+	if strategy == HandoffStrategyOnchain && activeInfo.IsNativeFiredancer && !passiveInfo.IsNativeFiredancer {
+		patchURL := passiveInfo.IdentityTransitionRPCPatchURL
+		if patchURL == "" {
+			patchURL = IdentityTransitionPatchURL(passiveInfo.ClientVersionRPC, pkgconstants.AppVersion)
+		}
+		if probeClient, ok := s.solanaRPCClient.(solana.IdentityTransitionClient); ok {
+			probeCtx, probeCancel := context.WithTimeout(s.ctx, handoffTimeout(s.handoffTimeout))
+			available, probeErr := probeClient.ProbeIdentityTransitionStatus(probeCtx)
+			probeCancel()
+			passiveInfo.IdentityTransitionRPCAvailable = available
+			s.failoverStream.SetPassiveNodeInfo(passiveInfo)
+			if probeErr != nil {
+				s.logger.Warn("destination identity transition RPC probe failed; later failback will require the configured slot fallback", "err", probeErr)
+			}
+		}
+		if passiveInfo.IdentityTransitionRPCAvailable {
+			s.failoverStream.SetHandoffWarningf("if you plan to fail back from this Agave/Jito validator to native Firedancer, keep the identityTransitionStatus RPC patch installed; this destination currently reports that capability (patch: %s)", patchURL)
+		} else {
+			s.failoverStream.SetHandoffWarningf("if you plan to fail back from this Agave/Jito validator to native Firedancer, install the identityTransitionStatus RPC patch first; without it, failback requires the configured slot fallback (patch: %s)", patchURL)
+		}
+	}
+	// Complete the capability round-trip before doing further preflight. The
+	// active node can now report an optional RPC extension without affecting
+	// legacy handoffs.
+	if s.failoverStream.GetProbeIdentityTransitionRPC() {
+		if err := s.failoverStream.Encode(); err != nil {
+			return
+		}
+		if err := s.failoverStream.Decode(); err != nil {
+			return
+		}
+		activeInfo = s.failoverStream.GetActiveNodeInfo()
+	}
+	if strategy == HandoffStrategyOnchain && passiveInfo.IsNativeFiredancer && !activeInfo.IsNativeFiredancer && !activeInfo.IdentityTransitionRPCAvailable {
+		patchURL := activeInfo.IdentityTransitionRPCPatchURL
+		if patchURL == "" {
+			patchURL = IdentityTransitionPatchURL(activeInfo.ClientVersionRPC, pkgconstants.AppVersion)
+		}
+		waitSlots := s.fallbackWaitSlots
+		if waitSlots == 0 {
+			waitSlots = nativeFallbackWaitSlots
+		}
+		s.failoverStream.SetSlotFallbackRequired(true)
+		s.failoverStream.SetFallbackWaitSlots(waitSlots)
+		s.failoverStream.SetHandoffWarningf("identityTransitionStatus is unavailable on the active Agave/Jito validator; install the RPC patch at %s or, after confirmation, this failover will wait %d finalized slots before activating native Firedancer", patchURL, waitSlots)
 	}
 	if strategy == HandoffStrategyOnchain && s.skipTowerSync {
 		s.failoverStream.SetErrorMessage("--skip-tower-sync is not supported when native Firedancer participates in a failover")
@@ -355,25 +408,34 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 			passiveInfo.VoteAccount = account.VotePubkey.String()
 			s.failoverStream.SetPassiveNodeInfo(passiveInfo)
 		}
-		if activeInfo.VoteAccount != passiveInfo.VoteAccount {
+		if activeInfo.VoteAccount == "" {
+			// The destination account was resolved from the shared active identity.
+			// Carry it back to the source when the optional source configuration
+			// omitted vote_account, including the fast patched-RPC path.
+			activeInfo.VoteAccount = passiveInfo.VoteAccount
+			s.failoverStream.SetActiveNodeInfo(activeInfo)
+		}
+		if activeInfo.VoteAccount != "" && passiveInfo.VoteAccount != "" && activeInfo.VoteAccount != passiveInfo.VoteAccount {
 			s.failoverStream.SetErrorMessagef("on-chain handoff rejected: source vote account %s does not match destination vote account %s", activeInfo.VoteAccount, passiveInfo.VoteAccount)
 			_ = s.failoverStream.Encode()
 			return
 		}
 
-		voteCtx, voteCancel := context.WithTimeout(s.ctx, handoffTimeout(s.handoffTimeout))
-		voteAccount, voteErr := s.solanaRPCClient.GetVoteAccountState(voteCtx, activeInfo.VoteAccount, false, commitment)
-		voteCancel()
-		if voteErr != nil {
-			s.failoverStream.SetErrorMessagef("on-chain handoff rejected: unable to validate source vote account %s: %v", activeInfo.VoteAccount, voteErr)
-			_ = s.failoverStream.Encode()
-			return
-		}
-		sourceActivePubkey := activeInfo.Identities.Active.PubKey()
-		if voteAccount.NodePubkey.String() != sourceActivePubkey {
-			s.failoverStream.SetErrorMessagef("on-chain handoff rejected: source vote account %s belongs to node %s, expected source node %s", activeInfo.VoteAccount, voteAccount.NodePubkey, sourceActivePubkey)
-			_ = s.failoverStream.Encode()
-			return
+		if activeInfo.VoteAccount != "" {
+			voteCtx, voteCancel := context.WithTimeout(s.ctx, handoffTimeout(s.handoffTimeout))
+			voteAccount, voteErr := s.solanaRPCClient.GetVoteAccountState(voteCtx, activeInfo.VoteAccount, false, commitment)
+			voteCancel()
+			if voteErr != nil {
+				s.failoverStream.SetErrorMessagef("on-chain handoff rejected: unable to validate source vote account %s: %v", activeInfo.VoteAccount, voteErr)
+				_ = s.failoverStream.Encode()
+				return
+			}
+			sourceActivePubkey := activeInfo.Identities.Active.PubKey()
+			if voteAccount.NodePubkey.String() != sourceActivePubkey {
+				s.failoverStream.SetErrorMessagef("on-chain handoff rejected: source vote account %s belongs to node %s, expected source node %s", activeInfo.VoteAccount, voteAccount.NodePubkey, sourceActivePubkey)
+				_ = s.failoverStream.Encode()
+				return
+			}
 		}
 		destinationCtx, destinationCancel := context.WithTimeout(s.ctx, handoffTimeout(s.handoffTimeout))
 		destinationVoteAccount, destinationErr := s.solanaRPCClient.GetVoteAccountState(destinationCtx, passiveInfo.VoteAccount, false, commitment)
@@ -622,8 +684,14 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 				s.logger.Error("failed to decode on-chain handoff evidence", "err", err)
 				return
 			}
-			if err := s.waitForOnchainReconciliation(); err != nil {
-				s.failoverStream.SetErrorMessagef("on-chain tower reconciliation failed: %v", err)
+			var reconciliationErr error
+			if s.failoverStream.GetSlotFallbackRequired() {
+				reconciliationErr = s.waitForSlotFallback(s.failoverStream.GetFallbackWaitSlots())
+			} else {
+				reconciliationErr = s.waitForOnchainReconciliation()
+			}
+			if reconciliationErr != nil {
+				s.failoverStream.SetErrorMessagef("on-chain tower reconciliation failed: %v", reconciliationErr)
 				_ = s.failoverStream.Encode()
 				return
 			}
@@ -833,6 +901,61 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		}
 	}
 	s.cancel()
+}
+
+func (s *Server) waitForSlotFallback(waitSlots uint64) error {
+	if s.isDryRunFailover {
+		return nil
+	}
+	if waitSlots == 0 {
+		waitSlots = s.fallbackWaitSlots
+	}
+	if waitSlots == 0 {
+		waitSlots = nativeFallbackWaitSlots
+	}
+	// This is the conservative fallback for when identityTransitionStatus is
+	// unavailable. Its safety guarantee is explicitly based on finalized slots,
+	// independent of the normal reconciliation commitment.
+	commitment := rpc.CommitmentFinalized
+	timeout := s.fallbackTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	poll := s.handoffPollInterval
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+	current, err := s.currentNetworkSlot(ctx, commitment)
+	if err != nil {
+		return fmt.Errorf("failed to establish %d-slot fallback barrier: %w", waitSlots, err)
+	}
+	target := current + waitSlots
+	s.logger.Warn("identity transition RPC unavailable; waiting for conservative slot fallback before activating destination", "start_slot", current, "target_slot", target, "wait_slots", waitSlots)
+	for {
+		current, err = s.currentNetworkSlot(ctx, commitment)
+		if err == nil && current >= target {
+			return nil
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("did not reach fallback slot %d before timeout", target)
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Server) currentNetworkSlot(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	if client, ok := s.solanaRPCClient.(solana.ContextSlotCommitmentClient); ok {
+		return client.GetCurrentSlotContextWithCommitment(ctx, commitment)
+	}
+	if client, ok := s.solanaRPCClient.(solana.ContextSlotClient); ok {
+		return client.GetCurrentSlotContext(ctx)
+	}
+	return s.solanaRPCClient.GetCurrentSlot()
 }
 
 func commandHasArgument(command, argument string) bool {

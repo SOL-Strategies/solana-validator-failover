@@ -35,6 +35,8 @@ type NodeInfo struct {
 	MetricsAddress                    string
 	SolanaValidatorFailoverVersion    string
 	RPCAddress                        string
+	IdentityTransitionRPCAvailable    bool
+	IdentityTransitionRPCPatchURL     string
 }
 
 // SetTowerFileBytes sets the tower file bytes

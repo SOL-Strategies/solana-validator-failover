@@ -102,6 +102,8 @@ type Validator struct {
 	HandoffCommitment                 string
 	HandoffTimeout                    time.Duration
 	HandoffPollInterval               time.Duration
+	HandoffFallbackTimeout            time.Duration
+	HandoffFallbackWaitSlots          uint64
 	TowerFile                         string
 	TowerFileAutoDeleteWhenPassive    bool
 	Rollback                          hooks.RollbackConfig
@@ -323,6 +325,20 @@ func (v *Validator) configureHandoff(cfg HandoffConfig) error {
 	v.HandoffCommitment = commitment
 	v.HandoffTimeout = timeoutDuration
 	v.HandoffPollInterval = pollDuration
+	fallbackTimeout := cfg.FallbackTimeout
+	if fallbackTimeout == "" {
+		fallbackTimeout = "10m"
+	}
+	fallbackTimeoutDuration, err := time.ParseDuration(fallbackTimeout)
+	if err != nil || fallbackTimeoutDuration <= 0 {
+		return fmt.Errorf("invalid validator.failover.handoff.fallback_timeout %q", fallbackTimeout)
+	}
+	fallbackSlots := cfg.FallbackWaitSlots
+	if fallbackSlots == 0 {
+		fallbackSlots = 512
+	}
+	v.HandoffFallbackTimeout = fallbackTimeoutDuration
+	v.HandoffFallbackWaitSlots = fallbackSlots
 	return nil
 }
 
@@ -908,6 +924,8 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 			MetricsAddress:                    v.ClientMetricsAddress,
 			SolanaValidatorFailoverVersion:    pkgconstants.AppVersion,
 			RPCAddress:                        v.RPCAddress,
+			IdentityTransitionRPCAvailable:    false,
+			IdentityTransitionRPCPatchURL:     failover.IdentityTransitionPatchURL(v.getLocalNodeVersion(), pkgconstants.AppVersion),
 		},
 		SolanaRPCClient:      v.solanaRPCClient,
 		RPCURL:               v.RPCAddress,
@@ -920,6 +938,8 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		HandoffTimeout:       v.HandoffTimeout,
 		HandoffPollInterval:  v.HandoffPollInterval,
 		HandoffCommitment:    v.HandoffCommitment,
+		FallbackTimeout:      v.HandoffFallbackTimeout,
+		FallbackWaitSlots:    v.HandoffFallbackWaitSlots,
 		AutoEmptyWhenPassive: v.TowerFileAutoDeleteWhenPassive,
 		MonitorConfig: failover.MonitorConfig{
 			CreditSamples: failover.CreditSamplesConfig{
@@ -1004,9 +1024,12 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 			MetricsAddress:                    v.ClientMetricsAddress,
 			SolanaValidatorFailoverVersion:    pkgconstants.AppVersion,
 			RPCAddress:                        v.RPCAddress,
+			IdentityTransitionRPCPatchURL:     failover.IdentityTransitionPatchURL(v.getLocalNodeVersion(), pkgconstants.AppVersion),
 		},
 		Hooks:               v.Hooks,
 		Rollback:            v.Rollback,
+		AutoConfirm:         params.AutoConfirm,
+		FallbackWaitSlots:   v.HandoffFallbackWaitSlots,
 		TLSConfig:           v.clientTLSConfig,
 		HandoffTimeout:      v.HandoffTimeout,
 		HandoffPollInterval: v.HandoffPollInterval,

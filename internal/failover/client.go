@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
 	solanago "github.com/gagliardetto/solana-go"
@@ -34,6 +35,8 @@ type ClientConfig struct {
 	RPCURL                         string
 	SkipTowerSync                  bool
 	Rollback                       hooks.RollbackConfig
+	AutoConfirm                    bool
+	FallbackWaitSlots              uint64
 	// TLSConfig is an optional mTLS config. When non-nil, the client presents its
 	// certificate to the server and verifies the server's certificate against the CA.
 	// When nil, server certificate verification is skipped (InsecureSkipVerify).
@@ -63,6 +66,8 @@ type Client struct {
 	tlsConfig                      *tls.Config // non-nil when mTLS is enabled
 	handoffTimeout                 time.Duration
 	handoffPollInterval            time.Duration
+	autoConfirm                    bool
+	fallbackWaitSlots              uint64
 	failure                        error
 }
 
@@ -95,6 +100,8 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		tlsConfig:                      clientTLSConfig,
 		handoffTimeout:                 config.HandoffTimeout,
 		handoffPollInterval:            config.HandoffPollInterval,
+		autoConfirm:                    config.AutoConfirm,
+		fallbackWaitSlots:              config.FallbackWaitSlots,
 	}
 
 	err = client.connectToServer()
@@ -137,6 +144,63 @@ func waitForLocalIdentity(ctx context.Context, rpcClient solana.ClientInterface,
 		case <-ctx.Done():
 			timer.Stop()
 			return lastErr
+		case <-timer.C:
+		}
+	}
+}
+
+func confirmSlotFallback(autoConfirm bool, waitSlots uint64) error {
+	if waitSlots == 0 {
+		waitSlots = nativeFallbackWaitSlots
+	}
+	if autoConfirm {
+		return nil
+	}
+	confirmed := false
+	err := huh.NewForm(huh.NewGroup(huh.NewConfirm().
+		Title(fmt.Sprintf("identityTransitionStatus failed; wait %d finalized slots before activating native Firedancer?", waitSlots)).
+		Value(&confirmed))).Run()
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return fmt.Errorf("%d-slot fallback declined", waitSlots)
+	}
+	return nil
+}
+
+func negotiatedFallbackWaitSlots(stream *Stream, configured uint64) uint64 {
+	if waitSlots := stream.GetFallbackWaitSlots(); waitSlots > 0 {
+		return waitSlots
+	}
+	if configured > 0 {
+		return configured
+	}
+	return nativeFallbackWaitSlots
+}
+
+func waitForIdentityTransition(ctx context.Context, client solana.IdentityTransitionClient, sequence uint64, expectedIdentity, expectedVoteAccount string, poll time.Duration) (uint64, error) {
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	var lastErr error
+	for {
+		status, err := client.GetIdentityTransitionStatus(ctx)
+		if err == nil {
+			if status.Sequence > sequence && status.State == "complete" && status.CurrentIdentity == expectedIdentity &&
+				(status.ToIdentity == "" || status.ToIdentity == expectedIdentity) &&
+				(expectedVoteAccount == "" || status.VoteAccount == "" || status.VoteAccount == expectedVoteAccount) {
+				return status.LastVoteSlot, nil
+			}
+			lastErr = fmt.Errorf("identity transition status is not complete for %s (sequence=%d state=%s)", expectedIdentity, status.Sequence, status.State)
+		} else {
+			lastErr = err
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, lastErr
 		case <-timer.C:
 		}
 	}
@@ -286,6 +350,33 @@ func (c *Client) Start() (startErr error) {
 		return
 	}
 
+	// Probe only when the negotiated direction can require the Agave/Jito
+	// transition RPC. Legacy tower-file handoffs never acquire this dependency.
+	if c.failoverStream.GetProbeIdentityTransitionRPC() {
+		info := c.failoverStream.GetActiveNodeInfo()
+		available := false
+		if probeClient, ok := c.solanaRPCClient.(solana.IdentityTransitionClient); ok {
+			probeCtx, probeCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+			var probeErr error
+			available, probeErr = probeClient.ProbeIdentityTransitionStatus(probeCtx)
+			probeCancel()
+			if probeErr != nil {
+				c.logger.Warn("identity transition RPC probe failed; configured slot fallback may be required", "err", probeErr)
+			}
+		}
+		info.IdentityTransitionRPCAvailable = available
+		c.failoverStream.SetActiveNodeInfo(info)
+		c.failoverStream.SetIdentityTransitionRPCAvailable(available)
+		if err := c.failoverStream.Encode(); err != nil {
+			c.setFailure("failed to send identity transition RPC capability", err)
+			return
+		}
+		if err := c.failoverStream.Decode(); err != nil {
+			c.setFailure("failed to receive negotiated handoff strategy", err)
+			return
+		}
+	}
+
 	// ensure server is running the same version of this program
 	serverVersion := c.failoverStream.GetPassiveNodeInfo().SolanaValidatorFailoverVersion
 	clientVersion := pkgconstants.AppVersion
@@ -317,6 +408,9 @@ func (c *Client) Start() (startErr error) {
 	// watermark is read again after the identity change, but an unavailable
 	// endpoint must not strand this validator in passive state first.
 	var preDemotionNativeVoteSlot uint64
+	var preDemotionTransitionSequence uint64
+	var preDemotionTransitionVoteSlot uint64
+	var transitionClient solana.IdentityTransitionClient
 	if !skipTowerSync && c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain {
 		sourceInfo := c.failoverStream.GetActiveNodeInfo()
 		if sourceInfo.IsNativeFiredancer {
@@ -328,6 +422,36 @@ func (c *Client) Start() (startErr error) {
 				c.setFailure("failed to validate native Firedancer metrics before switching to passive", metricsErr)
 				c.logger.Error("failed to validate native Firedancer metrics before switching to passive", "err", metricsErr)
 				return
+			}
+		}
+		if sourceInfo := c.failoverStream.GetActiveNodeInfo(); !sourceInfo.IsNativeFiredancer &&
+			c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && c.failoverStream.GetIdentityTransitionRPCAvailable() {
+			var ok bool
+			transitionClient, ok = c.solanaRPCClient.(solana.IdentityTransitionClient)
+			if !ok {
+				c.setFailure("identity transition RPC was negotiated but is unavailable locally", nil)
+				return
+			}
+			statusCtx, statusCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+			status, statusErr := transitionClient.GetIdentityTransitionStatus(statusCtx)
+			statusCancel()
+			if statusErr != nil {
+				patchURL := sourceInfo.IdentityTransitionRPCPatchURL
+				if patchURL == "" {
+					patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
+				}
+				c.logger.Warn("identityTransitionStatus is unavailable; the hosted validator patch is available at", "url", patchURL)
+				waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
+				if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr != nil {
+					c.setFailure("failed to read identity transition status before demotion", statusErr)
+					return
+				}
+				c.failoverStream.SetSlotFallbackRequired(true)
+				c.failoverStream.SetFallbackWaitSlots(waitSlots)
+				transitionClient = nil
+			} else {
+				preDemotionTransitionSequence = status.Sequence
+				preDemotionTransitionVoteSlot = status.LastVoteSlot
 			}
 		}
 	}
@@ -414,13 +538,36 @@ func (c *Client) Start() (startErr error) {
 				tip, tipErr = waitForNativeTowerVoteAtLeastStable(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
 			}
 			cancel()
+		} else if c.failoverStream.GetSlotFallbackRequired() {
+			// The server will enforce the conservative post-demotion slot barrier.
+			tip = 0
 		} else {
 			if tipErr == nil {
-				account, _, err := c.solanaRPCClient.GetCreditRankedVoteAccountFromPubkey(sourceInfo.Identities.Active.PubKey())
-				if err != nil {
-					tipErr = err
+				if transitionClient != nil && c.failoverStream.GetIsDryRunFailover() {
+					// The identity command is intentionally not executed in a dry run,
+					// so no new transition sequence can appear. Use the sampled value
+					// for the plan without waiting for an impossible state change.
+					tip = preDemotionTransitionVoteSlot
+				} else if transitionClient != nil {
+					ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+					tip, tipErr = waitForIdentityTransition(ctx, transitionClient, preDemotionTransitionSequence, sourceInfo.Identities.Passive.PubKey(), sourceInfo.VoteAccount, c.handoffPollInterval)
+					cancel()
+					if tipErr != nil {
+						patchURL := sourceInfo.IdentityTransitionRPCPatchURL
+						if patchURL == "" {
+							patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
+						}
+						c.logger.Warn("identityTransitionStatus did not complete; install the hosted validator patch for future fast handoffs", "url", patchURL)
+						waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
+						if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr == nil {
+							c.failoverStream.SetSlotFallbackRequired(true)
+							c.failoverStream.SetFallbackWaitSlots(waitSlots)
+							tipErr = nil
+							tip = 0
+						}
+					}
 				} else {
-					tip = account.LastVote
+					tip = 0
 				}
 			}
 		}

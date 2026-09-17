@@ -19,6 +19,9 @@ type PlanData struct {
 	SkipTowerSync              bool
 	HandoffStrategy            string
 	TowerFileWillBeTransferred bool
+	HandoffWarning             string
+	FallbackWaitSlots          uint64
+	SlotFallbackRequired       bool
 	ActiveNodeInfo             NodeInfo
 	PassiveNodeInfo            NodeInfo
 	AppVersion                 string
@@ -200,7 +203,8 @@ func RenderFailoverPlan(data PlanData) (string, error) {
   {{ HRule }}
   {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .TowerFileWillBeTransferred .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ Muted .AppVersion }}
-  {{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
+{{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
+{{ if .HandoffWarning }}  {{ Warning "Handoff warning:" }} {{ Muted .HandoffWarning }}{{ end }}
   {{ HRule }}
 `)
 	if err != nil {
@@ -213,6 +217,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		"SkipTowerSync":              data.SkipTowerSync,
 		"HandoffStrategy":            data.HandoffStrategy,
 		"TowerFileWillBeTransferred": data.TowerFileWillBeTransferred,
+		"HandoffWarning":             data.HandoffWarning,
 		"PassiveNodeInfo":            data.PassiveNodeInfo,
 		"ActiveNodeInfo":             data.ActiveNodeInfo,
 		"AppVersion":                 data.AppVersion,

@@ -117,6 +117,14 @@ Download and install the latest [release](https://github.com/SOL-Strategies/sola
 
 3. **Local validator started with `--full-rpc-api`** — this tool calls `getClusterNodes` on the local RPC, which requires the validator to be started with the `--full-rpc-api` flag (Agave/Firedancer). For resilient peer discovery, configure a private cluster RPC that also supports `getClusterNodes`; it is used when the local validator's gossip view does not contain the peer.
 
+For Agave-derived → native Firedancer handoffs, patched Agave/Jito builds may
+expose the optional `identityTransitionStatus` RPC. When it is available, the
+handoff waits for the exact final vote watermark before activating Firedancer.
+If it is unavailable, the confirmation plan explicitly warns the operator and
+offers the conservative configured slot fallback (512 slots by default). A
+native Firedancer → Agave-derived handoff remains possible without the RPC,
+but warns that a later fast failback will not be available.
+
 ## Configuration
 
 ```yaml
@@ -256,6 +264,7 @@ validator:
     # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - client family strings
     # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
     # {{ .TowerFileAvailableAtDestination }} - bool; safe condition for --require-tower
+	# {{ .IdentityTransitionRPCPatchURL }} - URL for the hosted Agave/Jito identityTransitionStatus patch
     # For example:
     #   {{ if .TowerFileAvailableAtDestination }}--require-tower{{ end }}
     # Go templates use `not` or `ne`; for example:
@@ -271,6 +280,10 @@ validator:
       commitment: finalized # finalized or confirmed
       timeout: 2m
       poll_interval: 500ms
+      # Used only after explicit confirmation when Agave/Jito cannot provide
+      # identityTransitionStatus while handing off to native Firedancer.
+      fallback_timeout: 10m
+      fallback_wait_slots: 512
 
     # failover peers - keys are vanity names shown in program output and usable with --to-peer
     # configure one peer per passive validator you may want to fail over to

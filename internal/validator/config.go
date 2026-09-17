@@ -56,11 +56,14 @@ type FailoverConfig struct {
 }
 
 type HandoffConfig struct {
-	Commitment           string `mapstructure:"commitment"`
-	Timeout              string `mapstructure:"timeout"`
-	PollInterval         string `mapstructure:"poll_interval"`
-	TimeoutDuration      time.Duration
-	PollIntervalDuration time.Duration
+	Commitment              string `mapstructure:"commitment"`
+	Timeout                 string `mapstructure:"timeout"`
+	PollInterval            string `mapstructure:"poll_interval"`
+	FallbackTimeout         string `mapstructure:"fallback_timeout"`
+	FallbackWaitSlots       uint64 `mapstructure:"fallback_wait_slots"`
+	TimeoutDuration         time.Duration
+	PollIntervalDuration    time.Duration
+	FallbackTimeoutDuration time.Duration
 }
 
 // TLSConfig holds the optional mTLS configuration for the QUIC connection between validators.

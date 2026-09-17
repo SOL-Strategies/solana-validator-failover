@@ -1,9 +1,12 @@
 package solana
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +63,43 @@ type ClientInterface interface {
 	GetVoteAccountState(ctx context.Context, votePubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error)
 }
 
+// IdentityTransitionStatus describes the optional Agave/Jito RPC extension
+// used when handing an Agave-derived validator to native Firedancer.
+type IdentityTransitionStatus struct {
+	Version         uint64  `json:"version"`
+	Sequence        uint64  `json:"sequence"`
+	State           string  `json:"state"`
+	Consensus       string  `json:"consensus"`
+	CurrentIdentity string  `json:"currentIdentity"`
+	FromIdentity    string  `json:"fromIdentity"`
+	ToIdentity      string  `json:"toIdentity"`
+	VoteAccount     string  `json:"voteAccount"`
+	LastVoteSlot    uint64  `json:"lastVoteSlot"`
+	TowerRootSlot   uint64  `json:"towerRootSlot"`
+	Error           *string `json:"error"`
+}
+
+// IdentityTransitionClient is optional. Its absence means the peer is an
+// unpatched Agave/Jito validator and requires the explicitly confirmed slot
+// fallback for Agave-derived to native Firedancer handoffs.
+type IdentityTransitionClient interface {
+	GetIdentityTransitionStatus(context.Context) (*IdentityTransitionStatus, error)
+	ProbeIdentityTransitionStatus(context.Context) (bool, error)
+}
+
+// ContextSlotClient exposes a cancellable network slot request for long
+// compatibility waits. Existing implementations remain valid through the
+// optional interface.
+type ContextSlotClient interface {
+	GetCurrentSlotContext(context.Context) (uint64, error)
+}
+
+// ContextSlotCommitmentClient exposes a cancellable slot request with an
+// explicit commitment, used by the finalized fallback barrier.
+type ContextSlotCommitmentClient interface {
+	GetCurrentSlotContextWithCommitment(context.Context, rpc.CommitmentType) (uint64, error)
+}
+
 // ContextVoteAccountClient is implemented by RPC clients that can bound
 // automatic vote-account discovery with a caller-provided deadline.
 type ContextVoteAccountClient interface {
@@ -73,6 +113,8 @@ type Client struct {
 	loggerLocal         *log.Logger
 	loggerNetwork       *log.Logger
 	averageSlotDuration time.Duration
+	localRPCURL         string
+	networkRPCURL       string
 }
 
 // NewClientParams is the parameters for creating a new client
@@ -94,7 +136,72 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 		loggerLocal:         log.With("rpc_client", "local"),
 		loggerNetwork:       log.With("rpc_client", "network"),
 		averageSlotDuration: avgSlotDuration,
+		localRPCURL:         params.LocalRPCURL,
+		networkRPCURL:       params.ClusterRPCURL,
 	}
+}
+
+type identityTransitionRPCResponse struct {
+	JSONRPC string                    `json:"jsonrpc"`
+	Result  *IdentityTransitionStatus `json:"result"`
+	Error   *jsonrpc.RPCError         `json:"error"`
+}
+
+func (c *Client) GetIdentityTransitionStatus(ctx context.Context) (*IdentityTransitionStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "identityTransitionStatus", "params": []any{}})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.localRPCURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("identityTransitionStatus RPC request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("identityTransitionStatus RPC returned HTTP %s", resp.Status)
+	}
+	var decoded identityTransitionRPCResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("decode identityTransitionStatus response: %w", err)
+	}
+	if decoded.Error != nil {
+		return nil, decoded.Error
+	}
+	if decoded.Result == nil {
+		return nil, fmt.Errorf("identityTransitionStatus RPC returned no result")
+	}
+	return decoded.Result, nil
+}
+
+func (c *Client) ProbeIdentityTransitionStatus(ctx context.Context) (bool, error) {
+	status, err := c.GetIdentityTransitionStatus(ctx)
+	if err != nil {
+		var rpcErr *jsonrpc.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == jsonRPCMethodNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return status != nil, nil
+}
+
+func (c *Client) GetCurrentSlotContext(ctx context.Context) (uint64, error) {
+	return c.GetCurrentSlotContextWithCommitment(ctx, rpc.CommitmentConfirmed)
+}
+
+func (c *Client) GetCurrentSlotContextWithCommitment(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.networkRPCClient.GetSlot(ctx, commitment)
 }
 
 // GetLocalNodeHealth returns the health of the local node

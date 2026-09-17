@@ -44,6 +44,7 @@ type CommandTemplateData struct {
 	ActiveIdentityPubkey            string
 	VoteAccountPubkey               string
 	IsDryRunFailover                bool
+	IdentityTransitionRPCPatchURL   string
 }
 
 func isAgaveDerived(family string) bool {
@@ -73,6 +74,7 @@ func NewCommandTemplateData(local, peer, source, destination NodeInfo, strategy 
 		ActiveIdentityPubkey:            source.Identities.Active.PubKey(),
 		VoteAccountPubkey:               source.VoteAccount,
 		IsDryRunFailover:                dryRun,
+		IdentityTransitionRPCPatchURL:   local.IdentityTransitionRPCPatchURL,
 	}
 }
 
