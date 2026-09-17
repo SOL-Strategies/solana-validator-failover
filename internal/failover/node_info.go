@@ -37,6 +37,8 @@ type NodeInfo struct {
 	RPCAddress                        string
 	Consensus                         string
 	ConsensusGenesisSlot              uint64
+	IdentityTransitionRPCAvailable    bool
+	IdentityTransitionRPCPatchURL     string
 }
 
 // SetTowerFileBytes sets the tower file bytes

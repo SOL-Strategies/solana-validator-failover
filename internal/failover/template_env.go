@@ -18,4 +18,5 @@ func AddHandoffTemplateEnv(env map[string]string, source, destination NodeInfo, 
 	env["HANDOFF_STRATEGY"] = strategy
 	env["TOWER_FILE_WILL_BE_TRANSFERRED"] = fmt.Sprintf("%t", towerFileWillBeTransferred)
 	env["TOWER_FILE_AVAILABLE_AT_DESTINATION"] = fmt.Sprintf("%t", towerFileWillBeTransferred && !destination.IsNativeFiredancer)
+	env["IDENTITY_TRANSITION_RPC_PATCH_URL"] = local.IdentityTransitionRPCPatchURL
 }

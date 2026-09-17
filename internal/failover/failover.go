@@ -37,7 +37,8 @@ const (
 	//   2 = version byte added after msg_type / before first gob frame (v0.1.18+)
 	//   3 = Alpenglow vote-history streaming and initial consensus negotiation
 	//   4 = consensus genesis-slot agreement in the handshake
-	WireProtocolVersion byte = 4
+	//   5 = native Firedancer handoffs and identity-transition capability negotiation
+	WireProtocolVersion byte = 5
 )
 
 // hookEnvMapParams is the parameters for the hook environment map

@@ -15,6 +15,11 @@ type Message struct {
 	SkipTowerSync                    bool
 	HandoffStrategy                  string
 	TowerFileWillBeTransferred       bool
+	IdentityTransitionRPCAvailable   bool
+	SlotFallbackRequired             bool
+	FallbackWaitSlots                uint64
+	HandoffWarning                   string
+	ProbeIdentityTransitionRPC       bool
 	FrozenTowerSlot                  uint64
 	ReconciliationComplete           bool
 	ActiveRollbackCommand            string
