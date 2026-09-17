@@ -531,6 +531,8 @@ func (c *Client) Start() (startErr error) {
 		var tip uint64
 		var tipErr error
 		if sourceInfo.IsNativeFiredancer {
+			watermarkStarted := time.Now()
+			c.logger.Info("waiting for native Firedancer vote watermark to stabilize", "minimum_slot", preDemotionNativeVoteSlot, "poll_interval", c.handoffPollInterval)
 			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
 			if c.failoverStream.GetIsDryRunFailover() {
 				tip, tipErr = waitForNativeTowerVoteAtLeast(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
@@ -538,6 +540,9 @@ func (c *Client) Start() (startErr error) {
 				tip, tipErr = waitForNativeTowerVoteAtLeastStable(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
 			}
 			cancel()
+			if tipErr == nil {
+				c.logger.Info("native Firedancer vote watermark stabilized", "frozen_slot", tip, "elapsed", time.Since(watermarkStarted).Round(time.Millisecond))
+			}
 		} else if c.failoverStream.GetSlotFallbackRequired() {
 			// The server will enforce the conservative post-demotion slot barrier.
 			tip = 0

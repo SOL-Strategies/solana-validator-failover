@@ -1026,28 +1026,40 @@ func (s *Server) waitForOnchainReconciliation() error {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
+	frozenSlot := s.failoverStream.GetFrozenTowerSlot()
+	reconciliationStarted := time.Now()
+	lastProgressLog := reconciliationStarted
+	var networkLastVote, localLastVote uint64
+	s.logger.Info("waiting for vote account to reach frozen slot", "vote_account", source.VoteAccount, "frozen_slot", frozenSlot, "commitment", commitment, "timeout", timeout)
 	for {
 		account, err := s.solanaRPCClient.GetVoteAccountState(ctx, source.VoteAccount, false, commitment)
 		if err == nil {
+			networkLastVote = account.LastVote
 			if account.NodePubkey.String() != source.Identities.Active.PubKey() {
 				return fmt.Errorf("vote account %s belongs to node %s, expected source node %s", source.VoteAccount, account.NodePubkey, source.Identities.Active.PubKey())
 			}
-			if account.LastVote >= s.failoverStream.GetFrozenTowerSlot() {
+			if account.LastVote >= frozenSlot {
 				localAccount, localErr := s.solanaRPCClient.GetVoteAccountState(ctx, source.VoteAccount, true, commitment)
 				if localErr == nil {
+					localLastVote = localAccount.LastVote
 					if localAccount.NodePubkey.String() != source.Identities.Active.PubKey() {
 						return fmt.Errorf("local vote account %s belongs to node %s, expected source node %s", source.VoteAccount, localAccount.NodePubkey, source.Identities.Active.PubKey())
 					}
-					if localAccount.LastVote >= s.failoverStream.GetFrozenTowerSlot() {
+					if localAccount.LastVote >= frozenSlot {
+						s.logger.Info("vote account reached frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Millisecond))
 						return nil
 					}
 				}
 			}
 		}
+		if time.Since(lastProgressLog) >= 5*time.Second {
+			s.logger.Info("still waiting for vote account to reach frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Second))
+			lastProgressLog = time.Now()
+		}
 		timer := time.NewTimer(poll)
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout", source.VoteAccount, s.failoverStream.GetFrozenTowerSlot())
+			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout", source.VoteAccount, frozenSlot)
 		case <-timer.C:
 		}
 	}
