@@ -97,12 +97,15 @@ index 522388a..6fed95d 100644
      crossbeam_channel::Sender,
      jsonrpc_core::{BoxFuture, ErrorCode, MetaIoHandler, Metadata, Result},
      jsonrpc_core_client::{RpcError, transports::ipc},
-@@ -986,14 +987,20 @@ impl AdminRpcImpl {
+@@ -986,14 +987,23 @@ impl AdminRpcImpl {
                  }
              }
  
 +            let old_identity = post_init.cluster_info.id();
 +            let new_identity = identity_keypair.pubkey();
++            if old_identity == new_identity {
++                return Ok(());
++            }
 +            let transition_sequence = identity_transition_status::begin(
 +                old_identity,
 +                new_identity,
@@ -143,7 +146,7 @@ new file mode 100644
 index 0000000..00610c8
 --- /dev/null
 +++ b/votor-messages/src/identity_transition_status.rs
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,95 @@
 +//! Process-local identity transition state shared by validator services.
 +#![allow(missing_docs)]
 +
@@ -193,7 +196,7 @@ index 0000000..00610c8
 +}
 +
 +pub fn complete(
-+    from_identity: Pubkey,
++    _from_identity: Pubkey,
 +    to_identity: Pubkey,
 +    consensus: &str,
 +    last_vote_slot: Option<Slot>,
@@ -201,7 +204,6 @@ index 0000000..00610c8
 +) {
 +    if let Some(status) = STATUS.write().unwrap().as_mut()
 +        && status.state == "transitioning"
-+        && status.from_identity == from_identity.to_string()
 +        && status.to_identity == to_identity.to_string()
 +    {
 +        status.state = "complete".to_string();
@@ -306,4 +308,3 @@ index bf61992..f3ec828 100644
      /// Add a new vote to the voting history
      pub fn add_vote(&mut self, vote: Vote) {
          assert!(vote.slot() >= self.root);
-

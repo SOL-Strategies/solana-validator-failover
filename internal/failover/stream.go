@@ -150,11 +150,11 @@ func (s *Stream) SetIdentityTransitionRPCAvailable(v bool) {
 func (s Stream) GetIdentityTransitionRPCAvailable() bool {
 	return s.message.IdentityTransitionRPCAvailable
 }
-func (s *Stream) SetSlotFallbackRequired(v bool)       { s.message.SlotFallbackRequired = v }
-func (s Stream) GetSlotFallbackRequired() bool         { return s.message.SlotFallbackRequired }
-func (s *Stream) SetFallbackWaitSlots(v uint64)        { s.message.FallbackWaitSlots = v }
-func (s Stream) GetFallbackWaitSlots() uint64          { return s.message.FallbackWaitSlots }
-func (s *Stream) SetHandoffWarning(v string)           { s.message.HandoffWarning = v }
+func (s *Stream) SetSlotFallbackRequired(v bool) { s.message.SlotFallbackRequired = v }
+func (s Stream) GetSlotFallbackRequired() bool   { return s.message.SlotFallbackRequired }
+func (s *Stream) SetFallbackWaitSlots(v uint64)  { s.message.FallbackWaitSlots = v }
+func (s Stream) GetFallbackWaitSlots() uint64    { return s.message.FallbackWaitSlots }
+func (s *Stream) SetHandoffWarning(v string)     { s.message.HandoffWarning = v }
 func (s *Stream) SetHandoffWarningf(format string, args ...any) {
 	s.message.HandoffWarning = fmt.Sprintf(format, args...)
 }
@@ -410,6 +410,8 @@ func (s *Stream) BuildSummaryData() SummaryData {
 		OrigPassiveNode: s.message.PassiveNodeInfo,
 
 		OrigActiveSetIdentityDuration:  s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime),
+		HandoffEvidenceDuration:        s.message.HandoffEvidenceEndTime.Sub(s.message.HandoffEvidenceStartTime),
+		ReconciliationDuration:         s.message.ReconciliationEndTime.Sub(s.message.ReconciliationStartTime),
 		TowerSyncDuration:              s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime),
 		TowerFileSizeBytes:             int64(len(s.message.ActiveNodeInfo.TowerFileBytes)),
 		OrigPassiveSetIdentityDuration: s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime),
@@ -429,6 +431,26 @@ func (s *Stream) SetActiveNodeSetIdentityStartTime() {
 // SetActiveNodeSetIdentityEndTime sets the active node set identity end time
 func (s *Stream) SetActiveNodeSetIdentityEndTime() {
 	s.message.ActiveNodeSetIdentityEndTime = time.Now()
+}
+
+// SetHandoffEvidenceStartTime marks the start of post-demotion evidence collection.
+func (s *Stream) SetHandoffEvidenceStartTime() {
+	s.message.HandoffEvidenceStartTime = time.Now()
+}
+
+// SetHandoffEvidenceEndTime marks the end of post-demotion evidence collection.
+func (s *Stream) SetHandoffEvidenceEndTime() {
+	s.message.HandoffEvidenceEndTime = time.Now()
+}
+
+// SetReconciliationStartTime marks the start of on-chain reconciliation.
+func (s *Stream) SetReconciliationStartTime() {
+	s.message.ReconciliationStartTime = time.Now()
+}
+
+// SetReconciliationEndTime marks the end of on-chain reconciliation.
+func (s *Stream) SetReconciliationEndTime() {
+	s.message.ReconciliationEndTime = time.Now()
 }
 
 // SetActiveNodeSyncTowerFileStartTime sets the active node sync tower file start time

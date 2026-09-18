@@ -280,6 +280,10 @@ validator:
       commitment: finalized # finalized or confirmed
       timeout: 2m
       poll_interval: 500ms
+      # Reconciliation uses the cluster RPC as the completion authority. The
+      # local validator RPC is also polled for readiness diagnostics, but a
+      # client that does not expose the vote account locally does not block a
+      # finalized cluster observation.
       # Used only after explicit confirmation when Agave/Jito cannot provide
       # identityTransitionStatus while handing off to native Firedancer.
       fallback_timeout: 10m

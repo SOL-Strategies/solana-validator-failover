@@ -274,6 +274,9 @@ func (c *Client) GetVoteAccountState(ctx context.Context, votePubkey string, loc
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vote accounts: %w", err)
 	}
+	if accounts == nil {
+		return nil, fmt.Errorf("vote account RPC returned no result")
+	}
 	for _, account := range append(accounts.Current, accounts.Delinquent...) {
 		if account.VotePubkey.String() == votePubkey {
 			return &account, nil

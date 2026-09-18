@@ -28,6 +28,10 @@ type Message struct {
 	ActiveRollbackEnabled            bool
 	ActiveNodeSetIdentityStartTime   time.Time
 	ActiveNodeSetIdentityEndTime     time.Time
+	HandoffEvidenceStartTime         time.Time
+	HandoffEvidenceEndTime           time.Time
+	ReconciliationStartTime          time.Time
+	ReconciliationEndTime            time.Time
 	ActiveNodeSyncTowerFileStartTime time.Time
 	ActiveNodeSyncTowerFileEndTime   time.Time
 	PassiveNodeSetIdentityStartTime  time.Time

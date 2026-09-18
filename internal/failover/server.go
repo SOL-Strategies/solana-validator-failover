@@ -612,12 +612,22 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	s.logger.Debug("pulling pre-failover vote credits sample...")
 	err = s.failoverStream.PullActiveIdentityVoteCreditsSample(s.solanaRPCClient)
 	if err != nil {
-		s.logger.Error("failed to pull active identity vote credits sample", "err", err)
-		s.failoverStream.SetErrorMessagef("server failed to pull active identity vote credits sample: %v", err)
-		if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
-			s.logger.Error("failed to send error message to client", "err", encodeErr)
+		if s.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain {
+			// Credit ranking is monitoring data and is not part of the on-chain
+			// handoff safety proof. Native Firedancer and delinquent Agave/Jito
+			// accounts may be absent from the current-account ranking, so do not
+			// reject an otherwise validated handoff because this optional sample
+			// cannot be collected.
+			s.logger.Warn("failed to pull pre-failover vote credits sample; continuing with on-chain handoff", "err", err)
+			err = nil
+		} else {
+			s.logger.Error("failed to pull active identity vote credits sample", "err", err)
+			s.failoverStream.SetErrorMessagef("server failed to pull active identity vote credits sample: %v", err)
+			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+				s.logger.Error("failed to send error message to client", "err", encodeErr)
+			}
+			return
 		}
-		return
 	}
 
 	// this is where the actual failover starts
@@ -684,6 +694,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 				s.logger.Error("failed to decode on-chain handoff evidence", "err", err)
 				return
 			}
+			s.failoverStream.SetReconciliationStartTime()
 			var reconciliationErr error
 			if s.failoverStream.GetSlotFallbackRequired() {
 				reconciliationErr = s.waitForSlotFallback(s.failoverStream.GetFallbackWaitSlots())
@@ -691,10 +702,12 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 				reconciliationErr = s.waitForOnchainReconciliation()
 			}
 			if reconciliationErr != nil {
+				s.failoverStream.SetReconciliationEndTime()
 				s.failoverStream.SetErrorMessagef("on-chain tower reconciliation failed: %v", reconciliationErr)
 				_ = s.failoverStream.Encode()
 				return
 			}
+			s.failoverStream.SetReconciliationEndTime()
 			s.failoverStream.SetReconciliationComplete(true)
 			if err := s.failoverStream.Encode(); err != nil {
 				return
@@ -1028,39 +1041,106 @@ func (s *Server) waitForOnchainReconciliation() error {
 	defer cancel()
 	frozenSlot := s.failoverStream.GetFrozenTowerSlot()
 	reconciliationStarted := time.Now()
-	lastProgressLog := reconciliationStarted
-	var networkLastVote, localLastVote uint64
-	s.logger.Info("waiting for vote account to reach frozen slot", "vote_account", source.VoteAccount, "frozen_slot", frozenSlot, "commitment", commitment, "timeout", timeout)
-	for {
-		account, err := s.solanaRPCClient.GetVoteAccountState(ctx, source.VoteAccount, false, commitment)
-		if err == nil {
-			networkLastVote = account.LastVote
-			if account.NodePubkey.String() != source.Identities.Active.PubKey() {
-				return fmt.Errorf("vote account %s belongs to node %s, expected source node %s", source.VoteAccount, account.NodePubkey, source.Identities.Active.PubKey())
-			}
-			if account.LastVote >= frozenSlot {
-				localAccount, localErr := s.solanaRPCClient.GetVoteAccountState(ctx, source.VoteAccount, true, commitment)
-				if localErr == nil {
-					localLastVote = localAccount.LastVote
-					if localAccount.NodePubkey.String() != source.Identities.Active.PubKey() {
-						return fmt.Errorf("local vote account %s belongs to node %s, expected source node %s", source.VoteAccount, localAccount.NodePubkey, source.Identities.Active.PubKey())
-					}
-					if localAccount.LastVote >= frozenSlot {
-						s.logger.Info("vote account reached frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Millisecond))
-						return nil
-					}
+	type voteObservation struct {
+		account *rpc.VoteAccountsResult
+		err     error
+		latency time.Duration
+	}
+
+	// The cluster RPC is the reconciliation authority. The local RPC is polled
+	// independently for readiness diagnostics because native Firedancer may not
+	// expose this vote account through its local getVoteAccounts implementation.
+	pollVotes := func(local bool) <-chan voteObservation {
+		observations := make(chan voteObservation, 1)
+		go func() {
+			defer close(observations)
+			for {
+				started := time.Now()
+				account, err := s.solanaRPCClient.GetVoteAccountState(ctx, source.VoteAccount, local, commitment)
+				observation := voteObservation{
+					account: account,
+					err:     err,
+					latency: time.Since(started).Round(time.Millisecond),
+				}
+				select {
+				case observations <- observation:
+				case <-ctx.Done():
+					return
+				}
+
+				// Treat poll as a minimum interval between request starts. A slow
+				// RPC request should not incur another full poll interval.
+				remaining := poll - time.Since(started)
+				if remaining <= 0 {
+					continue
+				}
+				timer := time.NewTimer(remaining)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
 				}
 			}
-		}
-		if time.Since(lastProgressLog) >= 5*time.Second {
-			s.logger.Info("still waiting for vote account to reach frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Second))
-			lastProgressLog = time.Now()
-		}
-		timer := time.NewTimer(poll)
+		}()
+		return observations
+	}
+
+	networkObservations := pollVotes(false)
+	localObservations := pollVotes(true)
+	progressTicker := time.NewTicker(5 * time.Second)
+	defer progressTicker.Stop()
+	var networkLastVote, localLastVote uint64
+	var networkErr, localErr error
+	var localObserved bool
+	s.logger.Info("waiting for vote account to reach frozen slot", "vote_account", source.VoteAccount, "frozen_slot", frozenSlot, "commitment", commitment, "timeout", timeout)
+	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout", source.VoteAccount, frozenSlot)
-		case <-timer.C:
+			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout (network_last_vote=%d local_last_vote=%d network_error=%v local_error=%v)", source.VoteAccount, frozenSlot, networkLastVote, localLastVote, networkErr, localErr)
+		case observation, ok := <-networkObservations:
+			if !ok {
+				networkObservations = nil
+				continue
+			}
+			if observation.err != nil {
+				networkErr = observation.err
+				continue
+			}
+			if observation.account == nil {
+				networkErr = fmt.Errorf("vote account RPC returned no account")
+				continue
+			}
+			networkErr = nil
+			networkLastVote = observation.account.LastVote
+			if observation.account.NodePubkey.String() != source.Identities.Active.PubKey() {
+				return fmt.Errorf("vote account %s belongs to node %s, expected source node %s", source.VoteAccount, observation.account.NodePubkey, source.Identities.Active.PubKey())
+			}
+			if networkLastVote >= frozenSlot {
+				s.logger.Info("vote account reached frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "local_observed", localObserved, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Millisecond), "network_request_latency", observation.latency)
+				return nil
+			}
+		case observation, ok := <-localObservations:
+			if !ok {
+				localObservations = nil
+				continue
+			}
+			localObserved = true
+			if observation.err != nil {
+				localErr = observation.err
+				continue
+			}
+			if observation.account == nil {
+				localErr = fmt.Errorf("vote account RPC returned no account")
+				continue
+			}
+			localErr = nil
+			localLastVote = observation.account.LastVote
+			if observation.account.NodePubkey.String() != source.Identities.Active.PubKey() {
+				s.logger.Warn("local vote account belongs to a different node; continuing to use cluster RPC for reconciliation", "vote_account", source.VoteAccount, "local_node", observation.account.NodePubkey, "expected_source_node", source.Identities.Active.PubKey())
+			}
+		case <-progressTicker.C:
+			s.logger.Info("still waiting for vote account to reach frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "local_observed", localObserved, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Second), "network_error", networkErr, "local_error", localErr)
 		}
 	}
 }

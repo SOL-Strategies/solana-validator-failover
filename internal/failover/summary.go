@@ -28,6 +28,8 @@ type SummaryData struct {
 
 	// Timing
 	OrigActiveSetIdentityDuration  time.Duration
+	HandoffEvidenceDuration        time.Duration
+	ReconciliationDuration         time.Duration
 	TowerSyncDuration              time.Duration
 	TowerFileSizeBytes             int64
 	OrigPassiveSetIdentityDuration time.Duration
@@ -101,6 +103,12 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	if data.TowerFileWillBeTransferred {
 		labelWidth = max(labelWidth, len("> tower"))
 	}
+	if data.HandoffEvidenceDuration > 0 {
+		labelWidth = max(labelWidth, len("> evidence"))
+	}
+	if data.ReconciliationDuration > 0 {
+		labelWidth = max(labelWidth, len("> reconcile"))
+	}
 
 	tpl, err := template.New("failoverSummary").Funcs(funcMap).Parse(`
   {{ Passive .OrigActiveNode.Hostname true }}
@@ -109,6 +117,14 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
         {{ Muted "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
+{{ if gt .HandoffEvidenceDuration 0 }}
+  {{ LightGrey "handoff evidence" }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .HandoffEvidenceDuration) }}
+{{ end }}
+{{ if gt .ReconciliationDuration 0 }}
+  {{ LightGrey "reconcile" }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .ReconciliationDuration) }}
+{{ end }}
 {{ if .TowerFileWillBeTransferred }}
   {{ LightGrey "tower" }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
@@ -138,6 +154,8 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 		"OrigPassiveNode":                data.OrigPassiveNode,
 		"LabelWidth":                     labelWidth,
 		"OrigActiveSetIdentityDuration":  data.OrigActiveSetIdentityDuration,
+		"HandoffEvidenceDuration":        data.HandoffEvidenceDuration,
+		"ReconciliationDuration":         data.ReconciliationDuration,
 		"TowerSyncDuration":              data.TowerSyncDuration,
 		"TowerFileSizeBytes":             data.TowerFileSizeBytes,
 		"OrigPassiveSetIdentityDuration": data.OrigPassiveSetIdentityDuration,

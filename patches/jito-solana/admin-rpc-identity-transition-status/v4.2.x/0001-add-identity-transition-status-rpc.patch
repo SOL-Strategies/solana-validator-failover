@@ -97,12 +97,15 @@ index 6aa553c..602ceda 100644
      arc_swap::ArcSwap,
      crossbeam_channel::Sender,
      jsonrpc_core::{BoxFuture, Error, ErrorCode, MetaIoHandler, Metadata, Result},
-@@ -1152,14 +1153,21 @@ impl AdminRpcImpl {
+@@ -1152,14 +1153,24 @@ impl AdminRpcImpl {
                  }
              }
  
 +            let old_identity = post_init.cluster_info.id();
 +            let new_identity = identity_keypair.pubkey();
++            if old_identity == new_identity {
++                return Ok(());
++            }
 +            let transition_sequence = identity_transition_status::begin(
 +                old_identity,
 +                new_identity,
@@ -212,7 +215,7 @@ new file mode 100644
 index 0000000..fbff4d7
 --- /dev/null
 +++ b/votor-messages/src/identity_transition_status.rs
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,111 @@
 +//! Process-local identity transition state shared by validator services.
 +#![allow(missing_docs)]
 +
@@ -277,7 +280,6 @@ index 0000000..fbff4d7
 +) {
 +    if let Some(status) = STATUS.write().unwrap().as_mut()
 +        && status.state == "transitioning"
-+        && status.from_identity == from_identity.to_string()
 +        && status.to_identity == to_identity.to_string()
 +    {
 +        status.state = "complete".to_string();
