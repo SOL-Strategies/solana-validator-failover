@@ -36,14 +36,17 @@ func ReadNativeTowerVoteSlot(ctx context.Context, address string) (uint64, error
 
 func parseNativeTowerVoteSlot(reader io.Reader) (uint64, error) {
 	const noVote = math.MaxUint64
-	validMetrics := map[string]bool{
-		"fd_voter_vote_slot": true,
-		// Older/native compatibility builds have exposed this spelling.
-		"fd_tower_vote_slot": true,
-		"tower_vote_slot":    true,
+	// Prefer Firedancer's voter watermark. The compatibility names are
+	// fallbacks only; taking the maximum across different metrics can select a
+	// value that does not represent the voter's final identity-transition tip.
+	metricNames := []string{
+		"fd_voter_vote_slot",
+		// Older/native compatibility builds have exposed these spellings.
+		"fd_tower_vote_slot",
+		"tower_vote_slot",
 	}
-	var highest uint64
-	found := false
+	highestByMetric := make(map[string]uint64, len(metricNames))
+	foundByMetric := make(map[string]bool, len(metricNames))
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -58,22 +61,31 @@ func parseNativeTowerVoteSlot(reader io.Reader) (uint64, error) {
 		if brace := strings.IndexByte(metric, '{'); brace >= 0 {
 			metric = metric[:brace]
 		}
-		if !validMetrics[metric] {
+		validMetric := false
+		for _, name := range metricNames {
+			if metric == name {
+				validMetric = true
+				break
+			}
+		}
+		if !validMetric {
 			continue
 		}
 		slot, parseErr := parsePrometheusUint(parts[1])
-		if parseErr == nil && slot != noVote && (!found || slot > highest) {
-			highest = slot
-			found = true
+		if parseErr == nil && slot != noVote && (!foundByMetric[metric] || slot > highestByMetric[metric]) {
+			highestByMetric[metric] = slot
+			foundByMetric[metric] = true
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, fmt.Errorf("read Firedancer metrics: %w", err)
 	}
-	if !found {
-		return 0, fmt.Errorf("Firedancer vote slot metric not found")
+	for _, metric := range metricNames {
+		if foundByMetric[metric] {
+			return highestByMetric[metric], nil
+		}
 	}
-	return highest, nil
+	return 0, fmt.Errorf("Firedancer vote slot metric not found")
 }
 
 // parsePrometheusUint accepts the decimal and scientific formats permitted for
