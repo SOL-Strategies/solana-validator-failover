@@ -46,6 +46,16 @@ func TestParseNativeTowerVoteSlotAcceptsPrometheusNumericFormats(t *testing.T) {
 	}
 }
 
+func TestParseNativeTowerVoteSlotPrefersVoterMetric(t *testing.T) {
+	slot, err := parseNativeTowerVoteSlot(strings.NewReader(
+		"fd_voter_vote_slot 424\n" +
+			"fd_tower_vote_slot 483\n" +
+			"tower_vote_slot 500\n",
+	))
+	require.NoError(t, err)
+	require.Equal(t, uint64(424), slot)
+}
+
 func TestParseNativeTowerVoteSlotRejectsNonIntegralSamples(t *testing.T) {
 	_, err := parseNativeTowerVoteSlot(strings.NewReader("fd_voter_vote_slot 456.5\n"))
 	if err == nil {
