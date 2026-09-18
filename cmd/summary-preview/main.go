@@ -6,6 +6,7 @@
 //	go run ./cmd/summary-preview                 # real failover, with tower sync
 //	go run ./cmd/summary-preview --dry-run       # render as a dry run
 //	go run ./cmd/summary-preview --skip-tower    # omit tower file sync step
+//	go run ./cmd/summary-preview --onchain       # include on-chain timing sections
 //	go run ./cmd/summary-preview --credits       # include vote credit rank data
 package main
 
@@ -23,8 +24,17 @@ import (
 func main() {
 	isDryRun := flag.Bool("dry-run", false, "render as a dry run")
 	skipTower := flag.Bool("skip-tower", false, "skip tower file sync step")
+	onchain := flag.Bool("onchain", false, "include on-chain handoff timing sections")
 	withCredits := flag.Bool("credits", false, "include vote credit rank data")
 	flag.Parse()
+
+	var handoffEvidenceDuration, reconciliationDuration time.Duration
+	totalDuration := 445 * time.Millisecond
+	if *onchain {
+		handoffEvidenceDuration = 26*time.Second + 277*time.Millisecond
+		reconciliationDuration = 14*time.Second + 534*time.Millisecond
+		totalDuration = 210*time.Millisecond + handoffEvidenceDuration + reconciliationDuration + 155*time.Millisecond
+	}
 
 	// Mirror the mock nodes from plan-preview so the two tools stay consistent.
 	origActiveNode := failover.NodeInfo{
@@ -59,10 +69,12 @@ func main() {
 		OrigPassiveNode: origPassiveNode,
 
 		OrigActiveSetIdentityDuration:  210 * time.Millisecond,
+		HandoffEvidenceDuration:        handoffEvidenceDuration,
+		ReconciliationDuration:         reconciliationDuration,
 		TowerSyncDuration:              80 * time.Millisecond,
 		TowerFileSizeBytes:             12_345,
 		OrigPassiveSetIdentityDuration: 155 * time.Millisecond,
-		TotalDuration:                  445 * time.Millisecond,
+		TotalDuration:                  totalDuration,
 
 		FailoverStartSlot: 300_000_042,
 		FailoverEndSlot:   300_000_044,

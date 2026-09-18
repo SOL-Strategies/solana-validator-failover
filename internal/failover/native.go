@@ -120,21 +120,31 @@ func waitForNativeTowerVoteAtLeast(ctx context.Context, address string, poll tim
 // watermark while the identity switch settles, so one qualifying sample is
 // not sufficient evidence of the frozen tower tip.
 func waitForNativeTowerVoteAtLeastStable(ctx context.Context, address string, poll time.Duration, minimum uint64) (uint64, error) {
+	return waitForNativeTowerVoteAtLeastStableWithProgress(ctx, address, poll, minimum, nil)
+}
+
+func waitForNativeTowerVoteAtLeastStableWithProgress(ctx context.Context, address string, poll time.Duration, minimum uint64, progress func(slot uint64, err error, stableSamples int)) (uint64, error) {
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
 	}
 	var previous uint64
 	havePrevious := false
+	stableSamples := 0
 	for {
 		slot, err := ReadNativeTowerVoteSlot(ctx, address)
+		if progress != nil {
+			progress(slot, err, stableSamples)
+		}
 		if err == nil && slot >= minimum {
 			if havePrevious && slot == previous {
 				return slot, nil
 			}
 			previous = slot
 			havePrevious = true
+			stableSamples++
 		} else {
 			havePrevious = false
+			stableSamples = 0
 		}
 		timer := time.NewTimer(poll)
 		select {

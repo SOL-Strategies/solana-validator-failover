@@ -522,6 +522,9 @@ func (c *Client) Start() (startErr error) {
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
+	if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && !skipTowerSync {
+		c.failoverStream.SetHandoffEvidenceStartTime()
+	}
 
 	if c.activeNodeInfo.Consensus == "alpenglow" {
 		c.logger.Infof("sending vote history to %s", c.failoverStream.GetPassiveNodeInfo().Hostname)
@@ -556,12 +559,23 @@ func (c *Client) Start() (startErr error) {
 		var tipErr error
 		if sourceInfo.IsNativeFiredancer {
 			watermarkStarted := time.Now()
+			lastWatermarkProgress := watermarkStarted
 			c.logger.Info("waiting for native Firedancer vote watermark to stabilize", "minimum_slot", preDemotionNativeVoteSlot, "poll_interval", c.handoffPollInterval)
 			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
 			if c.failoverStream.GetIsDryRunFailover() {
 				tip, tipErr = waitForNativeTowerVoteAtLeast(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
 			} else {
-				tip, tipErr = waitForNativeTowerVoteAtLeastStable(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
+				tip, tipErr = waitForNativeTowerVoteAtLeastStableWithProgress(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot, func(slot uint64, err error, stableSamples int) {
+					if time.Since(lastWatermarkProgress) < 5*time.Second {
+						return
+					}
+					fields := []any{"minimum_slot", preDemotionNativeVoteSlot, "latest_slot", slot, "stable_samples", stableSamples, "elapsed", time.Since(watermarkStarted).Round(time.Second)}
+					if err != nil {
+						fields = append(fields, "err", err)
+					}
+					c.logger.Info("still waiting for native Firedancer vote watermark to stabilize", fields...)
+					lastWatermarkProgress = time.Now()
+				})
 			}
 			cancel()
 			if tipErr == nil {
@@ -605,6 +619,7 @@ func (c *Client) Start() (startErr error) {
 			return
 		}
 		c.failoverStream.SetFrozenTowerSlot(tip)
+		c.failoverStream.SetHandoffEvidenceEndTime()
 		if err := c.failoverStream.Encode(); err != nil {
 			// A write error is ambiguous: the peer may have received and acted on
 			// the complete frame even though this side observed a transport error.
