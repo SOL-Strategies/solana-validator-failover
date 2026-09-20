@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -263,7 +262,7 @@ func (s *Server) handleStream(stream *quic.Stream) {
 	// This gives a clear error when nodes are running incompatible versions,
 	// rather than the cryptic gob type-mismatch that would otherwise surface.
 	if err := readAndCheckWireVersion(stream); err != nil {
-		s.logger.Fatal("aborting", "err", err)
+		s.logger.Error("rejecting failover stream with incompatible wire protocol", "err", err)
 		return
 	}
 
@@ -584,28 +583,6 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		}
 		s.cancel()
 		os.Exit(1)
-	}
-
-	// The destination tower is either replaced by the transferred tower or
-	// removed for a tower-free handoff.  Preserve the historical safeguard for
-	// operators that disabled automatic cleanup, but do this only after the
-	// failover plan is confirmed and before the source is demoted.  On-chain
-	// removal itself remains deferred until reconciliation succeeds.
-	if !s.isDryRunFailover && !s.autoEmptyWhenPassive && utils.FileExists(passiveInfo.TowerFile) && !s.autoConfirm {
-		confirmed := false
-		form := huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().
-				Title(fmt.Sprintf("Delete existing tower file at %s?", passiveInfo.TowerFile)).
-				Value(&confirmed),
-		))
-		if err := form.Run(); err != nil || !confirmed {
-			if err == nil {
-				err = fmt.Errorf("cancelled")
-			}
-			s.failoverStream.SetErrorMessagef("tower file replacement cancelled: %v", err)
-			_ = s.failoverStream.Encode()
-			return
-		}
 	}
 
 	// take initial sample of vote credits and rank for the active key - use it to compare later

@@ -896,6 +896,34 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		)
 	}
 
+	// A passive Agave-derived node must not retain an old tower indefinitely:
+	// a later legacy activation may use it with --require-tower. Preserve the
+	// dry-run behavior. When automatic cleanup is disabled, obtain the
+	// operator's deletion decision before starting the failover server; the
+	// negotiated server path performs the deletion after its plan is accepted.
+	if params.NotADrill && utils.FileExists(v.TowerFile) {
+		if !v.TowerFileAutoDeleteWhenPassive && !params.AutoConfirm {
+			confirmed := false
+			form := huh.NewForm(huh.NewGroup(
+				huh.NewConfirm().
+					Title(fmt.Sprintf("Delete existing tower file at %s?", v.TowerFile)).
+					Value(&confirmed),
+			))
+			if promptErr := form.Run(); promptErr != nil || !confirmed {
+				if promptErr == nil {
+					promptErr = fmt.Errorf("cancelled")
+				}
+				return fmt.Errorf("tower file cleanup cancelled: %w", promptErr)
+			}
+		}
+		if v.TowerFileAutoDeleteWhenPassive {
+			v.logger.Infof("removing existing tower file at %s", v.TowerFile)
+			if err := utils.RemoveFile(v.TowerFile); err != nil {
+				return fmt.Errorf("failed to remove tower file at %s: %w", v.TowerFile, err)
+			}
+		}
+	}
+
 	// create a QUIC server that listens for the active node to connect and decide what to do
 	failoverServer, err := failover.NewServerFromConfig(failover.ServerConfig{
 		Port:              v.FailoverServerConfig.Port,
