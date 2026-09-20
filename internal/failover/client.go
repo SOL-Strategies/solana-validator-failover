@@ -3,6 +3,7 @@ package failover
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -43,6 +44,14 @@ type ClientConfig struct {
 	TLSConfig           *tls.Config
 	HandoffTimeout      time.Duration
 	HandoffPollInterval time.Duration
+}
+
+type identityTransitionFailedError struct {
+	message string
+}
+
+func (e *identityTransitionFailedError) Error() string {
+	return e.message
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
@@ -187,6 +196,13 @@ func waitForIdentityTransition(ctx context.Context, client solana.IdentityTransi
 	for {
 		status, err := client.GetIdentityTransitionStatus(ctx)
 		if err == nil {
+			if status.Sequence > sequence && status.State == "failed" {
+				message := "identity transition failed"
+				if status.Error != nil && *status.Error != "" {
+					message += ": " + *status.Error
+				}
+				return 0, &identityTransitionFailedError{message: message}
+			}
 			if status.Sequence > sequence && status.State == "complete" && status.CurrentIdentity == expectedIdentity &&
 				(status.ToIdentity == "" || status.ToIdentity == expectedIdentity) &&
 				(expectedVoteAccount == "" || status.VoteAccount == "" || status.VoteAccount == expectedVoteAccount) {
@@ -572,17 +588,22 @@ func (c *Client) Start() (startErr error) {
 					tip, tipErr = waitForIdentityTransition(ctx, transitionClient, preDemotionTransitionSequence, sourceInfo.Identities.Passive.PubKey(), sourceInfo.VoteAccount, c.handoffPollInterval)
 					cancel()
 					if tipErr != nil {
-						patchURL := sourceInfo.IdentityTransitionRPCPatchURL
-						if patchURL == "" {
-							patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
-						}
-						c.logger.Warn("identityTransitionStatus did not complete; install the hosted validator patch for future fast handoffs", "url", patchURL)
-						waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
-						if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr == nil {
-							c.failoverStream.SetSlotFallbackRequired(true)
-							c.failoverStream.SetFallbackWaitSlots(waitSlots)
-							tipErr = nil
-							tip = 0
+						var transitionFailedErr *identityTransitionFailedError
+						if errors.As(tipErr, &transitionFailedErr) {
+							c.logger.Error("identity transition failed; refusing slot fallback", "err", tipErr)
+						} else {
+							patchURL := sourceInfo.IdentityTransitionRPCPatchURL
+							if patchURL == "" {
+								patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
+							}
+							c.logger.Warn("identityTransitionStatus did not complete; install the hosted validator patch for future fast handoffs", "url", patchURL)
+							waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
+							if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr == nil {
+								c.failoverStream.SetSlotFallbackRequired(true)
+								c.failoverStream.SetFallbackWaitSlots(waitSlots)
+								tipErr = nil
+								tip = 0
+							}
 						}
 					}
 				} else {

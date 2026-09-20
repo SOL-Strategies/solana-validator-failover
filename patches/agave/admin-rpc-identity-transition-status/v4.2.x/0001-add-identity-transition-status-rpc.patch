@@ -146,7 +146,7 @@ new file mode 100644
 index 0000000..00610c8
 --- /dev/null
 +++ b/votor-messages/src/identity_transition_status.rs
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,104 @@
 +//! Process-local identity transition state shared by validator services.
 +#![allow(missing_docs)]
 +
@@ -223,6 +223,15 @@ index 0000000..00610c8
 +    }
 +}
 +
++pub fn fail_current(error: impl Into<String>) {
++    if let Some(status) = STATUS.write().unwrap().as_mut()
++        && status.state == "transitioning"
++    {
++        status.state = "failed".to_string();
++        status.error = Some(error.into());
++    }
++}
++
 +pub fn get(current_identity: Pubkey) -> IdentityTransitionStatus {
 +    STATUS
 +        .read()
@@ -269,7 +278,7 @@ index 6974af7..09734a4 100644
      },
      crossbeam_channel::{RecvError, SendError, TrySendError, select},
      parking_lot::RwLock,
-@@ -511,6 +511,9 @@ impl EventHandler {
+@@ -511,6 +511,10 @@ impl EventHandler {
              // Operator called set identity make sure that our keypair is updated for voting
              VotorEvent::SetIdentity => {
                  info!("{my_pubkey}: SetIdentity");
@@ -277,7 +286,8 @@ index 6974af7..09734a4 100644
 +                let last_vote_slot = vctx.vote_history.last_voted_slot();
 +                let root_slot = vctx.vote_history.root();
                  if let Err(e) = Self::handle_set_identity(my_pubkey, ctx, vctx) {
-                     error!(
++                    identity_transition_status::fail_current(e.to_string());
+                    error!(
                          "Unable to load new vote history when attempting to change identity from \
 @@ -521,6 +524,13 @@ impl EventHandler {
                      );

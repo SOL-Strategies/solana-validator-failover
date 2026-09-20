@@ -22,7 +22,7 @@ index bda5559..986d504 100644
          migration::{GENESIS_VOTE_REFRESH, MigrationStatus},
          vote::Vote,
      },
-@@ -1429,6 +1430,16 @@ impl ReplayStage {
+@@ -1429,6 +1430,15 @@ impl ReplayStage {
                                  my_pubkey = identity_keypair.pubkey();
                                  migration_status.set_pubkey(my_pubkey);
  
@@ -35,7 +35,6 @@ index bda5559..986d504 100644
 +                                    tower.last_voted_slot(),
 +                                    tower.root(),
 +                                );
-+
                                  // Load the new identity's tower
                                  tower = match Self::load_tower(
                                      tower_storage.as_ref(),
@@ -97,10 +96,9 @@ index 4f30e05..3175478 100644
      crossbeam_channel::Sender,
      jsonrpc_core::{BoxFuture, ErrorCode, MetaIoHandler, Metadata, Result},
      jsonrpc_core_client::{RpcError, transports::ipc},
-@@ -1007,6 +1008,15 @@ impl AdminRpcImpl {
+@@ -1007,5 +1008,14 @@ impl AdminRpcImpl {
              }
            }
-
 +            if old_identity == new_identity {
 +                return Ok(());
 +            }
@@ -136,7 +134,7 @@ new file mode 100644
 index 0000000..00610c8
 --- /dev/null
 +++ b/votor-messages/src/identity_transition_status.rs
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,104 @@
 +//! Process-local identity transition state shared by validator services.
 +#![allow(missing_docs)]
 +
@@ -213,6 +211,15 @@ index 0000000..00610c8
 +    }
 +}
 +
++pub fn fail_current(error: impl Into<String>) {
++    if let Some(status) = STATUS.write().unwrap().as_mut()
++        && status.state == "transitioning"
++    {
++        status.state = "failed".to_string();
++        status.error = Some(error.into());
++    }
++}
++
 +pub fn get(current_identity: Pubkey) -> IdentityTransitionStatus {
 +    STATUS
 +        .read()
@@ -259,7 +266,7 @@ index 749d11f..326236d 100644
      },
      crossbeam_channel::select,
      parking_lot::RwLock,
-@@ -567,6 +567,9 @@ impl EventHandler {
+@@ -567,6 +567,10 @@ impl EventHandler {
              // Operator called set identity make sure that our keypair is updated for voting
              VotorEvent::SetIdentity => {
                  info!("{}: SetIdentity", local_context.my_pubkey);
@@ -267,7 +274,8 @@ index 749d11f..326236d 100644
 +                let last_vote_slot = vctx.vote_history.last_voted_slot();
 +                let root_slot = vctx.vote_history.root();
                  if let Err(e) = Self::handle_set_identity(ctx, vctx, local_context) {
-                     error!(
++                    identity_transition_status::fail_current(e.to_string());
+                    error!(
                          "Unable to load new vote history when attempting to change identity from \
 @@ -577,6 +580,13 @@ impl EventHandler {
                      );
