@@ -1070,11 +1070,15 @@ func (s *Server) waitForOnchainReconciliation() error {
 	var networkLastVote, localLastVote uint64
 	var networkErr, localErr error
 	var localObserved bool
-	s.logger.Info("waiting for vote account to reach frozen slot", "vote_account", source.VoteAccount, "frozen_slot", frozenSlot, "commitment", commitment, "timeout", timeout)
+	s.logger.Info("waiting for vote account to reach frozen slot", "vote_account", source.VoteAccount, "frozen_slot", frozenSlot, "commitment", commitment, "timeout", timeout, "poll_interval", poll)
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout (network_last_vote=%d local_last_vote=%d network_error=%v local_error=%v)", source.VoteAccount, frozenSlot, networkLastVote, localLastVote, networkErr, localErr)
+			slotGap := uint64(0)
+			if frozenSlot > networkLastVote {
+				slotGap = frozenSlot - networkLastVote
+			}
+			return fmt.Errorf("vote account %s did not reach frozen slot %d before timeout after %s (network_last_vote=%d slot_gap=%d local_last_vote=%d network_error=%v local_error=%v)", source.VoteAccount, frozenSlot, time.Since(reconciliationStarted).Round(time.Millisecond), networkLastVote, slotGap, localLastVote, networkErr, localErr)
 		case observation, ok := <-networkObservations:
 			if !ok {
 				networkObservations = nil
@@ -1117,7 +1121,11 @@ func (s *Server) waitForOnchainReconciliation() error {
 				s.logger.Warn("local vote account belongs to a different node; continuing to use cluster RPC for reconciliation", "vote_account", source.VoteAccount, "local_node", observation.account.NodePubkey, "expected_source_node", source.Identities.Active.PubKey())
 			}
 		case <-progressTicker.C:
-			s.logger.Info("still waiting for vote account to reach frozen slot", "network_last_vote", networkLastVote, "local_last_vote", localLastVote, "local_observed", localObserved, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Second), "network_error", networkErr, "local_error", localErr)
+			slotGap := uint64(0)
+			if frozenSlot > networkLastVote {
+				slotGap = frozenSlot - networkLastVote
+			}
+			s.logger.Info("still waiting for vote account to reach frozen slot", "network_last_vote", networkLastVote, "slot_gap", slotGap, "local_last_vote", localLastVote, "local_observed", localObserved, "frozen_slot", frozenSlot, "elapsed", time.Since(reconciliationStarted).Round(time.Second), "network_error", networkErr, "local_error", localErr)
 		}
 	}
 }

@@ -125,6 +125,12 @@ offers the conservative configured slot fallback (512 slots by default). A
 native Firedancer → Agave-derived handoff remains possible without the RPC,
 but warns that a later fast failback will not be available.
 
+Native Firedancer exposes its local tower watermark as `tower_vote_slot`. The
+destination must observe that exact slot on-chain before activation. If the
+source is substantially ahead of the cluster RPC, increase
+`validator.failover.handoff.timeout` to allow finalized reconciliation to
+complete; the default is two minutes.
+
 ## Configuration
 
 ```yaml
