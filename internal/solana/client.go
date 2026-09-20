@@ -110,6 +110,7 @@ type ContextVoteAccountClient interface {
 type Client struct {
 	localRPCClient      RPCClientInterface
 	networkRPCClient    RPCClientInterface
+	networkRPCClients   []RPCClientInterface
 	loggerLocal         *log.Logger
 	loggerNetwork       *log.Logger
 	averageSlotDuration time.Duration
@@ -121,6 +122,7 @@ type Client struct {
 type NewClientParams struct {
 	LocalRPCURL         string
 	ClusterRPCURL       string
+	ClusterRPCURLs      []string
 	AverageSlotDuration time.Duration // average slot duration, defaults to 400ms
 }
 
@@ -130,15 +132,112 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 	if avgSlotDuration <= 0 {
 		avgSlotDuration = 400 * time.Millisecond
 	}
+	clusterRPCURLs := params.ClusterRPCURLs
+	if len(clusterRPCURLs) == 0 && params.ClusterRPCURL != "" {
+		clusterRPCURLs = []string{params.ClusterRPCURL}
+	}
+	networkRPCClients := make([]RPCClientInterface, 0, len(clusterRPCURLs))
+	for _, clusterRPCURL := range clusterRPCURLs {
+		networkRPCClients = append(networkRPCClients, rpc.New(clusterRPCURL))
+	}
+	var networkRPCClient RPCClientInterface
+	if len(networkRPCClients) > 0 {
+		networkRPCClient = networkRPCClients[0]
+	}
 	return &Client{
 		localRPCClient:      rpc.New(params.LocalRPCURL),
-		networkRPCClient:    rpc.New(params.ClusterRPCURL),
+		networkRPCClient:    networkRPCClient,
+		networkRPCClients:   networkRPCClients,
 		loggerLocal:         log.With("rpc_client", "local"),
 		loggerNetwork:       log.With("rpc_client", "network"),
 		averageSlotDuration: avgSlotDuration,
 		localRPCURL:         params.LocalRPCURL,
-		networkRPCURL:       params.ClusterRPCURL,
+		networkRPCURL:       firstString(clusterRPCURLs),
 	}
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func (c *Client) networkClients() []RPCClientInterface {
+	if len(c.networkRPCClients) > 0 {
+		return c.networkRPCClients
+	}
+	if c.networkRPCClient != nil {
+		return []RPCClientInterface{c.networkRPCClient}
+	}
+	return nil
+}
+
+func networkExhaustedError(operation string, errs []error) error {
+	if len(errs) == 0 {
+		return fmt.Errorf("%s: no cluster RPC endpoints configured", operation)
+	}
+	return fmt.Errorf("%s: all cluster RPC endpoints failed: %w", operation, errors.Join(errs...))
+}
+
+func (c *Client) networkGetSlot(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	var errs []error
+	for _, client := range c.networkClients() {
+		result, err := client.GetSlot(ctx, commitment)
+		if err == nil {
+			return result, nil
+		}
+		errs = append(errs, err)
+	}
+	return 0, networkExhaustedError("getSlot", errs)
+}
+
+func (c *Client) networkGetVoteAccounts(ctx context.Context, opts *rpc.GetVoteAccountsOpts) (*rpc.GetVoteAccountsResult, error) {
+	var errs []error
+	for _, client := range c.networkClients() {
+		result, err := client.GetVoteAccounts(ctx, opts)
+		if err == nil {
+			return result, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, networkExhaustedError("getVoteAccounts", errs)
+}
+
+func (c *Client) networkGetClusterNodes(ctx context.Context) ([]*rpc.GetClusterNodesResult, error) {
+	var errs []error
+	for _, client := range c.networkClients() {
+		result, err := client.GetClusterNodes(ctx)
+		if err == nil {
+			return result, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, networkExhaustedError("getClusterNodes", errs)
+}
+
+func (c *Client) networkGetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
+	var errs []error
+	for _, client := range c.networkClients() {
+		result, err := client.GetEpochInfo(ctx, commitment)
+		if err == nil {
+			return result, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, networkExhaustedError("getEpochInfo", errs)
+}
+
+func (c *Client) networkGetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error) {
+	var errs []error
+	for _, client := range c.networkClients() {
+		result, err := client.GetLeaderSchedule(ctx)
+		if err == nil {
+			return result, nil
+		}
+		errs = append(errs, err)
+	}
+	return nil, networkExhaustedError("getLeaderSchedule", errs)
 }
 
 type identityTransitionRPCResponse struct {
@@ -201,7 +300,7 @@ func (c *Client) GetCurrentSlotContextWithCommitment(ctx context.Context, commit
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.networkRPCClient.GetSlot(ctx, commitment)
+	return c.networkGetSlot(ctx, commitment)
 }
 
 // GetLocalNodeHealth returns the health of the local node
@@ -263,14 +362,19 @@ func (c *Client) GetVoteAccountState(ctx context.Context, votePubkey string, loc
 	if err != nil {
 		return nil, fmt.Errorf("invalid vote account pubkey %q: %w", votePubkey, err)
 	}
-	client := c.networkRPCClient
-	if local {
-		client = c.localRPCClient
+	getVoteAccounts := func() (*rpc.GetVoteAccountsResult, error) {
+		if local {
+			return c.localRPCClient.GetVoteAccounts(ctx, &rpc.GetVoteAccountsOpts{
+				Commitment: commitment,
+				VotePubkey: &votePubkeyValue,
+			})
+		}
+		return c.networkGetVoteAccounts(ctx, &rpc.GetVoteAccountsOpts{
+			Commitment: commitment,
+			VotePubkey: &votePubkeyValue,
+		})
 	}
-	accounts, err := client.GetVoteAccounts(ctx, &rpc.GetVoteAccountsOpts{
-		Commitment: commitment,
-		VotePubkey: &votePubkeyValue,
-	})
+	accounts, err := getVoteAccounts()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vote accounts: %w", err)
 	}
@@ -331,7 +435,7 @@ func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err err
 		c.loggerLocal.Debug("failed to query gossip peer by ip", "ip", ip, "err", localErr)
 	}
 
-	clusterNodes, clusterErr := c.networkRPCClient.GetClusterNodes(context.Background())
+	clusterNodes, clusterErr := c.networkGetClusterNodes(context.Background())
 	if clusterErr == nil {
 		if node := findGossipNodeFromIP(clusterNodes, ip); node != nil {
 			c.loggerNetwork.Debug("gossip peer found by ip", "ip", ip, "node_count", len(clusterNodes))
@@ -366,7 +470,7 @@ func (c *Client) gossipNodeFromPubkey(pubkey string) (node *rpc.GetClusterNodesR
 		c.loggerLocal.Debug("failed to query gossip peer by pubkey", "pubkey", pubkey, "err", localErr)
 	}
 
-	clusterNodes, clusterErr := c.networkRPCClient.GetClusterNodes(context.Background())
+	clusterNodes, clusterErr := c.networkGetClusterNodes(context.Background())
 	if clusterErr == nil {
 		if node := findGossipNodeFromPubkey(clusterNodes, pubkey); node != nil {
 			c.loggerNetwork.Debug("gossip peer found by pubkey", "pubkey", pubkey, "node_count", len(clusterNodes))
@@ -451,7 +555,7 @@ func (c *Client) nodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*rpc.G
 		c.loggerLocal.Debug("failed to query gossip peer by ip and expected pubkey", "ip", ip, "pubkey", expectedPubkey, "err", localErr)
 	}
 
-	clusterNodes, clusterErr := c.networkRPCClient.GetClusterNodes(context.Background())
+	clusterNodes, clusterErr := c.networkGetClusterNodes(context.Background())
 	var clusterFirstMatch *rpc.GetClusterNodesResult
 	if clusterErr == nil {
 		clusterExactMatch, firstMatch := findGossipNodeFromIPWithExpectedPubkey(clusterNodes, ip, expectedPubkey)
@@ -511,7 +615,7 @@ func (c *Client) GetCreditRankedVoteAccountFromPubkeyContext(ctx context.Context
 
 func (c *Client) getCreditRankedVoteAccount(ctx context.Context, pubkey string, includeDelinquent bool) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
 	// fetch all vote accounts
-	voteAccounts, err := c.networkRPCClient.GetVoteAccounts(
+	voteAccounts, err := c.networkGetVoteAccounts(
 		ctx,
 		&rpc.GetVoteAccountsOpts{
 			Commitment: rpc.CommitmentConfirmed,
@@ -574,7 +678,7 @@ func (c *Client) getCreditRankedVoteAccount(ctx context.Context, pubkey string, 
 
 // GetCurrentSlot returns the current slot
 func (c *Client) GetCurrentSlot() (slot uint64, err error) {
-	slot, err = c.networkRPCClient.GetSlot(context.Background(), rpc.CommitmentConfirmed)
+	slot, err = c.networkGetSlot(context.Background(), rpc.CommitmentConfirmed)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get slot: %w", err)
 	}
@@ -584,7 +688,7 @@ func (c *Client) GetCurrentSlot() (slot uint64, err error) {
 // GetTimeToNextLeaderSlotForPubkey returns the time to the next leader slot for the given pubkey
 func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (isOnLeaderSchedule bool, timeToNextLeaderSlot time.Duration, err error) {
 	// get epoch information, includes the current slot (absolute slot) and its offset from the first slot of the epoch
-	epochInfo, err := c.networkRPCClient.GetEpochInfo(context.Background(), rpc.CommitmentConfirmed)
+	epochInfo, err := c.networkGetEpochInfo(context.Background(), rpc.CommitmentConfirmed)
 	if err != nil {
 		return false, time.Duration(0), fmt.Errorf("failed to get epoch info: %w", err)
 	}
@@ -597,7 +701,7 @@ func (c *Client) GetTimeToNextLeaderSlotForPubkey(pubkey solanago.PublicKey) (is
 
 	// get the leader schedule - returns a map of pubkey:[]uint64 - where values are a slice of slot indexes
 	// relaative to the first slot of epochInfo result
-	leaderSchedule, err := c.networkRPCClient.GetLeaderSchedule(context.Background())
+	leaderSchedule, err := c.networkGetLeaderSchedule(context.Background())
 	if err != nil {
 		return false, time.Duration(0), fmt.Errorf("failed to get leader schedule: %w", err)
 	}

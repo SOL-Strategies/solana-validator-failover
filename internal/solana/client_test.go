@@ -840,6 +840,40 @@ func TestGossipClient_GetCurrentSlot_RPCError(t *testing.T) {
 	networkMock.AssertExpectations(t)
 }
 
+func TestGossipClient_GetCurrentSlot_UsesOrderedClusterRPCFallback(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	thirdRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC, thirdRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("primary unavailable"))
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(123), nil)
+
+	slot, err := client.GetCurrentSlot()
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(123), slot)
+	firstRPC.AssertExpectations(t)
+	secondRPC.AssertExpectations(t)
+	thirdRPC.AssertNotCalled(t, "GetSlot", mock.Anything, mock.Anything)
+}
+
+func TestGossipClient_GetCurrentSlot_ReportsExhaustedClusterRPCs(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("primary unavailable"))
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("secondary unavailable"))
+
+	_, err := client.GetCurrentSlot()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "all cluster RPC endpoints failed")
+	assert.Contains(t, err.Error(), "primary unavailable")
+	assert.Contains(t, err.Error(), "secondary unavailable")
+}
+
 func TestGossipClient_GetLocalNodeHealth_Success(t *testing.T) {
 	// Create test client with mocks
 	client, localMock, _ := createTestClient()

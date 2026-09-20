@@ -281,6 +281,29 @@ func TestResolveClusterRPCURL_CustomCluster(t *testing.T) {
 	assert.Equal(t, "https://custom-rpc.example.com", url)
 }
 
+func TestResolveClusterRPCURLs_PreservesConfiguredOrder(t *testing.T) {
+	urls, err := resolveClusterRPCURLs("mainnet-beta", "", []string{
+		"https://primary.example.com",
+		"https://secondary.example.com",
+		"https://primary.example.com",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://primary.example.com",
+		"https://secondary.example.com",
+	}, urls)
+}
+
+func TestResolveClusterRPCURLsTakesPrecedenceOverSingularURL(t *testing.T) {
+	urls, err := resolveClusterRPCURLs("mainnet-beta", "https://singular.example.com", []string{
+		"https://primary.example.com",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://primary.example.com"}, urls)
+}
+
 func TestRPCURLForLog_RedactsCredentialsAndPath(t *testing.T) {
 	loggedURL := rpcURLForLog("https://user:secret@private-rpc.example.com/v1/key?api-key=secret")
 

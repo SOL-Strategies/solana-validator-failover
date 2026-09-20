@@ -140,7 +140,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	defer v.logger.Debug("configuration done")
 
 	// configure solana rpc clients all in one
-	err := v.configureRPCClient(cfg.RPCAddress, cfg.Cluster, cfg.ClusterRPCURL, cfg.AverageSlotDuration)
+	err := v.configureRPCClientWithURLs(cfg.RPCAddress, cfg.Cluster, cfg.ClusterRPCURL, cfg.ClusterRPCURLs, cfg.AverageSlotDuration)
 	if err != nil {
 		return err
 	}
@@ -396,6 +396,10 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 
 // configureRPCClient configures the solana rpc client
 func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, clusterRPCURL, averageSlotDuration string) error {
+	return v.configureRPCClientWithURLs(localRPCURL, solanaClusterName, clusterRPCURL, nil, averageSlotDuration)
+}
+
+func (v *Validator) configureRPCClientWithURLs(localRPCURL, solanaClusterName, clusterRPCURL string, clusterRPCURLs []string, averageSlotDuration string) error {
 	if solanaClusterName == "" {
 		return fmt.Errorf("cluster is required")
 	}
@@ -407,9 +411,9 @@ func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, clusterRP
 		)
 	}
 
-	// An explicit cluster RPC URL overrides the built-in endpoint for known clusters.
-	// This allows operators to use a private endpoint that supports getClusterNodes.
-	solanaClusterRPCURL, err := resolveClusterRPCURL(solanaClusterName, clusterRPCURL)
+	// An explicit ordered cluster RPC URL list overrides the singular URL and
+	// built-in endpoint. This allows operators to provide redundant endpoints.
+	solanaClusterRPCURLs, err := resolveClusterRPCURLs(solanaClusterName, clusterRPCURL, clusterRPCURLs)
 	if err != nil {
 		return err
 	}
@@ -422,13 +426,14 @@ func (v *Validator) configureRPCClient(localRPCURL, solanaClusterName, clusterRP
 	v.logger.Debug("rpc client configured",
 		"cluster", solanaClusterName,
 		"local_rpc_url", rpcURLForLog(localRPCURL),
-		"cluster_rpc_url", rpcURLForLog(solanaClusterRPCURL),
+		"cluster_rpc_urls", redactRPCURLs(solanaClusterRPCURLs),
 	)
 
 	v.RPCAddress = localRPCURL
 	v.solanaRPCClient = v.NewSolanaRPCClient(solana.NewClientParams{
 		LocalRPCURL:         localRPCURL,
-		ClusterRPCURL:       solanaClusterRPCURL,
+		ClusterRPCURL:       solanaClusterRPCURLs[0],
+		ClusterRPCURLs:      solanaClusterRPCURLs,
 		AverageSlotDuration: avgSlotDuration,
 	})
 
@@ -444,17 +449,52 @@ func rpcURLForLog(rawURL string) string {
 }
 
 func resolveClusterRPCURL(solanaClusterName, clusterRPCURL string) (string, error) {
+	urls, err := resolveClusterRPCURLs(solanaClusterName, clusterRPCURL, nil)
+	if err != nil {
+		return "", err
+	}
+	return urls[0], nil
+}
+
+func resolveClusterRPCURLs(solanaClusterName, clusterRPCURL string, clusterRPCURLs []string) ([]string, error) {
+	if len(clusterRPCURLs) > 0 {
+		resolved := make([]string, 0, len(clusterRPCURLs))
+		seen := make(map[string]struct{}, len(clusterRPCURLs))
+		for _, rawURL := range clusterRPCURLs {
+			rawURL = strings.TrimSpace(rawURL)
+			if rawURL == "" {
+				continue
+			}
+			if _, ok := seen[rawURL]; ok {
+				continue
+			}
+			seen[rawURL] = struct{}{}
+			resolved = append(resolved, rawURL)
+		}
+		if len(resolved) == 0 {
+			return nil, fmt.Errorf("cluster_rpc_urls must contain at least one non-empty URL")
+		}
+		return resolved, nil
+	}
 	if clusterRPCURL != "" {
-		return clusterRPCURL, nil
+		return []string{clusterRPCURL}, nil
 	}
 	if utils.IsKnownCluster(solanaClusterName) {
-		return constants.SolanaClusters[solanaClusterName].RPC, nil
+		return []string{constants.SolanaClusters[solanaClusterName].RPC}, nil
 	}
-	return "", fmt.Errorf(
+	return nil, fmt.Errorf(
 		"cluster_rpc_url is required for custom cluster %q (known clusters: %s)",
 		solanaClusterName,
 		strings.Join(constants.SolanaClusterNames, ", "),
 	)
+}
+
+func redactRPCURLs(urls []string) []string {
+	redacted := make([]string, len(urls))
+	for i, rawURL := range urls {
+		redacted[i] = rpcURLForLog(rawURL)
+	}
+	return redacted
 }
 
 // configureBin ensures the validator binary exists and sets it

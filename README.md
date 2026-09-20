@@ -170,7 +170,13 @@ validator:
   # For well-known clusters the built-in URL is used unless this is set. A private endpoint
   # that supports getClusterNodes is recommended: peer discovery falls back to it when the
   # local validator's gossip view does not contain the expected peer.
+  # cluster_rpc_urls is an optional ordered failover list. Each request tries
+  # these URLs in order and fails only after all endpoints are exhausted. When
+  # set, it takes precedence over cluster_rpc_url.
   # cluster_rpc_url: <solana_compatible_rpc_endpoint>
+  # cluster_rpc_urls:
+  #   - <primary_solana_compatible_rpc_endpoint>
+  #   - <secondary_solana_compatible_rpc_endpoint>
 
   # optional display name used in failover plans, logs, and hook templates
   # defaults to OS hostname if not set
