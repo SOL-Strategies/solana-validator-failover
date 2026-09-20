@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/solana"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestClient returns a Client wired with the given mock, suitable for unit
@@ -20,6 +22,36 @@ func newTestClient(mock solana.ClientInterface) *Client {
 		solanaRPCClient: mock,
 	}
 	return c
+}
+
+type identityTransitionStatusMock struct {
+	status *solana.IdentityTransitionStatus
+}
+
+func (m identityTransitionStatusMock) GetIdentityTransitionStatus(context.Context) (*solana.IdentityTransitionStatus, error) {
+	return m.status, nil
+}
+
+func (m identityTransitionStatusMock) ProbeIdentityTransitionStatus(context.Context) (bool, error) {
+	return true, nil
+}
+
+func TestWaitForIdentityTransitionRejectsTerminalFailure(t *testing.T) {
+	transitionError := "failed to load new vote history"
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err := waitForIdentityTransition(ctx, identityTransitionStatusMock{
+		status: &solana.IdentityTransitionStatus{
+			Sequence: 2,
+			State:    "failed",
+			Error:    &transitionError,
+		},
+	}, 1, "expected-identity", "expected-vote-account", time.Millisecond)
+
+	var terminalError *identityTransitionFailedError
+	require.ErrorAs(t, err, &terminalError)
+	require.Contains(t, err.Error(), transitionError)
 }
 
 // slotSequenceMock builds a MockClient whose GetCurrentSlot returns successive
