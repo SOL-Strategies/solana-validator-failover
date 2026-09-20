@@ -379,7 +379,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		return
 	}
 	if strategy == HandoffStrategyOnchain && !s.mtlsEnabled {
-		s.logger.Warn("native Firedancer handoff is proceeding without application-level mTLS; ensure the failover connection uses a private, authenticated network such as Tailscale or WireGuard")
+		s.logger.Debug("native Firedancer handoff is proceeding without application-level mTLS; ensure the failover connection uses a private, authenticated network such as Tailscale or WireGuard")
 	}
 	if strategy == HandoffStrategyOnchain {
 		commitment := rpc.CommitmentFinalized
