@@ -36,14 +36,13 @@ func ReadNativeTowerVoteSlot(ctx context.Context, address string) (uint64, error
 
 func parseNativeTowerVoteSlot(reader io.Reader) (uint64, error) {
 	const noVote = math.MaxUint64
-	// Prefer Firedancer's voter watermark. The compatibility names are
-	// fallbacks only; taking the maximum across different metrics can select a
-	// value that does not represent the voter's final identity-transition tip.
+	// tower_vote_slot is Firedancer's current native tower watermark. The other
+	// names are compatibility fallbacks for older or nonstandard builds; never
+	// combine values from different metric families.
 	metricNames := []string{
-		"fd_voter_vote_slot",
-		// Older/native compatibility builds have exposed these spellings.
-		"fd_tower_vote_slot",
 		"tower_vote_slot",
+		"fd_tower_vote_slot",
+		"fd_voter_vote_slot",
 	}
 	highestByMetric := make(map[string]uint64, len(metricNames))
 	foundByMetric := make(map[string]bool, len(metricNames))
@@ -57,8 +56,11 @@ func parseNativeTowerVoteSlot(reader io.Reader) (uint64, error) {
 		if len(parts) < 2 {
 			continue
 		}
-		metric := parts[0]
+		rawMetric := parts[0]
+		metric := rawMetric
+		labels := ""
 		if brace := strings.IndexByte(metric, '{'); brace >= 0 {
+			labels = metric[brace:]
 			metric = metric[:brace]
 		}
 		validMetric := false
@@ -69,6 +71,9 @@ func parseNativeTowerVoteSlot(reader io.Reader) (uint64, error) {
 			}
 		}
 		if !validMetric {
+			continue
+		}
+		if metric == "tower_vote_slot" && labels != "" && !strings.Contains(labels, `kind="tower"`) {
 			continue
 		}
 		slot, parseErr := parsePrometheusUint(parts[1])
