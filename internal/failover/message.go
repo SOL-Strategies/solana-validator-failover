@@ -21,6 +21,7 @@ type Message struct {
 	HandoffWarning                   string
 	ProbeIdentityTransitionRPC       bool
 	FrozenTowerSlot                  uint64
+	HandoffAborted                   bool
 	ReconciliationComplete           bool
 	ActiveRollbackCommand            string
 	PassiveRollbackCommand           string
