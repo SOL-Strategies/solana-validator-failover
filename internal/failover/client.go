@@ -222,6 +222,49 @@ func waitForIdentityTransition(ctx context.Context, client solana.IdentityTransi
 	}
 }
 
+func waitForFinalizedVoteAccount(ctx context.Context, client solana.ClientInterface, voteAccount, expectedNode string, targetSlot uint64, poll time.Duration, progress func(lastVote uint64, err error)) error {
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	var lastVote uint64
+	var lastErr error
+	for {
+		account, err := client.GetVoteAccountState(ctx, voteAccount, false, rpc.CommitmentFinalized)
+		if err == nil && account != nil {
+			lastErr = nil
+			lastVote = account.LastVote
+			if expectedNode != "" && account.NodePubkey.String() != expectedNode {
+				err = fmt.Errorf("vote account %s belongs to node %s, expected source node %s", voteAccount, account.NodePubkey, expectedNode)
+			} else if lastVote >= targetSlot {
+				return nil
+			}
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if progress != nil {
+			progress(lastVote, lastErr)
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if lastErr != nil {
+				return fmt.Errorf("vote account %s did not reach finalized slot %d (last_vote=%d): %w", voteAccount, targetSlot, lastVote, lastErr)
+			}
+			return fmt.Errorf("vote account %s did not reach finalized slot %d (last_vote=%d): %w", voteAccount, targetSlot, lastVote, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func maxSlotGap(target, observed uint64) uint64 {
+	if target > observed {
+		return target - observed
+	}
+	return 0
+}
+
 func (c *Client) setFailure(message string, failure error) {
 	if failure == nil {
 		c.failure = fmt.Errorf("%s", message)
@@ -283,6 +326,17 @@ func (c *Client) Start() (startErr error) {
 		c.logger.Error("rollback disabled — this node is passive and destination activation has not begun; manual intervention required")
 		if c.rollback.ToActive.ResolvedCmd != "" {
 			c.logger.Errorf("to recover this node to active: %s", c.rollback.ToActive.ResolvedCmd)
+		}
+	}
+	abortDestinationHandoff := func(message string, failure error) {
+		reason := message
+		if failure != nil {
+			reason = fmt.Sprintf("%s: %v", message, failure)
+		}
+		c.failoverStream.SetHandoffAborted(true)
+		c.failoverStream.SetErrorMessage(reason)
+		if err := c.failoverStream.Encode(); err != nil {
+			c.logger.Error("failed to send handoff abort to destination", "err", err)
 		}
 	}
 
@@ -612,8 +666,33 @@ func (c *Client) Start() (startErr error) {
 			}
 		}
 		if tipErr != nil {
+			if sourceInfo.IsNativeFiredancer && !c.failoverStream.GetIsDryRunFailover() {
+				// The source must establish the finalized on-chain barrier before
+				// the destination receives evidence and begins reconciliation.
+				abortDestinationHandoff("native Firedancer watermark was not observed at finalized commitment", tipErr)
+			}
 			recoverBeforeDestinationActivation("failed to determine frozen tower vote", tipErr)
 			return
+		}
+		if sourceInfo.IsNativeFiredancer && !c.failoverStream.GetIsDryRunFailover() && tip > 0 {
+			reconciliationStarted := time.Now()
+			c.logger.Info("waiting for native Firedancer tower watermark to reach finalized on-chain vote", "vote_account", sourceInfo.VoteAccount, "frozen_slot", tip, "commitment", rpc.CommitmentFinalized, "timeout", handoffTimeout(c.handoffTimeout), "poll_interval", c.handoffPollInterval)
+			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+			lastProgress := time.Now()
+			finalizedErr := waitForFinalizedVoteAccount(ctx, c.solanaRPCClient, sourceInfo.VoteAccount, sourceInfo.Identities.Active.PubKey(), tip, c.handoffPollInterval, func(lastVote uint64, err error) {
+				if time.Since(lastProgress) < 5*time.Second {
+					return
+				}
+				c.logger.Info("still waiting for native Firedancer tower watermark to finalize on-chain", "frozen_slot", tip, "network_last_vote", lastVote, "slot_gap", maxSlotGap(tip, lastVote), "elapsed", time.Since(reconciliationStarted).Round(time.Second), "err", err)
+				lastProgress = time.Now()
+			})
+			cancel()
+			if finalizedErr != nil {
+				abortDestinationHandoff("native Firedancer tower watermark did not reach finalized commitment", finalizedErr)
+				recoverBeforeDestinationActivation("failed to confirm native Firedancer tower watermark on-chain", finalizedErr)
+				return
+			}
+			c.logger.Info("native Firedancer tower watermark reached finalized on-chain vote", "frozen_slot", tip, "elapsed", time.Since(reconciliationStarted).Round(time.Millisecond))
 		}
 		c.failoverStream.SetFrozenTowerSlot(tip)
 		c.failoverStream.SetHandoffEvidenceEndTime()

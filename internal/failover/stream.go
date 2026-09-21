@@ -144,6 +144,10 @@ func (s *Stream) SetFrozenTowerSlot(slot uint64) { s.message.FrozenTowerSlot = s
 
 func (s Stream) GetFrozenTowerSlot() uint64 { return s.message.FrozenTowerSlot }
 
+func (s *Stream) SetHandoffAborted(aborted bool) { s.message.HandoffAborted = aborted }
+
+func (s Stream) GetHandoffAborted() bool { return s.message.HandoffAborted }
+
 func (s *Stream) SetIdentityTransitionRPCAvailable(v bool) {
 	s.message.IdentityTransitionRPCAvailable = v
 }

@@ -671,6 +671,16 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 				s.logger.Error("failed to decode on-chain handoff evidence", "err", err)
 				return
 			}
+			if s.failoverStream.GetHandoffAborted() {
+				s.failoverStream.SetReconciliationEndTime()
+				s.failoverStream.SetCanProceed(false)
+				if s.failoverStream.GetErrorMessage() == "" {
+					s.failoverStream.SetErrorMessage("active node aborted handoff before destination reconciliation")
+				}
+				s.logger.Warn("active node aborted handoff before destination reconciliation", "reason", s.failoverStream.GetErrorMessage())
+				_ = s.failoverStream.Encode()
+				return
+			}
 			s.failoverStream.SetReconciliationStartTime()
 			var reconciliationErr error
 			if s.failoverStream.GetSlotFallbackRequired() {
