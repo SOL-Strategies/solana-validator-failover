@@ -114,11 +114,18 @@ func waitForNativeTowerVote(ctx context.Context, address string, poll time.Durat
 }
 
 func waitForNativeTowerVoteAtLeast(ctx context.Context, address string, poll time.Duration, minimum uint64) (uint64, error) {
+	return waitForNativeTowerVoteAtLeastWithProgress(ctx, address, poll, minimum, nil)
+}
+
+func waitForNativeTowerVoteAtLeastWithProgress(ctx context.Context, address string, poll time.Duration, minimum uint64, progress func(slot uint64, err error)) (uint64, error) {
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
 	}
 	for {
 		slot, err := ReadNativeTowerVoteSlot(ctx, address)
+		if progress != nil {
+			progress(slot, err)
+		}
 		if err == nil && slot >= minimum {
 			return slot, nil
 		}
