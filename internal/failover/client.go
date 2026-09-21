@@ -606,26 +606,31 @@ func (c *Client) Start() (startErr error) {
 		if sourceInfo.IsNativeFiredancer {
 			watermarkStarted := time.Now()
 			lastWatermarkProgress := watermarkStarted
-			c.logger.Info("waiting for native Firedancer vote watermark to stabilize", "minimum_slot", preDemotionNativeVoteSlot, "poll_interval", c.handoffPollInterval)
+			c.logger.Info("confirming native Firedancer vote watermark after demotion", "captured_slot", preDemotionNativeVoteSlot, "poll_interval", c.handoffPollInterval)
 			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
 			if c.failoverStream.GetIsDryRunFailover() {
 				tip, tipErr = waitForNativeTowerVoteAtLeast(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
 			} else {
-				tip, tipErr = waitForNativeTowerVoteAtLeastStableWithProgress(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot, func(slot uint64, err error, stableSamples int) {
+				_, tipErr = waitForNativeTowerVoteAtLeastWithProgress(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot, func(slot uint64, err error) {
 					if time.Since(lastWatermarkProgress) < 5*time.Second {
 						return
 					}
-					fields := []any{"minimum_slot", preDemotionNativeVoteSlot, "latest_slot", slot, "stable_samples", stableSamples, "elapsed", time.Since(watermarkStarted).Round(time.Second)}
+					fields := []any{"captured_slot", preDemotionNativeVoteSlot, "latest_slot", slot, "elapsed", time.Since(watermarkStarted).Round(time.Second)}
 					if err != nil {
 						fields = append(fields, "err", err)
 					}
-					c.logger.Info("still waiting for native Firedancer vote watermark to stabilize", fields...)
+					c.logger.Info("still waiting for native Firedancer vote watermark after demotion", fields...)
 					lastWatermarkProgress = time.Now()
 				})
+				// The captured pre-demotion watermark is the safety target. The
+				// metric may continue advancing while Firedancer drains/replays
+				// state after set-identity, so a later metric value is not a
+				// reliable frozen-vote boundary.
+				tip = preDemotionNativeVoteSlot
 			}
 			cancel()
 			if tipErr == nil {
-				c.logger.Info("native Firedancer vote watermark stabilized", "frozen_slot", tip, "elapsed", time.Since(watermarkStarted).Round(time.Millisecond))
+				c.logger.Info("native Firedancer vote watermark confirmed after demotion", "frozen_slot", tip, "captured_slot", preDemotionNativeVoteSlot, "elapsed", time.Since(watermarkStarted).Round(time.Millisecond))
 			}
 		} else if c.failoverStream.GetSlotFallbackRequired() {
 			// The server will enforce the conservative post-demotion slot barrier.
