@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 5d98574..e67d8a1 100644
+index ea8b544..89bbb96 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -386,6 +386,7 @@ dependencies = [
@@ -22,7 +22,7 @@ index bda5559..986d504 100644
          migration::{GENESIS_VOTE_REFRESH, MigrationStatus},
          vote::Vote,
      },
-@@ -1429,6 +1430,16 @@ impl ReplayStage {
+@@ -1429,6 +1430,15 @@ impl ReplayStage {
                                  my_pubkey = identity_keypair.pubkey();
                                  migration_status.set_pubkey(my_pubkey);
  
@@ -35,15 +35,14 @@ index bda5559..986d504 100644
 +                                    tower.last_voted_slot(),
 +                                    tower.root(),
 +                                );
-+
                                  // Load the new identity's tower
                                  tower = match Self::load_tower(
                                      tower_storage.as_ref(),
 diff --git a/rpc/src/rpc.rs b/rpc/src/rpc.rs
-index d6065a2..0f73100 100644
+index 3a70806..7668e38 100644
 --- a/rpc/src/rpc.rs
 +++ b/rpc/src/rpc.rs
-@@ -2822,6 +2822,12 @@ pub mod rpc_minimal {
+@@ -2816,6 +2816,12 @@ pub mod rpc_minimal {
          #[rpc(meta, name = "getIdentity")]
          fn get_identity(&self, meta: Self::Metadata) -> Result<RpcIdentity>;
  
@@ -56,7 +55,7 @@ index d6065a2..0f73100 100644
          #[rpc(meta, name = "getSlot")]
          fn get_slot(&self, meta: Self::Metadata, config: Option<RpcContextConfig>) -> Result<Slot>;
  
-@@ -2916,6 +2922,16 @@ pub mod rpc_minimal {
+@@ -2910,6 +2916,16 @@ pub mod rpc_minimal {
              })
          }
  
@@ -74,10 +73,10 @@ index d6065a2..0f73100 100644
              debug!("get_slot rpc request received");
              meta.get_slot(config.unwrap_or_default())
 diff --git a/validator/Cargo.toml b/validator/Cargo.toml
-index 0f350d2..80f7cc3 100644
+index 8ba95de..9c1cfdb 100644
 --- a/validator/Cargo.toml
 +++ b/validator/Cargo.toml
-@@ -27,6 +27,7 @@ agave-feature-set = { workspace = true }
+@@ -26,6 +26,7 @@ agave-feature-set = { workspace = true }
  agave-logger = { workspace = true }
  agave-snapshots = { workspace = true }
  agave-votor = { workspace = true }
@@ -86,20 +85,20 @@ index 0f350d2..80f7cc3 100644
  agave-xdp = { workspace = true }
  arc-swap = { workspace = true }
 diff --git a/validator/src/admin_rpc_service.rs b/validator/src/admin_rpc_service.rs
-index f038336..ce69355 100644
+index 4f30e05..3175478 100644
 --- a/validator/src/admin_rpc_service.rs
 +++ b/validator/src/admin_rpc_service.rs
-@@ -3,6 +3,7 @@ use {
+@@ -2,6 +2,7 @@ use {
      agave_votor::{
          event::VotorEvent, vote_history::VoteHistory, vote_history_storage::VoteHistoryStorage,
      },
 +    agave_votor_messages::identity_transition_status,
-     arc_swap::ArcSwap,
      crossbeam_channel::Sender,
-     jsonrpc_core::{BoxFuture, Error, ErrorCode, MetaIoHandler, Metadata, Result},
-@@ -1173,5 +1174,15 @@ impl AdminRpcImpl {
+     jsonrpc_core::{BoxFuture, ErrorCode, MetaIoHandler, Metadata, Result},
+     jsonrpc_core_client::{RpcError, transports::ipc},
+@@ -1007,5 +1008,14 @@ impl AdminRpcImpl {
              }
-
+           }
 +            if old_identity == new_identity {
 +                return Ok(());
 +            }
@@ -107,13 +106,12 @@ index f038336..ce69355 100644
 +                old_identity,
 +                new_identity,
 +                post_init.vote_account,
-+            )
-+            .map_err(jsonrpc_core::error::Error::invalid_params)?;
++            );
 +
              // Updaters block until the new key is in effect, so take a copy of the
              // list instead of running them under the lock.
              let notifiers = {
-@@ -1210,10 +1218,13 @@ impl AdminRpcImpl {
+@@ -1044,10 +1051,13 @@ impl AdminRpcImpl {
              post_init
                  .votor_event_sender
                  .send(VotorEvent::SetIdentity)
@@ -131,80 +129,12 @@ index f038336..ce69355 100644
                  })?;
  
              warn!("Identity set to {new_identity}");
-diff --git a/votor-messages/src/lib.rs b/votor-messages/src/lib.rs
-index dfe42ef..b5e8a00 100644
---- a/votor-messages/src/lib.rs
-+++ b/votor-messages/src/lib.rs
-@@ -13,6 +13,7 @@ pub mod certificate;
- pub mod consensus_message;
- pub mod finalized_slot;
- pub mod fraction;
-+pub mod identity_transition_status;
- pub mod metric_types;
- pub mod migration;
- pub mod reward_certificate;
-diff --git a/votor/src/event_handler.rs b/votor/src/event_handler.rs
-index 749d11f..2e9a55b 100644
---- a/votor/src/event_handler.rs
-+++ b/votor/src/event_handler.rs
-@@ -21,8 +21,8 @@ use {
-         votor::{ExitOnDrop, SharedContext},
-     },
-     agave_votor_messages::{
--        consensus_message::Block, metric_types::ConsensusMetricsEvent, migration::MigrationStatus,
--        vote::Vote,
-+        consensus_message::Block, identity_transition_status, metric_types::ConsensusMetricsEvent,
-+        migration::MigrationStatus, vote::Vote,
-     },
-     crossbeam_channel::select,
-     parking_lot::RwLock,
-@@ -567,7 +567,11 @@ impl EventHandler {
-             // Operator called set identity make sure that our keypair is updated for voting
-             VotorEvent::SetIdentity => {
-                 info!("{}: SetIdentity", local_context.my_pubkey);
-+                let old_identity = local_context.my_pubkey;
-+                let last_vote_slot = vctx.vote_history.last_voted_slot();
-+                let root_slot = vctx.vote_history.root();
-                 if let Err(e) = Self::handle_set_identity(ctx, vctx, local_context) {
-+                    identity_transition_status::fail_current(e.to_string());
-                     error!(
-                         "Unable to load new vote history when attempting to change identity from \
-                          {} to {} in voting loop, Exiting: {}",
-@@ -577,6 +581,13 @@ impl EventHandler {
-                     );
-                     return Err(EventLoopError::SetIdentityError(e));
-                 }
-+                identity_transition_status::complete(
-+                    old_identity,
-+                    local_context.my_pubkey,
-+                    "alpenglow",
-+                    last_vote_slot,
-+                    root_slot,
-+                );
-                 Self::send_vote_history_to_consensus_pool(&local_context.my_pubkey, vctx)?;
-             }
-         }
-diff --git a/votor/src/vote_history.rs b/votor/src/vote_history.rs
-index c1d0a2d..eba104c 100644
---- a/votor/src/vote_history.rs
-+++ b/votor/src/vote_history.rs
-@@ -196,6 +196,10 @@ impl VoteHistory {
-         self.root
-     }
- 
-+    pub fn last_voted_slot(&self) -> Option<Slot> {
-+        self.votes_cast.keys().max().copied()
-+    }
-+
-     /// Add a new vote to the voting history
-     pub fn add_vote(&mut self, vote: Vote) {
-         assert!(vote.slot() >= self.root);
 diff --git a/votor-messages/src/identity_transition_status.rs b/votor-messages/src/identity_transition_status.rs
 new file mode 100644
-index 0000000..fbff4d7
+index 0000000..00610c8
 --- /dev/null
 +++ b/votor-messages/src/identity_transition_status.rs
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,104 @@
 +//! Process-local identity transition state shared by validator services.
 +#![allow(missing_docs)]
 +
@@ -234,15 +164,8 @@ index 0000000..fbff4d7
 +static STATUS: LazyLock<RwLock<Option<IdentityTransitionStatus>>> =
 +    LazyLock::new(|| RwLock::new(None));
 +
-+pub fn begin(
-+    from_identity: Pubkey,
-+    to_identity: Pubkey,
-+    vote_account: Pubkey,
-+) -> Result<u64, String> {
++pub fn begin(from_identity: Pubkey, to_identity: Pubkey, vote_account: Pubkey) -> u64 {
 +    let mut status = STATUS.write().unwrap();
-+    if matches!(status.as_ref(), Some(previous) if previous.state == "transitioning") {
-+        return Err("an identity transition is already in progress".to_string());
-+    }
 +    let sequence = status.as_ref().map_or(1, |previous| previous.sequence + 1);
 +    *status = Some(IdentityTransitionStatus {
 +        version: 1,
@@ -257,11 +180,11 @@ index 0000000..fbff4d7
 +        tower_root_slot: None,
 +        error: None,
 +    });
-+    Ok(sequence)
++    sequence
 +}
 +
 +pub fn complete(
-+    from_identity: Pubkey,
++    _from_identity: Pubkey,
 +    to_identity: Pubkey,
 +    consensus: &str,
 +    last_vote_slot: Option<Slot>,
@@ -316,3 +239,71 @@ index 0000000..fbff4d7
 +            error: None,
 +        })
 +}
+diff --git a/votor-messages/src/lib.rs b/votor-messages/src/lib.rs
+index dfe42ef..b5e8a00 100644
+--- a/votor-messages/src/lib.rs
++++ b/votor-messages/src/lib.rs
+@@ -13,6 +13,7 @@ pub mod certificate;
+ pub mod consensus_message;
+ pub mod finalized_slot;
+ pub mod fraction;
++pub mod identity_transition_status;
+ pub mod metric_types;
+ pub mod migration;
+ pub mod reward_certificate;
+diff --git a/votor/src/event_handler.rs b/votor/src/event_handler.rs
+index 749d11f..326236d 100644
+--- a/votor/src/event_handler.rs
++++ b/votor/src/event_handler.rs
+@@ -21,8 +21,8 @@ use {
+         votor::{ExitOnDrop, SharedContext},
+     },
+     agave_votor_messages::{
+-        consensus_message::Block, metric_types::ConsensusMetricsEvent, migration::MigrationStatus,
+-        vote::Vote,
++        consensus_message::Block, identity_transition_status, metric_types::ConsensusMetricsEvent,
++        migration::MigrationStatus, vote::Vote,
+     },
+     crossbeam_channel::select,
+     parking_lot::RwLock,
+@@ -567,6 +567,10 @@ impl EventHandler {
+             // Operator called set identity make sure that our keypair is updated for voting
+             VotorEvent::SetIdentity => {
+                 info!("{}: SetIdentity", local_context.my_pubkey);
++                let old_identity = local_context.my_pubkey;
++                let last_vote_slot = vctx.vote_history.last_voted_slot();
++                let root_slot = vctx.vote_history.root();
+                 if let Err(e) = Self::handle_set_identity(ctx, vctx, local_context) {
++                    identity_transition_status::fail_current(e.to_string());
+                    error!(
+                         "Unable to load new vote history when attempting to change identity from \
+@@ -577,6 +580,13 @@ impl EventHandler {
+                     );
+                     return Err(EventLoopError::SetIdentityError(e));
+                 }
++                identity_transition_status::complete(
++                    old_identity,
++                    local_context.my_pubkey,
++                    "alpenglow",
++                    last_vote_slot,
++                    root_slot,
++                );
+                 Self::send_vote_history_to_consensus_pool(&local_context.my_pubkey, vctx)?;
+             }
+         }
+diff --git a/votor/src/vote_history.rs b/votor/src/vote_history.rs
+index c1d0a2d..eba104c 100644
+--- a/votor/src/vote_history.rs
++++ b/votor/src/vote_history.rs
+@@ -196,6 +196,10 @@ impl VoteHistory {
+         self.root
+     }
+ 
++    pub fn last_voted_slot(&self) -> Option<Slot> {
++        self.votes_cast.keys().max().copied()
++    }
++
+     /// Add a new vote to the voting history
+     pub fn add_vote(&mut self, vote: Vote) {
+         assert!(vote.slot() >= self.root);
+

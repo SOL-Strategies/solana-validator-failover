@@ -7,14 +7,8 @@ func TestIdentityTransitionPatchURL(t *testing.T) {
 		name, version, release, want string
 	}{
 		{
-			name:    "agave 4.2",
-			version: "Agave 4.2.2",
-			release: "v0.2.0",
-			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches",
-		},
-		{
-			name:    "agave 4.3 prerelease",
-			version: "Agave 4.3.0-rc.1",
+			name:    "agave 4.3.0",
+			version: "Agave 4.3.0",
 			release: "v0.2.0",
 			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/v0.2.0/patches",
 		},
@@ -26,7 +20,7 @@ func TestIdentityTransitionPatchURL(t *testing.T) {
 		},
 		{
 			name:    "development build",
-			version: "Agave 4.2.2",
+			version: "Agave 4.3.0",
 			release: "dev",
 			want:    "https://github.com/sol-strategies/solana-validator-failover/tree/main/patches",
 		},

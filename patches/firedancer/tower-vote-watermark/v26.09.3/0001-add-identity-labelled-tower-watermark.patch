@@ -1,0 +1,269 @@
+diff --git a/src/disco/metrics/fd_prometheus.c b/src/disco/metrics/fd_prometheus.c
+index b4bfacf..93edae6 100644
+--- a/src/disco/metrics/fd_prometheus.c
++++ b/src/disco/metrics/fd_prometheus.c
+@@ -1,9 +1,11 @@
+ #include "fd_prometheus.h"
+ 
+ #include "fd_metrics.h"
++#include "generated/fd_metrics_tower.h"
+ 
+ #include "../topo/fd_topo.h"
+ #include "../../waltz/http/fd_http_server.h"
++#include "../../ballet/base58/fd_base58.h"
+ 
+ struct fd_prom_render {
+   fd_http_server_t * http;
+@@ -169,12 +171,49 @@ render_links_in( fd_prom_render_t *        r,
+   }
+ }
+ 
++static void
++render_tower_vote_slot_by_identity( fd_prom_render_t *        r,
++                                    fd_topo_tile_t const *    tile ) {
++  volatile ulong * metrics = fd_metrics_tile( tile->metrics );
++  uchar current_identity[ 32UL ];
++  uchar previous_identity[ 32UL ];
++  for( ulong i=0UL; i<4UL; i++ ) {
++    ((ulong *)current_identity)[ i ] = metrics[ FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_OFF + i ];
++    ((ulong *)previous_identity)[ i ] = metrics[ FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_OFF + i ];
++  }
++
++  char current_identity_b58[ FD_BASE58_ENCODED_32_SZ ];
++  char previous_identity_b58[ FD_BASE58_ENCODED_32_SZ ];
++  fd_base58_encode_32( current_identity, NULL, current_identity_b58 );
++  fd_base58_encode_32( previous_identity, NULL, previous_identity_b58 );
++  ulong current_vote_slot = *(metrics + FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_OFF);
++  ulong previous_vote_slot = *(metrics + FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_OFF);
++
++  fd_http_server_printf( r->http, "# HELP tower_vote_slot_by_identity Highest voted slot in the local tower, labelled by the identity that voted it\n# TYPE tower_vote_slot_by_identity gauge\n" );
++  if( current_vote_slot!=ULONG_MAX ) {
++    fd_http_server_printf( r->http, "tower_vote_slot_by_identity{kind=\"%s\",kind_id=\"%lu\",identity=\"%s\"} %lu\n", tile->name, tile->kind_id, current_identity_b58, current_vote_slot );
++  }
++  if( previous_vote_slot!=ULONG_MAX && memcmp( previous_identity, (uchar[32UL]){0}, 32UL ) ) {
++    fd_http_server_printf( r->http, "tower_vote_slot_by_identity{kind=\"%s\",kind_id=\"%lu\",identity=\"%s\"} %lu\n", tile->name, tile->kind_id, previous_identity_b58, previous_vote_slot );
++  }
++}
++
++static int
++is_tower_identity_metadata( fd_metrics_meta_t const * metric ) {
++  return !strncmp( metric->name, "tower_current_identity_key", 26UL ) ||
++         !strcmp( metric->name, "tower_current_identity_vote_slot" ) ||
++         !strncmp( metric->name, "tower_previous_identity_key", 27UL ) ||
++         !strcmp( metric->name, "tower_previous_identity_vote_slot" );
++}
++
+ static void
+ render_tile_metric( fd_prom_render_t *        r,
+                     fd_topo_tile_t const *    tile,
+                     fd_metrics_meta_t const * metric ) {
++  if( FD_UNLIKELY( is_tower_identity_metadata( metric ) ) ) return;
+   if( FD_LIKELY( metric->type==FD_METRICS_TYPE_COUNTER || metric->type==FD_METRICS_TYPE_GAUGE ) ) {
+     render_counter( r, metric, tile );
++    if( FD_UNLIKELY( !strcmp( tile->name, "tower" ) && !strcmp( metric->name, "tower_vote_slot" ) ) ) render_tower_vote_slot_by_identity( r, tile );
+   } else if( FD_LIKELY( metric->type==FD_METRICS_TYPE_HISTOGRAM ) ) {
+     render_histogram( r, metric, tile );
+   }
+diff --git a/src/disco/metrics/generated/fd_metrics_tower.c b/src/disco/metrics/generated/fd_metrics_tower.c
+index b342a36..b0042fb 100644
+--- a/src/disco/metrics/generated/fd_metrics_tower.c
++++ b/src/disco/metrics/generated/fd_metrics_tower.c
+@@ -6,6 +6,16 @@ const fd_metrics_meta_t FD_METRICS_TOWER[FD_METRICS_TOWER_TOTAL] = {
+     DECLARE_METRIC( TOWER_SLOT_LAST_IGNORED, GAUGE ),
+     DECLARE_METRIC( TOWER_REPLAY_SLOT, GAUGE ),
+     DECLARE_METRIC( TOWER_VOTE_SLOT, GAUGE ),
++    DECLARE_METRIC( TOWER_CURRENT_IDENTITY_VOTE_SLOT, GAUGE ),
++    DECLARE_METRIC( TOWER_CURRENT_IDENTITY_KEY0, GAUGE ),
++    DECLARE_METRIC( TOWER_CURRENT_IDENTITY_KEY1, GAUGE ),
++    DECLARE_METRIC( TOWER_CURRENT_IDENTITY_KEY2, GAUGE ),
++    DECLARE_METRIC( TOWER_CURRENT_IDENTITY_KEY3, GAUGE ),
++    DECLARE_METRIC( TOWER_PREVIOUS_IDENTITY_KEY0, GAUGE ),
++    DECLARE_METRIC( TOWER_PREVIOUS_IDENTITY_KEY1, GAUGE ),
++    DECLARE_METRIC( TOWER_PREVIOUS_IDENTITY_KEY2, GAUGE ),
++    DECLARE_METRIC( TOWER_PREVIOUS_IDENTITY_KEY3, GAUGE ),
++    DECLARE_METRIC( TOWER_PREVIOUS_IDENTITY_VOTE_SLOT, GAUGE ),
+     DECLARE_METRIC( TOWER_RESET_SLOT, GAUGE ),
+     DECLARE_METRIC( TOWER_ROOT_SLOT, GAUGE ),
+     DECLARE_METRIC( TOWER_INIT_SLOT, GAUGE ),
+diff --git a/src/disco/metrics/generated/fd_metrics_tower.h b/src/disco/metrics/generated/fd_metrics_tower.h
+index c10c449..b7be82b 100644
+--- a/src/disco/metrics/generated/fd_metrics_tower.h
++++ b/src/disco/metrics/generated/fd_metrics_tower.h
+@@ -11,6 +11,16 @@ enum {
+   FD_METRICS_GAUGE_TOWER_SLOT_LAST_IGNORED_OFF,
+   FD_METRICS_GAUGE_TOWER_REPLAY_SLOT_OFF,
+   FD_METRICS_GAUGE_TOWER_VOTE_SLOT_OFF,
++  FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_OFF,
++  FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_OFF,
++  FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY1_OFF,
++  FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY2_OFF,
++  FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY3_OFF,
++  FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_OFF,
++  FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY1_OFF,
++  FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY2_OFF,
++  FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY3_OFF,
++  FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_OFF,
+   FD_METRICS_GAUGE_TOWER_RESET_SLOT_OFF,
+   FD_METRICS_GAUGE_TOWER_ROOT_SLOT_OFF,
+   FD_METRICS_GAUGE_TOWER_INIT_SLOT_OFF,
+@@ -152,6 +162,56 @@ enum {
+ #define FD_METRICS_GAUGE_TOWER_VOTE_SLOT_DESC "Highest voted slot in the local tower, ULONG_MAX if haven't voted. Monotonically increasing"
+ #define FD_METRICS_GAUGE_TOWER_VOTE_SLOT_CVT  (FD_METRICS_CONVERTER_NONE)
+ 
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_NAME "tower_current_identity_vote_slot"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_DESC "Highest tower vote slot recorded for the current identity; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_VOTE_SLOT_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_NAME "tower_current_identity_key0"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_DESC "First 8 bytes of the current tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY0_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY1_NAME "tower_current_identity_key1"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY1_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY1_DESC "Second 8 bytes of the current tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY1_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY2_NAME "tower_current_identity_key2"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY2_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY2_DESC "Third 8 bytes of the current tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY2_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY3_NAME "tower_current_identity_key3"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY3_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY3_DESC "Fourth 8 bytes of the current tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_CURRENT_IDENTITY_KEY3_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_NAME "tower_previous_identity_key0"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_DESC "First 8 bytes of the previous tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY0_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY1_NAME "tower_previous_identity_key1"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY1_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY1_DESC "Second 8 bytes of the previous tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY1_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY2_NAME "tower_previous_identity_key2"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY2_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY2_DESC "Third 8 bytes of the previous tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY2_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY3_NAME "tower_previous_identity_key3"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY3_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY3_DESC "Fourth 8 bytes of the previous tower identity public key; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_KEY3_CVT  (FD_METRICS_CONVERTER_NONE)
++
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_NAME "tower_previous_identity_vote_slot"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_TYPE (FD_METRICS_TYPE_GAUGE)
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_DESC "Highest tower vote slot recorded for the previous identity; internal watermark metadata"
++#define FD_METRICS_GAUGE_TOWER_PREVIOUS_IDENTITY_VOTE_SLOT_CVT  (FD_METRICS_CONVERTER_NONE)
++
+ #define FD_METRICS_GAUGE_TOWER_RESET_SLOT_NAME "tower_reset_slot"
+ #define FD_METRICS_GAUGE_TOWER_RESET_SLOT_TYPE (FD_METRICS_TYPE_GAUGE)
+ #define FD_METRICS_GAUGE_TOWER_RESET_SLOT_DESC "Most recent reset slot, ULONG_MAX if no reset yet. Not monotonically increasing"
+@@ -306,7 +366,7 @@ enum {
+ #define FD_METRICS_COUNTER_TOWER_ACCDB_BYTES_COPIED_DESC "Number of bytes copied within the account database"
+ #define FD_METRICS_COUNTER_TOWER_ACCDB_BYTES_COPIED_CVT  (FD_METRICS_CONVERTER_NONE)
+ 
+-#define FD_METRICS_TOWER_TOTAL (109UL)
++#define FD_METRICS_TOWER_TOTAL (119UL)
+ extern const fd_metrics_meta_t FD_METRICS_TOWER[FD_METRICS_TOWER_TOTAL];
+ 
+ #endif /* HEADER_fd_src_disco_metrics_generated_fd_metrics_tower_h */
+diff --git a/src/disco/metrics/metrics.xml b/src/disco/metrics/metrics.xml
+index 2c486a9..c1d0567 100644
+--- a/src/disco/metrics/metrics.xml
++++ b/src/disco/metrics/metrics.xml
+@@ -1965,6 +1965,16 @@ EXAMPLES
+ 
+     <gauge name="ReplaySlot" summary="Most recently replayed slot, ULONG_MAX if nothing replayed yet. Not monotonically increasing" />
+     <gauge name="VoteSlot" summary="Highest voted slot in the local tower, ULONG_MAX if haven't voted. Monotonically increasing" />
++    <gauge name="CurrentIdentityVoteSlot" summary="Highest tower vote slot recorded for the current identity; internal watermark metadata" />
++    <gauge name="CurrentIdentityKey0" summary="First 8 bytes of the current tower identity public key; internal watermark metadata" />
++    <gauge name="CurrentIdentityKey1" summary="Second 8 bytes of the current tower identity public key; internal watermark metadata" />
++    <gauge name="CurrentIdentityKey2" summary="Third 8 bytes of the current tower identity public key; internal watermark metadata" />
++    <gauge name="CurrentIdentityKey3" summary="Fourth 8 bytes of the current tower identity public key; internal watermark metadata" />
++    <gauge name="PreviousIdentityKey0" summary="First 8 bytes of the previous tower identity public key; internal watermark metadata" />
++    <gauge name="PreviousIdentityKey1" summary="Second 8 bytes of the previous tower identity public key; internal watermark metadata" />
++    <gauge name="PreviousIdentityKey2" summary="Third 8 bytes of the previous tower identity public key; internal watermark metadata" />
++    <gauge name="PreviousIdentityKey3" summary="Fourth 8 bytes of the previous tower identity public key; internal watermark metadata" />
++    <gauge name="PreviousIdentityVoteSlot" summary="Highest tower vote slot recorded for the previous identity; internal watermark metadata" />
+     <gauge name="ResetSlot" summary="Most recent reset slot, ULONG_MAX if no reset yet. Not monotonically increasing" />
+     <gauge name="RootSlot" summary="Highest rooted slot, ULONG_MAX if no root yet. Monotonically increasing" />
+     <gauge name="InitSlot" summary="Init slot, either the snapshot or genesis slot. Set once and does not change" />
+diff --git a/src/discof/tower/fd_tower_tile.c b/src/discof/tower/fd_tower_tile.c
+index 19dc1a2..14850a9 100644
+--- a/src/discof/tower/fd_tower_tile.c
++++ b/src/discof/tower/fd_tower_tile.c
+@@ -233,6 +233,7 @@ struct fd_tower_tile {
+   int              checkpt_fd;
+   int              restore_fd;
+   fd_pubkey_t      identity_key[1];
++  fd_pubkey_t      previous_identity_key[1];
+   fd_pubkey_t      vote_account[1];
+   ulong            auth_vtr_path_cnt;  /* number of authorized voter paths passed to tile */
+   uchar            our_vote_acct[FD_VOTE_STATE_DATA_MAX]; /* buffer for reading back our own vote acct data */
+@@ -313,6 +314,8 @@ struct fd_tower_tile {
+ 
+     ulong replay_slot;
+     ulong last_vote_slot;
++    ulong current_identity_vote_slot;
++    ulong previous_identity_vote_slot;
+     ulong reset_slot;
+     ulong root_slot;
+     ulong init_slot;
+@@ -1549,7 +1552,10 @@ replay_slot_completed( fd_tower_tile_t *            ctx,
+   /* Write out metrics. */
+ 
+   ctx->metrics.replay_slot    = slot_completed->slot;
+-  if( FD_LIKELY( out.vote_slot!=ULONG_MAX ) ) ctx->metrics.last_vote_slot = out.vote_slot;
++  if( FD_LIKELY( out.vote_slot!=ULONG_MAX ) ) {
++    ctx->metrics.last_vote_slot = out.vote_slot;
++    ctx->metrics.current_identity_vote_slot = out.vote_slot;
++  }
+   ctx->metrics.last_vote_slot = fd_ulong_if( out.vote_slot!=ULONG_MAX, out.vote_slot, ctx->metrics.last_vote_slot );
+   ctx->metrics.reset_slot     = out.reset_slot; /* always set */
+   ctx->metrics.root_slot      = ctx->tower->root;
+@@ -1697,6 +1703,8 @@ init_choreo( void                 * scratch,
+ 
+   memset( &ctx->metrics, 0, sizeof(ctx->metrics) );
+   ctx->metrics.last_vote_slot = ULONG_MAX;
++  ctx->metrics.current_identity_vote_slot = ULONG_MAX;
++  ctx->metrics.previous_identity_vote_slot = ULONG_MAX;
+ 
+   return ctx;
+ }
+@@ -1752,6 +1760,9 @@ during_housekeeping( fd_tower_tile_t * ctx ) {
+ 
+   if( FD_UNLIKELY( fd_keyswitch_state_query( ctx->identity_keyswitch )==FD_KEYSWITCH_STATE_SWITCH_PENDING ) ) {
+     FD_LOG_DEBUG(( "keyswitch: halting signing" ));
++    memcpy( ctx->previous_identity_key, ctx->identity_key, 32UL );
++    ctx->metrics.previous_identity_vote_slot = ctx->metrics.current_identity_vote_slot;
++    ctx->metrics.current_identity_vote_slot = ULONG_MAX;
+     memcpy( ctx->identity_key, ctx->identity_keyswitch->bytes, 32UL );
+     FD_BASE58_ENCODE_32_BYTES( ctx->identity_key->uc, pubkey_str );
+     FD_LOG_INFO(( "my identity key: %s (key switched)", pubkey_str ));
+@@ -1772,6 +1783,20 @@ metrics_write( fd_tower_tile_t * ctx ) {
+ 
+   FD_MGAUGE_SET( TOWER, REPLAY_SLOT, ctx->metrics.replay_slot    );
+   FD_MGAUGE_SET( TOWER, VOTE_SLOT,   ctx->metrics.last_vote_slot );
++  FD_MGAUGE_SET( TOWER, CURRENT_IDENTITY_VOTE_SLOT, ctx->metrics.current_identity_vote_slot );
++  ulong current_identity_words[ 4 ];
++  ulong previous_identity_words[ 4 ];
++  memcpy( current_identity_words, ctx->identity_key, 32UL );
++  memcpy( previous_identity_words, ctx->previous_identity_key, 32UL );
++  FD_MGAUGE_SET( TOWER, CURRENT_IDENTITY_KEY0, current_identity_words[ 0 ] );
++  FD_MGAUGE_SET( TOWER, CURRENT_IDENTITY_KEY1, current_identity_words[ 1 ] );
++  FD_MGAUGE_SET( TOWER, CURRENT_IDENTITY_KEY2, current_identity_words[ 2 ] );
++  FD_MGAUGE_SET( TOWER, CURRENT_IDENTITY_KEY3, current_identity_words[ 3 ] );
++  FD_MGAUGE_SET( TOWER, PREVIOUS_IDENTITY_KEY0, previous_identity_words[ 0 ] );
++  FD_MGAUGE_SET( TOWER, PREVIOUS_IDENTITY_KEY1, previous_identity_words[ 1 ] );
++  FD_MGAUGE_SET( TOWER, PREVIOUS_IDENTITY_KEY2, previous_identity_words[ 2 ] );
++  FD_MGAUGE_SET( TOWER, PREVIOUS_IDENTITY_KEY3, previous_identity_words[ 3 ] );
++  FD_MGAUGE_SET( TOWER, PREVIOUS_IDENTITY_VOTE_SLOT, ctx->metrics.previous_identity_vote_slot );
+   FD_MGAUGE_SET( TOWER, RESET_SLOT,  ctx->metrics.reset_slot     );
+   FD_MGAUGE_SET( TOWER, ROOT_SLOT,   ctx->metrics.root_slot      );
+   FD_MGAUGE_SET( TOWER, INIT_SLOT,   ctx->metrics.init_slot      );
+
