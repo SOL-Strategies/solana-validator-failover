@@ -703,8 +703,9 @@ func TestValidator_IsActive(t *testing.T) {
 
 	// Create validator with mock gossip node that matches active pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: activeKey.PublicKey().String(),
 	}
 
 	// Test IsActive
@@ -733,13 +734,52 @@ func TestValidator_IsPassive(t *testing.T) {
 
 	// Create validator with mock gossip node that matches passive pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
 	}
 
 	// Test IsPassive
 	assert.True(t, validator.IsPassive())
 	assert.False(t, validator.IsActive())
+}
+
+func TestValidator_LocalIdentityOverridesStaleGossipRole(t *testing.T) {
+	activeKey := solana.NewWallet().PrivateKey
+	passiveKey := solana.NewWallet().PrivateKey
+	validator := &Validator{
+		Identities: &identities.Identities{
+			Active:  &identities.Identity{KeyFile: "/path/to/active.json", Key: activeKey},
+			Passive: &identities.Identity{KeyFile: "/path/to/passive.json", Key: passiveKey},
+		},
+		// Gossip still associates this IP with the old active identity, while
+		// local getIdentity has already switched to passive.
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
+	}
+
+	assert.False(t, validator.IsActive())
+	assert.True(t, validator.IsPassive())
+}
+
+func TestValidator_RefreshLocalIdentityRejectsUnknownIdentity(t *testing.T) {
+	activeKey := solana.NewWallet().PrivateKey
+	passiveKey := solana.NewWallet().PrivateKey
+	unknownKey := solana.NewWallet().PrivateKey
+	validator := &Validator{
+		logger: log.WithPrefix("validator"),
+		Identities: &identities.Identities{
+			Active:  &identities.Identity{KeyFile: "/path/to/active.json", Key: activeKey},
+			Passive: &identities.Identity{KeyFile: "/path/to/passive.json", Key: passiveKey},
+		},
+		solanaRPCClient: solanapkg.NewMockClient().WithGetLocalIdentity(func() (string, error) {
+			return unknownKey.PublicKey().String(), nil
+		}),
+	}
+
+	err := validator.refreshLocalIdentity()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matches neither configured active identity")
 }
 
 func TestValidator_IsNeitherActiveNorPassive(t *testing.T) {
@@ -764,8 +804,9 @@ func TestValidator_IsNeitherActiveNorPassive(t *testing.T) {
 	// Create validator with mock gossip node that has different pubkey
 	otherKey := solana.NewWallet().PrivateKey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(otherKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(otherKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: otherKey.PublicKey().String(),
 	}
 
 	// Test neither active nor passive
@@ -917,8 +958,9 @@ func BenchmarkValidator_IsActive(b *testing.B) {
 
 	// Create validator with mock gossip node that matches active pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: activeKey.PublicKey().String(),
 	}
 
 	b.ResetTimer()
@@ -948,8 +990,9 @@ func BenchmarkValidator_IsPassive(b *testing.B) {
 
 	// Create validator with mock gossip node that matches passive pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
 	}
 
 	b.ResetTimer()
