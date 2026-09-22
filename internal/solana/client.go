@@ -21,6 +21,11 @@ import (
 // See: https://www.jsonrpc.org/specification#error_object
 const jsonRPCMethodNotFound = -32601
 
+// networkRPCAttemptTimeout prevents one unresponsive cluster endpoint from
+// blocking the ordered fallback list indefinitely. A shorter caller deadline
+// is divided among the remaining endpoints so each one gets an opportunity.
+const networkRPCAttemptTimeout = 5 * time.Second
+
 // RPCClientInterface defines the interface for RPC client operations - a solana rpc client interface
 type RPCClientInterface interface {
 	GetClusterNodes(ctx context.Context) ([]*rpc.GetClusterNodesResult, error)
@@ -180,62 +185,98 @@ func networkExhaustedError(operation string, errs []error) error {
 	return fmt.Errorf("%s: all cluster RPC endpoints failed: %w", operation, errors.Join(errs...))
 }
 
+func networkRPCAttemptContext(parent context.Context, attemptsRemaining int) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if attemptsRemaining < 1 {
+		attemptsRemaining = 1
+	}
+	timeout := networkRPCAttemptTimeout
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return context.WithCancel(parent)
+		}
+		perAttempt := remaining / time.Duration(attemptsRemaining)
+		if perAttempt < timeout {
+			timeout = perAttempt
+		}
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
 func (c *Client) networkGetSlot(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
 	var errs []error
-	for _, client := range c.networkClients() {
-		result, err := client.GetSlot(ctx, commitment)
+	clients := c.networkClients()
+	for i, client := range clients {
+		attemptCtx, cancel := networkRPCAttemptContext(ctx, len(clients)-i)
+		result, err := client.GetSlot(attemptCtx, commitment)
+		cancel()
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
 	}
 	return 0, networkExhaustedError("getSlot", errs)
 }
 
 func (c *Client) networkGetVoteAccounts(ctx context.Context, opts *rpc.GetVoteAccountsOpts) (*rpc.GetVoteAccountsResult, error) {
 	var errs []error
-	for _, client := range c.networkClients() {
-		result, err := client.GetVoteAccounts(ctx, opts)
+	clients := c.networkClients()
+	for i, client := range clients {
+		attemptCtx, cancel := networkRPCAttemptContext(ctx, len(clients)-i)
+		result, err := client.GetVoteAccounts(attemptCtx, opts)
+		cancel()
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
 	}
 	return nil, networkExhaustedError("getVoteAccounts", errs)
 }
 
 func (c *Client) networkGetClusterNodes(ctx context.Context) ([]*rpc.GetClusterNodesResult, error) {
 	var errs []error
-	for _, client := range c.networkClients() {
-		result, err := client.GetClusterNodes(ctx)
+	clients := c.networkClients()
+	for i, client := range clients {
+		attemptCtx, cancel := networkRPCAttemptContext(ctx, len(clients)-i)
+		result, err := client.GetClusterNodes(attemptCtx)
+		cancel()
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
 	}
 	return nil, networkExhaustedError("getClusterNodes", errs)
 }
 
 func (c *Client) networkGetEpochInfo(ctx context.Context, commitment rpc.CommitmentType) (*rpc.GetEpochInfoResult, error) {
 	var errs []error
-	for _, client := range c.networkClients() {
-		result, err := client.GetEpochInfo(ctx, commitment)
+	clients := c.networkClients()
+	for i, client := range clients {
+		attemptCtx, cancel := networkRPCAttemptContext(ctx, len(clients)-i)
+		result, err := client.GetEpochInfo(attemptCtx, commitment)
+		cancel()
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
 	}
 	return nil, networkExhaustedError("getEpochInfo", errs)
 }
 
 func (c *Client) networkGetLeaderSchedule(ctx context.Context) (rpc.GetLeaderScheduleResult, error) {
 	var errs []error
-	for _, client := range c.networkClients() {
-		result, err := client.GetLeaderSchedule(ctx)
+	clients := c.networkClients()
+	for i, client := range clients {
+		attemptCtx, cancel := networkRPCAttemptContext(ctx, len(clients)-i)
+		result, err := client.GetLeaderSchedule(attemptCtx)
+		cancel()
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, err)
+		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
 	}
 	return nil, networkExhaustedError("getLeaderSchedule", errs)
 }
