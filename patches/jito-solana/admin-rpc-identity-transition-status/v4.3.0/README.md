@@ -8,3 +8,4 @@ Apply it from the root of that source tree with `git apply --check`, then
 This is a Jito-specific patch. It adds the optional `identityTransitionStatus`
 JSON-RPC method and publishes the final old-identity vote watermark only after
 the voting loop processes the identity transition.
+

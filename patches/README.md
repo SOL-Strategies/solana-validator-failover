@@ -12,10 +12,9 @@ verify the RPC before using it for a fast handoff.
 
 ## Available patch lines
 
-- [Agave 4.2.x](agave/admin-rpc-identity-transition-status/v4.2.x/)
-- [Agave 4.3.x](agave/admin-rpc-identity-transition-status/v4.3.x/)
-- [Jito-Solana 4.2.x](jito-solana/admin-rpc-identity-transition-status/v4.2.x/)
-- [Jito-Solana 4.3.x](jito-solana/admin-rpc-identity-transition-status/v4.3.x/)
+- [Agave 4.3.0](agave/admin-rpc-identity-transition-status/v4.3.0/)
+- [Jito-Solana 4.3.0](jito-solana/admin-rpc-identity-transition-status/v4.3.0/)
+- [Firedancer 26.09.3 identity-labelled tower watermark](firedancer/tower-vote-watermark/v26.09.3/)
 
 Patch URLs are intended to be consumed from a tagged
 `solana-validator-failover` release so they remain immutable.
