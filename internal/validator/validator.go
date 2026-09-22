@@ -174,14 +174,6 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 		return err
 	}
 
-	// The local validator RPC is authoritative for this process's current
-	// identity. Gossip can retain multiple or stale CRDS entries for the same IP
-	// across an identity switch and must not determine the local role.
-	err = v.refreshLocalIdentity()
-	if err != nil {
-		return err
-	}
-
 	// tower file configure
 	v.Consensus = cfg.Failover.Consensus.Mode
 	if v.Consensus == "" {
