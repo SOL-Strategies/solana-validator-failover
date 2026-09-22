@@ -60,6 +60,7 @@ type Validator struct {
 	FailoverServerConfig              ServerConfig
 	MonitorConfig                     MonitorConfig
 	GossipNode                        *solana.Node
+	LocalIdentityPubkey               string
 	Hooks                             hooks.FailoverHooks
 	Hostname                          string
 	Identities                        *identities.Identities
@@ -168,6 +169,14 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 
 	// configure identities
 	err = v.configureIdentities(cfg.Identities)
+	if err != nil {
+		return err
+	}
+
+	// The local validator RPC is authoritative for this process's current
+	// identity. Gossip can retain multiple or stale CRDS entries for the same IP
+	// across an identity switch and must not determine the local role.
+	err = v.refreshLocalIdentity()
 	if err != nil {
 		return err
 	}
@@ -344,12 +353,12 @@ func (v *Validator) configureHandoff(cfg HandoffConfig) error {
 
 // IsActive returns true if the validator is active
 func (v *Validator) IsActive() bool {
-	return v.GossipNode.PubKey() == v.Identities.Active.PubKey()
+	return v.LocalIdentityPubkey == v.Identities.Active.PubKey()
 }
 
 // IsPassive returns true if the validator is passive
 func (v *Validator) IsPassive() bool {
-	return v.GossipNode.PubKey() == v.Identities.Passive.PubKey()
+	return v.LocalIdentityPubkey == v.Identities.Passive.PubKey()
 }
 
 // Failover runs the failover process
@@ -367,6 +376,13 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to wait until healthy: %w", err)
 		}
+	}
+
+	// Refresh after the health wait so an identity changed since startup (or
+	// while waiting for RPC health) cannot send this invocation down the wrong
+	// active/passive path.
+	if err := v.refreshLocalIdentity(); err != nil {
+		return err
 	}
 
 	params.MinTimeToLeaderSlot = v.MinimumTimeToLeaderSlot
@@ -908,6 +924,27 @@ func (v *Validator) configureGossipNode() (err error) {
 		"public_ip", v.GossipNode.IP(),
 		"pubkey", v.GossipNode.PubKey(),
 	)
+	return nil
+}
+
+func (v *Validator) refreshLocalIdentity() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pubkey, err := v.solanaRPCClient.GetLocalIdentity(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get local validator identity: %w", err)
+	}
+	if pubkey != v.Identities.Active.PubKey() && pubkey != v.Identities.Passive.PubKey() {
+		return fmt.Errorf(
+			"local validator identity %s matches neither configured active identity %s nor passive identity %s",
+			pubkey,
+			v.Identities.Active.PubKey(),
+			v.Identities.Passive.PubKey(),
+		)
+	}
+	v.LocalIdentityPubkey = pubkey
+	v.logger.Debug("local validator identity set", "pubkey", pubkey)
 	return nil
 }
 

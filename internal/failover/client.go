@@ -88,6 +88,13 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	if config.TLSConfig != nil {
 		cloned := config.TLSConfig.Clone()
 		cloned.NextProtos = []string{ProtocolName}
+		if cloned.ServerName == "" {
+			cloned.ServerName, err = tlsServerNameFromAddress(config.ServerAddress)
+			if err != nil {
+				cancel()
+				return nil, fmt.Errorf("derive TLS server name from peer address %q: %w", config.ServerAddress, err)
+			}
+		}
 		clientTLSConfig = cloned
 	}
 
@@ -122,6 +129,17 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	client.logger.Debugf("connected to %s", style.RenderPassiveString(config.ServerName, false))
 
 	return client, nil
+}
+
+func tlsServerNameFromAddress(address string) (string, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", err
+	}
+	if host == "" {
+		return "", fmt.Errorf("peer address has an empty host")
+	}
+	return host, nil
 }
 
 func handoffTimeout(timeout time.Duration) time.Duration {

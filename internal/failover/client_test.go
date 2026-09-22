@@ -73,6 +73,31 @@ func TestWaitForIdentityTransitionAcceptsCurrentSequence(t *testing.T) {
 	require.Equal(t, uint64(123), got)
 }
 
+func TestTLSServerNameFromAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		want    string
+	}{
+		{name: "hostname", address: "validator.example.com:9898", want: "validator.example.com"},
+		{name: "IPv4", address: "127.0.0.1:9898", want: "127.0.0.1"},
+		{name: "IPv6", address: "[::1]:9898", want: "::1"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := tlsServerNameFromAddress(test.address)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestTLSServerNameFromAddressRejectsMissingPort(t *testing.T) {
+	_, err := tlsServerNameFromAddress("validator.example.com")
+	require.Error(t, err)
+}
+
 // slotSequenceMock builds a MockClient whose GetCurrentSlot returns successive
 // values from the provided slice. Once the slice is exhausted it repeats the
 // last value, so the slot appears stable until the test is done.
