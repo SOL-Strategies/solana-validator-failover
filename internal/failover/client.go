@@ -196,14 +196,14 @@ func waitForIdentityTransition(ctx context.Context, client solana.IdentityTransi
 	for {
 		status, err := client.GetIdentityTransitionStatus(ctx)
 		if err == nil {
-			if status.Sequence > sequence && status.State == "failed" {
+			if status.Sequence >= sequence && status.State == "failed" {
 				message := "identity transition failed"
 				if status.Error != nil && *status.Error != "" {
 					message += ": " + *status.Error
 				}
 				return 0, &identityTransitionFailedError{message: message}
 			}
-			if status.Sequence > sequence && status.State == "complete" && status.CurrentIdentity == expectedIdentity &&
+			if status.Sequence >= sequence && status.State == "complete" && status.CurrentIdentity == expectedIdentity &&
 				(status.ToIdentity == "" || status.ToIdentity == expectedIdentity) &&
 				(expectedVoteAccount == "" || status.VoteAccount == "" || status.VoteAccount == expectedVoteAccount) {
 				return status.LastVoteSlot, nil
