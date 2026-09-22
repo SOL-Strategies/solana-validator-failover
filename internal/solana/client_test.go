@@ -858,6 +858,41 @@ func TestGossipClient_GetCurrentSlot_UsesOrderedClusterRPCFallback(t *testing.T)
 	thirdRPC.AssertNotCalled(t, "GetSlot", mock.Anything, mock.Anything)
 }
 
+func TestNetworkGetSlot_BoundsPrimaryAttemptAndUsesFallback(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentFinalized).
+		Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).
+		Return(uint64(0), context.DeadlineExceeded)
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentFinalized).Return(uint64(456), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	slot, err := client.networkGetSlot(ctx, rpc.CommitmentFinalized)
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(456), slot)
+	assert.Less(t, time.Since(started), 200*time.Millisecond)
+	firstRPC.AssertExpectations(t)
+	secondRPC.AssertExpectations(t)
+}
+
+func TestNetworkRPCAttemptContext_BoundsBackgroundContext(t *testing.T) {
+	ctx, cancel := networkRPCAttemptContext(context.Background(), 1)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	remaining := time.Until(deadline)
+	assert.Greater(t, remaining, time.Duration(0))
+	assert.LessOrEqual(t, remaining, networkRPCAttemptTimeout)
+}
+
 func TestGossipClient_GetCurrentSlot_ReportsExhaustedClusterRPCs(t *testing.T) {
 	client, _, firstRPC := createTestClient()
 	secondRPC := &MockRPCClient{}
