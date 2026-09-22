@@ -474,10 +474,12 @@ func (c *Client) Start() (startErr error) {
 	// Get skipTowerSync from the server's message (server is the authority on this)
 	skipTowerSync := c.failoverStream.GetSkipTowerSync()
 
-	// Probe native Firedancer metrics before demoting the source. The final
-	// watermark is read again after the identity change, but an unavailable
-	// endpoint must not strand this validator in passive state first.
+	// Probe native Firedancer metrics before demoting the source. The actual
+	// watermark is captured again immediately before the identity change, but
+	// an unavailable endpoint must not strand this validator in passive state
+	// first.
 	var preDemotionNativeVoteSlot uint64
+	var nativeWatermarkCapturedAt time.Time
 	var preDemotionTransitionSequence uint64
 	var preDemotionTransitionVoteSlot uint64
 	var transitionClient solana.IdentityTransitionClient
@@ -486,7 +488,7 @@ func (c *Client) Start() (startErr error) {
 		if sourceInfo.IsNativeFiredancer {
 			metricsCtx, metricsCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
 			var metricsErr error
-			preDemotionNativeVoteSlot, metricsErr = ReadNativeTowerVoteSlot(metricsCtx, sourceInfo.MetricsAddress)
+			_, metricsErr = ReadNativeTowerVoteSlot(metricsCtx, sourceInfo.MetricsAddress)
 			metricsCancel()
 			if metricsErr != nil {
 				c.setFailure("failed to validate native Firedancer metrics before switching to passive", metricsErr)
@@ -559,6 +561,27 @@ func (c *Client) Start() (startErr error) {
 	// set the failover start slot to the current slot (we're now early in this slot)
 	c.failoverStream.SetFailoverStartSlot(slot)
 
+	// The preflight metrics request only proves that the endpoint is usable.
+	// Capture the handoff watermark as late as possible, immediately before the
+	// identity switch, so the interval in which the old identity could submit a
+	// later vote is minimized.
+	if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && !skipTowerSync {
+		sourceInfo := c.failoverStream.GetActiveNodeInfo()
+		if sourceInfo.IsNativeFiredancer {
+			metricsCtx, metricsCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+			var metricsErr error
+			preDemotionNativeVoteSlot, metricsErr = ReadNativeTowerVoteSlot(metricsCtx, sourceInfo.MetricsAddress)
+			metricsCancel()
+			if metricsErr != nil {
+				c.setFailure("failed to capture native Firedancer vote watermark before switching to passive", metricsErr)
+				c.logger.Error("failed to capture native Firedancer vote watermark before switching to passive", "err", metricsErr)
+				return
+			}
+			nativeWatermarkCapturedAt = time.Now()
+			c.logger.Info("captured native Firedancer vote watermark before demotion", "captured_slot", preDemotionNativeVoteSlot)
+		}
+	}
+
 	// set identity to passive
 	dryRunPrefix := ""
 	if c.failoverStream.GetIsDryRunFailover() {
@@ -583,6 +606,9 @@ func (c *Client) Start() (startErr error) {
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
+	if !nativeWatermarkCapturedAt.IsZero() {
+		c.logger.Info("native Firedancer identity switch completed after watermark capture", "captured_slot", preDemotionNativeVoteSlot, "capture_to_identity_switch", time.Since(nativeWatermarkCapturedAt).Round(time.Millisecond))
+	}
 	if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && !skipTowerSync {
 		c.failoverStream.SetHandoffEvidenceStartTime()
 	}
@@ -604,34 +630,13 @@ func (c *Client) Start() (startErr error) {
 		var tip uint64
 		var tipErr error
 		if sourceInfo.IsNativeFiredancer {
-			watermarkStarted := time.Now()
-			lastWatermarkProgress := watermarkStarted
-			c.logger.Info("confirming native Firedancer vote watermark after demotion", "captured_slot", preDemotionNativeVoteSlot, "poll_interval", c.handoffPollInterval)
-			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			if c.failoverStream.GetIsDryRunFailover() {
-				tip, tipErr = waitForNativeTowerVoteAtLeast(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot)
-			} else {
-				_, tipErr = waitForNativeTowerVoteAtLeastWithProgress(ctx, sourceInfo.MetricsAddress, c.handoffPollInterval, preDemotionNativeVoteSlot, func(slot uint64, err error) {
-					if time.Since(lastWatermarkProgress) < 5*time.Second {
-						return
-					}
-					fields := []any{"captured_slot", preDemotionNativeVoteSlot, "latest_slot", slot, "elapsed", time.Since(watermarkStarted).Round(time.Second)}
-					if err != nil {
-						fields = append(fields, "err", err)
-					}
-					c.logger.Info("still waiting for native Firedancer vote watermark after demotion", fields...)
-					lastWatermarkProgress = time.Now()
-				})
-				// The captured pre-demotion watermark is the safety target. The
-				// metric may continue advancing while Firedancer drains/replays
-				// state after set-identity, so a later metric value is not a
-				// reliable frozen-vote boundary.
-				tip = preDemotionNativeVoteSlot
-			}
-			cancel()
-			if tipErr == nil {
-				c.logger.Info("native Firedancer vote watermark confirmed after demotion", "frozen_slot", tip, "captured_slot", preDemotionNativeVoteSlot, "elapsed", time.Since(watermarkStarted).Round(time.Millisecond))
-			}
+			// Unpatched Firedancer exposes an unlabelled metric. After an identity
+			// switch it may reflect replay or the newly loaded passive identity, so
+			// the post-switch value cannot prove anything about the old identity.
+			// Use the sample captured immediately before demotion and establish the
+			// authoritative barrier from finalized on-chain vote state below.
+			tip = preDemotionNativeVoteSlot
+			c.logger.Info("using pre-demotion native Firedancer vote watermark", "frozen_slot", tip, "capture_to_identity_switch", time.Since(nativeWatermarkCapturedAt).Round(time.Millisecond))
 		} else if c.failoverStream.GetSlotFallbackRequired() {
 			// The server will enforce the conservative post-demotion slot barrier.
 			tip = 0
