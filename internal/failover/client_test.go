@@ -54,6 +54,25 @@ func TestWaitForIdentityTransitionRejectsTerminalFailure(t *testing.T) {
 	require.Contains(t, err.Error(), transitionError)
 }
 
+func TestWaitForIdentityTransitionAcceptsCurrentSequence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	got, err := waitForIdentityTransition(ctx, identityTransitionStatusMock{
+		status: &solana.IdentityTransitionStatus{
+			Sequence:        2,
+			State:           "complete",
+			CurrentIdentity: "expected-identity",
+			ToIdentity:      "expected-identity",
+			VoteAccount:     "expected-vote-account",
+			LastVoteSlot:    123,
+		},
+	}, 2, "expected-identity", "expected-vote-account", time.Millisecond)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), got)
+}
+
 // slotSequenceMock builds a MockClient whose GetCurrentSlot returns successive
 // values from the provided slice. Once the slice is exhausted it repeats the
 // last value, so the slot appears stable until the test is done.
