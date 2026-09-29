@@ -334,8 +334,6 @@ func findGossipNodeFromIPWithExpectedPubkey(nodes []*rpc.GetClusterNodesResult, 
 	return nil, firstMatch
 }
 
-// GetCreditRankedVoteAccountFromPubkey returns the credit rank-sorted current vote accounts rank is the difference
-// between current epoch credits and total credits (descending)
 // epochCreditsDiff returns the credits earned in the most recent epoch
 // (current minus previous). Alpenglow vote accounts can carry math.MaxUint64
 // sentinel values in EpochCredits; those (and any underflow) are treated as 0
@@ -352,6 +350,8 @@ func epochCreditsDiff(account rpc.VoteAccountsResult) uint64 {
 	return current - previous
 }
 
+// GetCreditRankedVoteAccountFromPubkey returns the current vote account and its
+// rank by credits earned in the most recent epoch, highest first.
 func (c *Client) GetCreditRankedVoteAccountFromPubkey(pubkey string) (voteAccount *rpc.VoteAccountsResult, creditRank int, err error) {
 	// fetch all vote accounts
 	voteAccounts, err := c.networkRPCClient.GetVoteAccounts(
