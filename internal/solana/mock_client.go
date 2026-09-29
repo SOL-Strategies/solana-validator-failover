@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/solana-foundation/solana-go/v2"
+	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
 // MockClient is a mock implementation of ClientInterface for testing
@@ -251,8 +251,8 @@ func (b *MockClientBuilder) WithVoteAccount(pubkey string, rank int, credits int
 		if p == pubkey {
 			return &rpc.VoteAccountsResult{
 				NodePubkey: solana.MustPublicKeyFromBase58(pubkey),
-				EpochCredits: [][]int64{
-					{1, credits, credits / 2},
+				EpochCredits: [][]uint64{
+					{1, uint64(credits), uint64(credits) / 2},
 				},
 			}, rank, nil
 		}

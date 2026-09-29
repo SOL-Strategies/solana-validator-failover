@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/log"
-	"github.com/gagliardetto/solana-go"
+	"github.com/solana-foundation/solana-go/v2"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 )
 

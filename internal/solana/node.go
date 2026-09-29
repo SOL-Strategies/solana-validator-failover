@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/log"
-	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
 // Node represents a gossip node
