@@ -103,7 +103,7 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("validator.average_slot_duration", DefaultAverageSlotDuration)
 	v.SetDefault("validator.cluster", DefaultCluster)
 	v.SetDefault("validator.failover.min_time_to_leader_slot", DefaultFailoverMinimumTimeToLeaderSlot)
-	v.SetDefault("validator.failover.consensus", "tower")
+	v.SetDefault("validator.failover.consensus.mode", "tower")
 	v.SetDefault("validator.failover.monitor.credit_samples.count", DefaultFailoverMonitorCreditSamplesCount)
 	v.SetDefault("validator.failover.monitor.credit_samples.interval", DefaultFailoverMonitorCreditSamplesInterval)
 	v.SetDefault("validator.failover.server.heartbeat_interval", DefaultFailoverServerHeartbeatInterval)
@@ -126,7 +126,7 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	}
 	if s.Validator.Failover.SetIdentityActiveCmdTemplate == "" {
 		s.Validator.Failover.SetIdentityActiveCmdTemplate = DefaultSetIdentityActiveCmdTemplate
-		if s.Validator.Failover.Consensus == "alpenglow" {
+		if s.Validator.Failover.Consensus.Mode == "alpenglow" {
 			s.Validator.Failover.SetIdentityActiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}"
 		}
 	}

@@ -46,7 +46,7 @@ solana-validator-failover run
 
 By default, `run` executes in **dry-run mode**: the consensus state file is synced and all timings are recorded, but set-identity commands are not executed. This is useful for gauging failover speed under real network conditions without committing. Pass `--not-a-drill` on the **passive** node to execute for real.
 
-Set `validator.failover.consensus` on both nodes to `tower` or `alpenglow`. The default is `tower`. At startup, the configured mode is checked against the validator's local RPC; a mismatch, migration, or unknown state prevents startup. The handshake checks both nodes again and requires the same Alpenglow genesis slot. For Alpenglow, remove `--require-tower` from any explicitly configured identity command. Vote history is read from each node's `validator.ledger_dir`; no separate directory setting is needed. Upgrade both failover binaries together before running failover.
+Set `validator.failover.consensus.mode` on both nodes to `tower` or `alpenglow`. The default is `tower`. At startup, the configured mode is checked against the validator's local RPC; a mismatch, migration, or unknown state prevents startup. The handshake checks both nodes again and requires the same Alpenglow genesis slot. For Alpenglow, remove `--require-tower` from any explicitly configured identity command. Vote history is read from each node's `validator.ledger_dir`; no separate directory setting is needed. Upgrade both failover binaries together before running failover.
 
 > ⚠️ **Who you run this as matters.** The user must have:
 > - Permission to run set-identity commands for the validator
@@ -179,7 +179,7 @@ validator:
   # note: the validator must be started with --full-rpc-api (required for getClusterNodes)
   rpc_address: http://localhost:8899
 
-  # tower file config (required only when failover.consensus is tower)
+  # tower file config (required only when failover.consensus.mode is tower)
   tower:
     # (required) directory hosting the tower file
     dir: /mnt/accounts/tower
@@ -198,7 +198,8 @@ validator:
     # tower (default) or alpenglow; configure identically on both nodes.
     # Alpenglow transfers vote_history-<active identity>.bin from validator.ledger_dir.
     # The mode must agree with the local validator's on-chain genesis certificate.
-    consensus: tower
+    consensus:
+      mode: tower
     # failover server config (runs on passive node taking over from active node)
     server:
       # default: 9898 - QUIC (udp) port to listen on

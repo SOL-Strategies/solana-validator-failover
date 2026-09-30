@@ -54,7 +54,7 @@ validator:
 	assert.Equal(t, DefaultLogLevel, cfg.Log.Level)
 	assert.Equal(t, DefaultLogFormat, cfg.Log.Format)
 	assert.Equal(t, "testnet", cfg.Validator.Cluster)
-	assert.Equal(t, "tower", cfg.Validator.Failover.Consensus)
+	assert.Equal(t, "tower", cfg.Validator.Failover.Consensus.Mode)
 	assert.Equal(t, DefaultSetIdentityActiveCmdTemplate, cfg.Validator.Failover.SetIdentityActiveCmdTemplate)
 	assert.Equal(t, "http://localhost:8899", cfg.Validator.RPCAddress)
 	assert.Equal(t, "/tmp/ledger", cfg.Validator.LedgerDir)
@@ -76,10 +76,10 @@ validator:
 
 func TestAlpenglowDefaultIdentityCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("validator:\n  failover:\n    consensus: alpenglow\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("validator:\n  failover:\n    consensus:\n      mode: alpenglow\n"), 0600))
 	cfg, err := NewFromFile(path)
 	require.NoError(t, err)
-	assert.Equal(t, "alpenglow", cfg.Validator.Failover.Consensus)
+	assert.Equal(t, "alpenglow", cfg.Validator.Failover.Consensus.Mode)
 	assert.NotContains(t, cfg.Validator.Failover.SetIdentityActiveCmdTemplate, "--require-tower")
 }
 
