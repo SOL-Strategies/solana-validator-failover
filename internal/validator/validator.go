@@ -31,8 +31,9 @@ type FailoverParams struct {
 	NoMinTimeToLeaderSlot bool
 	MinTimeToLeaderSlot   time.Duration
 	SkipTowerSync         bool
+	SkipTowerFileCheck    bool
 	SkipVoteCreditsCheck  bool
-	AutoConfirm           bool   // -y/--yes: skip all interactive confirmations
+	AutoConfirm          bool   // -y/--yes: skip all interactive confirmations
 	ToPeer                string // --to-peer: auto-select peer by name or IP (active node only)
 }
 
@@ -711,11 +712,11 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 	log.Debug().Msg("failover active to passive")
 
 	// ensure tower file exists and is not empty
-	if !utils.FileExists(v.TowerFile) {
+	if !params.SkipTowerFileCheck && !utils.FileExists(v.TowerFile) {
 		return fmt.Errorf("tower file does not exist: %s", v.TowerFile)
 	}
 
-	if utils.FileSize(v.TowerFile) == 0 {
+	if !params.SkipTowerFileCheck && utils.FileSize(v.TowerFile) == 0 {
 		return fmt.Errorf("tower file is empty: %s", v.TowerFile)
 	}
 

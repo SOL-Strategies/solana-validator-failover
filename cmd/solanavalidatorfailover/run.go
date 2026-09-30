@@ -13,6 +13,7 @@ var (
 	noWaitForHealthy      bool
 	noMinTimeToLeaderSlot bool
 	skipTowerSync         bool
+	skipTowerFileCheck    bool
 	skipVoteCreditsCheck  bool
 	autoConfirm           bool
 	toPeer                string
@@ -36,6 +37,7 @@ var (
 				NoWaitForHealthy:      noWaitForHealthy,
 				NoMinTimeToLeaderSlot: noMinTimeToLeaderSlot, // ignored when run on passive node
 				SkipTowerSync:         skipTowerSync,
+				SkipTowerFileCheck:    skipTowerFileCheck,
 				SkipVoteCreditsCheck:  skipVoteCreditsCheck,
 				AutoConfirm:           autoConfirm,
 				ToPeer:                toPeer,
@@ -52,6 +54,7 @@ func init() {
 	runCmd.Flags().BoolVar(&noWaitForHealthy, "no-wait-for-healthy", false, "don't wait for node to report being healthy by calling <config.validator.rpc_address>/health")
 	runCmd.Flags().BoolVar(&noMinTimeToLeaderSlot, "no-min-time-to-leader-slot", false, "when run on an active node, don't wait until it has no leader slots in the next <config.validator.min_time_to_leader_slot> (default: 5m) - ignored when run on a passive node")
 	runCmd.Flags().BoolVar(&skipTowerSync, "skip-tower-sync", false, "skip syncing the tower file from active to passive node (passive node must not have a tower file)")
+	runCmd.Flags().BoolVar(&skipTowerFileCheck, "skip-tower-file-check", false, "skip checking that the tower file exists and is non-empty before demoting")
 	runCmd.Flags().BoolVar(&skipVoteCreditsCheck, "skip-vote-credits-check", false, "skip checking the active validator's vote account before failover (useful when active validator is down)")
 	runCmd.Flags().BoolVarP(&autoConfirm, "yes", "y", false, "automatically answer yes to all prompts")
 	runCmd.Flags().StringVar(&toPeer, "to-peer", "", "when run on an active node, auto-select a peer by name or IP address (skips interactive prompt)")
