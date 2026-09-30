@@ -322,6 +322,10 @@ func (s *Stream) GetFailoverSlotsDuration() uint64 {
 // BuildSummaryData builds a SummaryData from the current stream message state.
 // Call this after the failover is complete and all timing fields are set.
 func (s *Stream) BuildSummaryData() SummaryData {
+	stateFileSize := int64(len(s.message.ActiveNodeInfo.TowerFileBytes))
+	if s.message.ActiveNodeInfo.Consensus == "alpenglow" {
+		stateFileSize = s.message.ActiveNodeInfo.TowerFileSizeBytes
+	}
 	return SummaryData{
 		IsDryRun:      s.message.IsDryRunFailover,
 		SkipTowerSync: s.message.SkipTowerSync,
@@ -331,7 +335,7 @@ func (s *Stream) BuildSummaryData() SummaryData {
 
 		OrigActiveSetIdentityDuration:  s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime),
 		TowerSyncDuration:              s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime),
-		TowerFileSizeBytes:             int64(len(s.message.ActiveNodeInfo.TowerFileBytes)),
+		TowerFileSizeBytes:             stateFileSize,
 		OrigPassiveSetIdentityDuration: s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime),
 		TotalDuration:                  s.GetFailoverDuration(),
 

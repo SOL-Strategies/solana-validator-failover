@@ -63,6 +63,7 @@ type Validator struct {
 	Hostname                       string
 	Identities                     *identities.Identities
 	LedgerDir                      string
+	Consensus                      string
 	MinimumTimeToLeaderSlot        time.Duration
 	Peers                          Peers
 	PublicIP                       string
@@ -129,15 +130,35 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	}
 
 	// tower file configure
-	err = v.configureTowerFile(cfg.Tower)
-	if err != nil {
-		return err
+	v.Consensus = cfg.Failover.Consensus.Mode
+	if v.Consensus == "" {
+		v.Consensus = "tower"
+	}
+	if v.Consensus != "tower" && v.Consensus != "alpenglow" {
+		return fmt.Errorf("validator.failover.consensus.mode must be tower or alpenglow, got %q", v.Consensus)
+	}
+	if err := failover.ValidateConsensus(v.RPCAddress, v.Consensus); err != nil {
+		return fmt.Errorf("validator.failover.consensus.mode does not match local RPC: %w", err)
+	}
+	if v.Consensus == "tower" {
+		if err = v.configureTowerFile(cfg.Tower); err != nil {
+			return err
+		}
+	} else {
+		v.TowerFile = filepath.Join(v.LedgerDir, "vote_history-"+v.Identities.Active.PubKey()+".bin")
 	}
 
 	// set identity commands configure
 	err = v.configureSetIdenttiyCommands(cfg.Failover)
 	if err != nil {
 		return err
+	}
+	if v.Consensus == "alpenglow" {
+		for _, cmd := range []string{v.SetIdentityActiveCommand, v.SetIdentityPassiveCommand} {
+			if err := validateAlpenglowCommand(cmd); err != nil {
+				return err
+			}
+		}
 	}
 
 	// configure hooks
@@ -150,6 +171,13 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	err = v.configureRollback(cfg.Failover)
 	if err != nil {
 		return err
+	}
+	if v.Consensus == "alpenglow" {
+		for _, cmd := range []string{v.Rollback.ToActive.ResolvedCmd, v.Rollback.ToPassive.ResolvedCmd} {
+			if err := validateAlpenglowCommand(cmd); err != nil {
+				return err
+			}
+		}
 	}
 
 	// must have at least one peer, each peer must have a valid string <host>:<port>
@@ -213,7 +241,9 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 	defer log.Debug("run failover done")
 
 	log.Debugf("failover with params: %+v", params)
-
+	if v.Consensus == "alpenglow" && params.SkipTowerSync {
+		return fmt.Errorf("--skip-tower-sync is unavailable with alpenglow consensus")
+	}
 	// wait until healthy unless told otherwise
 	if params.NoWaitForHealthy {
 		log.Debug("--no-wait-for-healthy flag is set, skipping wait for healthy")
@@ -223,7 +253,6 @@ func (v *Validator) Failover(params FailoverParams) (err error) {
 			return fmt.Errorf("failed to wait until healthy: %w", err)
 		}
 	}
-
 	params.MinTimeToLeaderSlot = v.MinimumTimeToLeaderSlot
 
 	if params.RollbackEnabled && !v.Rollback.Enabled {
@@ -331,6 +360,15 @@ func (v *Validator) configureLedgerDir(ledgerDir string) error {
 	}
 	v.LedgerDir = ledgerDir
 	v.logger.Debug("ledger dir set", "ledger_dir", v.LedgerDir)
+	return nil
+}
+
+func validateAlpenglowCommand(command string) error {
+	for _, field := range strings.Fields(command) {
+		if field == "--require-tower" || field == "--do-not-require-vote-history" {
+			return fmt.Errorf("alpenglow identity command contains %s; remove it from validator.failover command templates", field)
+		}
+	}
 	return nil
 }
 
@@ -747,7 +785,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 	}
 
 	// delete the tower file if it exists and auto empty when passive is true
-	if v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
+	if v.Consensus == "tower" && v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
 		log.Debug("deleting tower file because validator.tower.auto_empty_when_passive is true",
 			"tower_file", v.TowerFile,
 		)
@@ -758,7 +796,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 	}
 
 	// if the tower file exists and auto empty when passive is false, confirm if you want it deleted and exit if not.
-	if !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
+	if v.Consensus == "tower" && !v.TowerFileAutoDeleteWhenPassive && utils.FileExists(v.TowerFile) {
 		log.Warn("tower file exists", "tower_file", v.TowerFile)
 		if params.AutoConfirm {
 			log.Warn("--yes flag set, automatically deleting tower file", "tower_file", v.TowerFile)
@@ -783,6 +821,7 @@ func (v *Validator) makeActive(params FailoverParams) (err error) {
 		HeartbeatInterval: v.FailoverServerConfig.HeartbeatInterval,
 		StreamTimeout:     v.FailoverServerConfig.StreamTimeout,
 		PassiveNodeInfo: &failover.NodeInfo{
+			Consensus:                      v.Consensus,
 			Hostname:                       v.Hostname,
 			PublicIP:                       v.PublicIP,
 			Identities:                     v.Identities,
@@ -831,14 +870,21 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 	)
 
 	log.Debug("failover active to passive")
+	consensusState, err := failover.DetectConsensus(v.RPCAddress)
+	if err != nil {
+		return fmt.Errorf("failed to detect consensus for failover handshake: %w", err)
+	}
+	if consensusState.Mode != v.Consensus {
+		return fmt.Errorf("configured consensus %q disagrees with local RPC consensus %q", v.Consensus, consensusState.Mode)
+	}
 
-	// ensure tower file exists and is not empty
+	// Ensure the consensus state is available before contacting the passive node.
 	if !utils.FileExists(v.TowerFile) {
-		return fmt.Errorf("tower file does not exist: %s", v.TowerFile)
+		return fmt.Errorf("%s state file does not exist: %s", v.Consensus, v.TowerFile)
 	}
 
 	if utils.FileSize(v.TowerFile) == 0 {
-		return fmt.Errorf("tower file is empty: %s", v.TowerFile)
+		return fmt.Errorf("%s state file is empty: %s", v.Consensus, v.TowerFile)
 	}
 
 	// select passive peer to connect to from declared peers
@@ -857,6 +903,8 @@ func (v *Validator) makePassive(params FailoverParams) (err error) {
 		RPCURL:                         v.RPCAddress,
 		SkipTowerSync:                  params.SkipTowerSync,
 		ActiveNodeInfo: &failover.NodeInfo{
+			Consensus:                      consensusState.Mode,
+			ConsensusGenesisSlot:           consensusState.GenesisSlot,
 			Hostname:                       v.Hostname,
 			PublicIP:                       v.PublicIP,
 			Identities:                     v.Identities,

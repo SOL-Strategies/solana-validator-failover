@@ -103,12 +103,12 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("validator.average_slot_duration", DefaultAverageSlotDuration)
 	v.SetDefault("validator.cluster", DefaultCluster)
 	v.SetDefault("validator.failover.min_time_to_leader_slot", DefaultFailoverMinimumTimeToLeaderSlot)
+	v.SetDefault("validator.failover.consensus.mode", "tower")
 	v.SetDefault("validator.failover.monitor.credit_samples.count", DefaultFailoverMonitorCreditSamplesCount)
 	v.SetDefault("validator.failover.monitor.credit_samples.interval", DefaultFailoverMonitorCreditSamplesInterval)
 	v.SetDefault("validator.failover.server.heartbeat_interval", DefaultFailoverServerHeartbeatInterval)
 	v.SetDefault("validator.failover.server.port", DefaultFailoverServerPort)
 	v.SetDefault("validator.failover.server.stream_timeout", DefaultFailoverServerStreamTimeout)
-	v.SetDefault("validator.failover.set_identity_active_cmd_template", DefaultSetIdentityActiveCmdTemplate)
 	v.SetDefault("validator.failover.set_identity_passive_cmd_template", DefaultSetIdentityPassiveCmdTemplate)
 	v.SetDefault("validator.tower.file_name_template", DefaultTowerFileNameTemplate)
 	v.SetDefault("update.check_on_startup", true)
@@ -123,6 +123,12 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	// Unmarshal into the full config structure
 	if err := v.Unmarshal(s); err != nil {
 		return err
+	}
+	if s.Validator.Failover.SetIdentityActiveCmdTemplate == "" {
+		s.Validator.Failover.SetIdentityActiveCmdTemplate = DefaultSetIdentityActiveCmdTemplate
+		if s.Validator.Failover.Consensus.Mode == "alpenglow" {
+			s.Validator.Failover.SetIdentityActiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}"
+		}
 	}
 
 	return s.Log.Validate()

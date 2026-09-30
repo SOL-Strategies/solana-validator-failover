@@ -10,8 +10,6 @@ import (
 
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
-	solanago "github.com/solana-foundation/solana-go/v2"
-	"github.com/solana-foundation/solana-go/v2/rpc"
 	"github.com/quic-go/quic-go"
 	"github.com/sol-strategies/solana-validator-failover/internal/constants"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
@@ -19,6 +17,8 @@ import (
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
+	solanago "github.com/solana-foundation/solana-go/v2"
+	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
 // ClientConfig is the configuration for the failover client, client is always the active node
@@ -170,6 +170,14 @@ func (c *Client) Start() {
 		c.logger.Fatal(c.failoverStream.GetErrorMessage())
 		return
 	}
+	if c.failoverStream.GetPassiveNodeInfo().Consensus != c.activeNodeInfo.Consensus {
+		c.logger.Fatal("passive node consensus mode does not match active node")
+		return
+	}
+	if c.activeNodeInfo.Consensus == ConsensusAlpenglow && c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot != c.activeNodeInfo.ConsensusGenesisSlot {
+		c.logger.Fatalf("Alpenglow genesis mismatch: active slot %d, passive slot %d", c.activeNodeInfo.ConsensusGenesisSlot, c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot)
+		return
+	}
 
 	// Get skipTowerSync from the server's message (server is the authority on this)
 	skipTowerSync := c.failoverStream.GetSkipTowerSync()
@@ -204,7 +212,8 @@ func (c *Client) Start() {
 	// set the failover start slot to the current slot (we're now early in this slot)
 	c.failoverStream.SetFailoverStartSlot(slot)
 
-	// set identity to passive
+	// The local and peer consensus states were verified during the handshake.
+	// Do not add another RPC check here; use that accepted handshake state.
 	dryRunPrefix := ""
 	if c.failoverStream.GetIsDryRunFailover() {
 		dryRunPrefix = style.RenderLightGreyString("(dry run)") + " "
@@ -228,7 +237,22 @@ func (c *Client) Start() {
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
 
-	if skipTowerSync {
+	if c.activeNodeInfo.Consensus == "alpenglow" {
+		c.logger.Infof("sending vote history to %s", c.failoverStream.GetPassiveNodeInfo().Hostname)
+		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
+		if err := c.failoverStream.sendStateFile(c.activeNodeInfo.TowerFile); err != nil {
+			c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
+			return
+		}
+		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
+		// Streamed state transfer uses separate gob frames. Send the updated
+		// message so the passive node receives the start time and start slot
+		// used to calculate the final summary.
+		if err := c.failoverStream.Encode(); err != nil {
+			c.logger.Error("failed to send Alpenglow failover timing metadata", "err", err)
+			return
+		}
+	} else if skipTowerSync {
 		c.logger.Info("skipping tower file sync")
 		// Don't send anything - server won't wait for tower file when skipTowerSync is true
 	} else {
@@ -334,7 +358,7 @@ func (c *Client) waitUntilStartOfNextSlot() (newSlot uint64, err error) {
 	// ~5ms average detection lag vs ~25ms at the previous 50ms interval.
 	// On RPC error use a longer back-off to avoid hammering a struggling local node.
 	const (
-		pollInterval      = 10 * time.Millisecond
+		pollInterval       = 10 * time.Millisecond
 		errorRetryInterval = 50 * time.Millisecond
 	)
 	for {

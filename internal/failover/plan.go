@@ -33,6 +33,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 	// step is a closure counter so each conditional section gets the correct ordinal.
 	step := 0
 	funcMap := template.FuncMap{
+		"stateLabel": stateLabel,
 		// Step increments and returns the current step number.
 		"Step": func() int {
 			step++
@@ -61,7 +62,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 		// (identity changes, tower sync, hooks) sits on its own line. Continuation
 		// lines are indented to align with the value start after "   Plan: ".
 		// The indent is 11 chars: 2 (template leading spaces) + 8 (label) + 1 (space).
-		"planSummaryLines": func(activeHostname, passiveHostname string, skipTowerSync bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
+		"planSummaryLines": func(activeHostname, passiveHostname, consensus string, skipTowerSync bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
 			const indent = "           " // 11 spaces
 
 			arrow := style.RenderMutedString("→")
@@ -74,7 +75,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 			lines := []string{identityLine}
 
 			if !skipTowerSync {
-				lines = append(lines, style.RenderMutedString("1 tower sync"))
+				lines = append(lines, style.RenderMutedString("1 "+stateLabel(consensus)+" sync"))
 			}
 
 			type entry struct {
@@ -169,7 +170,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
         {{ Muted "cmd       =" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
 {{- if not .SkipTowerSync }}
 
-  {{ Purple (printf "%d — sync tower file" (Step)) }}
+  {{ Purple (printf "%d — sync %s file" (Step) (stateLabel .ActiveNodeInfo.Consensus)) }}
         {{ Muted "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
       {{ Active "+" false }} {{ Muted "destination =" }} {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.TowerFile) }}{{ if gt .ActiveNodeInfo.TowerFileSizeBytes 0 }}
         {{ Muted "size        =" }} {{ LightGrey (FormatBytes .ActiveNodeInfo.TowerFileSizeBytes) }}{{ end }}
@@ -196,7 +197,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
       {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} {{ Muted "→" }} {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
 {{- end }}
   {{ HRule }}
-  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .SkipTowerSync .Hooks .Rollback }}
+  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .ActiveNodeInfo.Consensus .SkipTowerSync .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ Muted .AppVersion }}
   {{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
   {{ HRule }}
