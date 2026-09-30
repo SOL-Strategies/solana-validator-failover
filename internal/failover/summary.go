@@ -45,6 +45,7 @@ type SummaryData struct {
 // RenderFailoverSummary renders the post-failover summary to a string.
 func RenderFailoverSummary(data SummaryData) (string, error) {
 	funcMap := template.FuncMap{
+		"stateLabel": stateLabel,
 		// truncPubkey uses ASCII "..." so byte-length == display-width.
 		"truncPubkey": func(s string) string {
 			if len(s) <= 16 {
@@ -96,7 +97,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	// timing info on each header line aligns vertically.
 	labelWidth := max(len(data.OrigActiveNode.Hostname), len(data.OrigPassiveNode.Hostname))
 	if !data.SkipTowerSync {
-		labelWidth = max(labelWidth, len("> tower"))
+		labelWidth = max(labelWidth, len("> "+stateLabel(data.OrigActiveNode.Consensus)))
 	}
 
 	tpl, err := template.New("failoverSummary").Funcs(funcMap).Parse(`
@@ -107,7 +108,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
 {{ if not .SkipTowerSync }}
-  {{ LightGrey "tower" }}
+  {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
         {{ Muted "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
 {{ end }}

@@ -14,6 +14,8 @@ type NodeInfo struct {
 	Hostname                       string
 	Identities                     *identities.Identities
 	TowerFile                      string
+	Consensus                      string
+	ConsensusGenesisSlot           uint64
 	TowerFileSizeBytes             int64
 	TowerFileBytes                 []byte
 	TowerFileHash                  string

@@ -294,6 +294,37 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		s.logger.Fatal("server and client running different versions of this program - aborting")
 		return
 	}
+	activeMode := s.failoverStream.GetActiveNodeInfo().Consensus
+	passiveMode := s.passiveNodeInfo.Consensus
+	if activeMode != ConsensusTower && activeMode != ConsensusAlpenglow {
+		s.failoverStream.SetErrorMessagef("active node reported unsupported consensus mode %q", activeMode)
+		_ = s.failoverStream.Encode()
+		return
+	}
+	passiveState, err := DetectConsensus(s.rpcURL)
+	if err != nil {
+		s.failoverStream.SetErrorMessagef("cannot detect passive node consensus: %v", err)
+		_ = s.failoverStream.Encode()
+		return
+	}
+	if passiveState.Mode == "migrating" {
+		s.failoverStream.SetErrorMessage("passive node is migrating to Alpenglow; failover is disabled during migration")
+		_ = s.failoverStream.Encode()
+		return
+	}
+	if passiveState.Mode != passiveMode {
+		s.failoverStream.SetErrorMessagef("passive consensus declaration %q disagrees with local RPC consensus %q", passiveMode, passiveState.Mode)
+		_ = s.failoverStream.Encode()
+		return
+	}
+	if activeMode != passiveState.Mode || (activeMode == ConsensusAlpenglow && s.failoverStream.GetActiveNodeInfo().ConsensusGenesisSlot != passiveState.GenesisSlot) {
+		s.failoverStream.SetErrorMessagef("consensus mismatch: active=%s genesis=%d passive=%s genesis=%d", activeMode, s.failoverStream.GetActiveNodeInfo().ConsensusGenesisSlot, passiveState.Mode, passiveState.GenesisSlot)
+		_ = s.failoverStream.Encode()
+		return
+	}
+	s.passiveNodeInfo.Consensus = passiveState.Mode
+	s.passiveNodeInfo.ConsensusGenesisSlot = passiveState.GenesisSlot
+	s.failoverStream.SetPassiveNodeInfo(s.passiveNodeInfo)
 
 	// Query gossip for the client by both its public IP and configured active identity.
 	activeNodeInfo := s.failoverStream.GetActiveNodeInfo()
@@ -386,36 +417,49 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	// this is where the actual failover starts
 
 	var towerFile *os.File
-	// if skip tower sync is enabled, remove tower file if it exists
-	if s.skipTowerSync {
-		if utils.FileExists(s.failoverStream.GetPassiveNodeInfo().TowerFile) {
-			s.logger.Infof("removing existing tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
-			if err := utils.RemoveFile(s.failoverStream.GetPassiveNodeInfo().TowerFile); err != nil {
-				s.failoverStream.SetErrorMessagef("failed to remove tower file at %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
+	if passiveMode == "alpenglow" {
+		if s.skipTowerSync {
+			s.failoverStream.SetErrorMessage("--skip-tower-sync is unavailable with alpenglow consensus")
+			_ = s.failoverStream.Encode()
+			return
+		}
+		if err := preflightStateDestination(s.passiveNodeInfo.TowerFile, activeNodeInfo.TowerFileSizeBytes); err != nil {
+			s.failoverStream.SetErrorMessagef("cannot receive vote history: %v", err)
+			_ = s.failoverStream.Encode()
+			return
+		}
+	} else {
+		// if skip tower sync is enabled, remove tower file if it exists
+		if s.skipTowerSync {
+			if utils.FileExists(s.failoverStream.GetPassiveNodeInfo().TowerFile) {
+				s.logger.Infof("removing existing tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile)
+				if err := utils.RemoveFile(s.failoverStream.GetPassiveNodeInfo().TowerFile); err != nil {
+					s.failoverStream.SetErrorMessagef("failed to remove tower file at %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
+					if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
+						s.logger.Error("failed to send error message to client", "err", encodeErr)
+					}
+					s.logger.Fatal(fmt.Sprintf("failed to remove tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile), "err", err)
+					return
+				}
+			}
+		} else {
+			// Open tower file handle early to speed up failover
+			var err error
+			towerFile, err = os.OpenFile(
+				s.failoverStream.GetPassiveNodeInfo().TowerFile,
+				os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+				os.FileMode(0644), // User and group can read/write, others can read
+			)
+			if err != nil {
+				s.logger.Error(fmt.Sprintf("failed to open tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile), "err", err)
+				s.failoverStream.SetErrorMessagef("server failed to open its tower file %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
 				if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
 					s.logger.Error("failed to send error message to client", "err", encodeErr)
 				}
-				s.logger.Fatal(fmt.Sprintf("failed to remove tower file at %s", s.failoverStream.GetPassiveNodeInfo().TowerFile), "err", err)
 				return
 			}
+			defer utils.SafeCloseFile(towerFile)
 		}
-	} else {
-		// Open tower file handle early to speed up failover
-		var err error
-		towerFile, err = os.OpenFile(
-			s.failoverStream.GetPassiveNodeInfo().TowerFile,
-			os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
-			os.FileMode(0644), // User and group can read/write, others can read
-		)
-		if err != nil {
-			s.logger.Error(fmt.Sprintf("failed to open tower file %s", s.failoverStream.GetPassiveNodeInfo().TowerFile), "err", err)
-			s.failoverStream.SetErrorMessagef("server failed to open its tower file %s: %v", s.failoverStream.GetPassiveNodeInfo().TowerFile, err)
-			if encodeErr := s.failoverStream.Encode(); encodeErr != nil {
-				s.logger.Error("failed to send error message to client", "err", encodeErr)
-			}
-			return
-		}
-		defer utils.SafeCloseFile(towerFile)
 	}
 
 	// run pre hooks when passive
@@ -432,13 +476,40 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		return
 	}
 
-	// set can proceed to true
+	// The local and peer consensus states were verified during the handshake.
+	// Continue with that result without querying RPC again before identity changes.
 	s.failoverStream.SetCanProceed(true)
 	if s.failoverStream.Encode() != nil {
 		return
 	}
 
-	if s.skipTowerSync {
+	if passiveMode == "alpenglow" {
+		s.logger.Infof("failover started - waiting for vote history from %s", activeNodeInfo.Hostname)
+		s.failoverStream.SetActiveNodeSyncTowerFileStartTime()
+		if err := s.failoverStream.receiveStateFile(s.passiveNodeInfo.TowerFile); err != nil {
+			s.logger.Error("vote-history transfer failed; active node may now be passive", "err", err)
+			s.failoverStream.SetErrorMessagef("vote-history transfer failed before activation: %v", err)
+			s.failoverStream.SetRollbackRequired(true)
+			_ = s.failoverStream.Encode()
+			return
+		}
+		// Receive the sender's updated timestamps and starting slot before
+		// recording the end slot or building the summary.
+		if err := s.failoverStream.Decode(); err != nil {
+			s.logger.Error("failed to receive Alpenglow failover timing metadata", "err", err)
+			s.failoverStream.SetErrorMessagef("failed to receive failover timing metadata: %v", err)
+			s.failoverStream.SetRollbackRequired(true)
+			_ = s.failoverStream.Encode()
+			return
+		}
+		if info, err := os.Stat(s.passiveNodeInfo.TowerFile); err == nil {
+			s.failoverStream.GetActiveNodeInfo().TowerFileSizeBytes = info.Size()
+			s.logger.Infof("received vote history file path=%s size=%d", s.passiveNodeInfo.TowerFile, info.Size())
+		} else {
+			s.logger.Warn("vote history was installed but its size could not be read for the summary", "path", s.passiveNodeInfo.TowerFile, "err", err)
+		}
+		s.failoverStream.SetPassiveNodeSyncTowerFileEndTime()
+	} else if s.skipTowerSync {
 		s.logger.Info("failover started - skipping tower file sync")
 	} else {
 		s.logger.Infof("failover started - waiting for tower file from %s", s.failoverStream.GetActiveNodeInfo().Hostname)

@@ -31,6 +31,7 @@ type TowerConfig struct {
 
 // FailoverConfig is the configuration for a failover
 type FailoverConfig struct {
+	Consensus                     string               `mapstructure:"consensus"`
 	SetIdentityPassiveCmdTemplate string               `mapstructure:"set_identity_passive_cmd_template"`
 	SetIdentityActiveCmdTemplate  string               `mapstructure:"set_identity_active_cmd_template"`
 	Hooks                         hooks.FailoverHooks  `mapstructure:"hooks"`

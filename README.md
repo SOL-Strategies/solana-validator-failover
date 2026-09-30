@@ -44,11 +44,13 @@ solana-validator-failover run --not-a-drill
 solana-validator-failover run
 ```
 
-By default, `run` executes in **dry-run mode**: the tower file is synced and all timings are recorded, but set-identity commands are not executed. This is useful for gauging failover speed under real network conditions without committing. Pass `--not-a-drill` on the **passive** node to execute for real.
+By default, `run` executes in **dry-run mode**: the consensus state file is synced and all timings are recorded, but set-identity commands are not executed. This is useful for gauging failover speed under real network conditions without committing. Pass `--not-a-drill` on the **passive** node to execute for real.
+
+Set `validator.failover.consensus` on both nodes to `tower` or `alpenglow`. The default is `tower`. At startup, the configured mode is checked against the validator's local RPC; a mismatch, migration, or unknown state prevents startup. The handshake checks both nodes again and requires the same Alpenglow genesis slot. For Alpenglow, remove `--require-tower` from any explicitly configured identity command. Vote history is read from each node's `validator.ledger_dir`; no separate directory setting is needed. Upgrade both failover binaries together before running failover.
 
 > ⚠️ **Who you run this as matters.** The user must have:
 > - Permission to run set-identity commands for the validator
-> - Read/write permission on the tower file — verify inherited permissions after a dry-run
+> - Read/write permission on the tower or vote-history file — verify inherited permissions after a dry-run
 
 ### Flags
 
@@ -59,7 +61,7 @@ By default, `run` executes in **dry-run mode**: the tower file is synced and all
 | `--not-a-drill`                | `false` | Execute failover for real. Effective on the passive node; ignored on the active node.                                                                             |
 | `--no-wait-for-healthy`        | `false` | Skip waiting for the node to report healthy at `<rpc_address>/health`.                                                                                            |
 | `--no-min-time-to-leader-slot` | `false` | Skip waiting for the active node to have no leader slots in the next `min_time_to_leader_slot` window. Effective on the active node; ignored on the passive node. |
-| `--skip-tower-sync`            | `false` | Skip syncing the tower file from active to passive. The passive node must not have an existing tower file.                                                        |
+| `--skip-tower-sync`            | `false` | Skip syncing the tower file in Tower mode. Unavailable in Alpenglow mode.                                                                                           |
 | `-y, --yes`                    | `false` | Skip all interactive confirmation prompts.                                                                                                                        |
 | `--to-peer <name\|ip>`         | —       | When run on the active node, auto-select a peer by its configured name or IP address, skipping the interactive selector. Ignored on the passive node.             |
 
@@ -177,7 +179,7 @@ validator:
   # note: the validator must be started with --full-rpc-api (required for getClusterNodes)
   rpc_address: http://localhost:8899
 
-  # tower file config
+  # tower file config (required only when failover.consensus is tower)
   tower:
     # (required) directory hosting the tower file
     dir: /mnt/accounts/tower
@@ -193,6 +195,10 @@ validator:
 
   # failover configuration
   failover:
+    # tower (default) or alpenglow; configure identically on both nodes.
+    # Alpenglow transfers vote_history-<active identity>.bin from validator.ledger_dir.
+    # The mode must agree with the local validator's on-chain genesis certificate.
+    consensus: tower
     # failover server config (runs on passive node taking over from active node)
     server:
       # default: 9898 - QUIC (udp) port to listen on
@@ -235,7 +241,8 @@ validator:
     # {{ .Identities }} - an object that has Active/Passive properties referencing
     #                     the loaded identities from validator.identities
     # {{ .LedgerDir }}  - a resolved absolute path to validator.ledger_dir
-    # defaults shown below
+    # Tower default shown below. In Alpenglow mode the default omits --require-tower.
+    # Remove --require-tower from an explicit active command when switching modes.
     set_identity_active_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
     set_identity_passive_cmd_template: "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}"
 
