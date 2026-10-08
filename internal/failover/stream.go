@@ -280,7 +280,8 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
 	data.HandoffStrategy = s.message.HandoffStrategy
 	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
-	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer &&
+		s.message.PassiveNodeInfo.Consensus != ConsensusAlpenglow && s.message.PassiveNodeInfo.ConsensusMode != ConsensusAlpenglow
 
 	return data
 }
@@ -329,7 +330,8 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
 	data.HandoffStrategy = s.message.HandoffStrategy
 	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
-	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer &&
+		s.message.PassiveNodeInfo.Consensus != ConsensusAlpenglow && s.message.PassiveNodeInfo.ConsensusMode != ConsensusAlpenglow
 
 	return data
 }

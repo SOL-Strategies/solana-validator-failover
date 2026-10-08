@@ -68,13 +68,14 @@ func NewCommandTemplateData(local, peer, source, destination NodeInfo, strategy 
 		ToNodeIsAgaveDerived:       isAgaveDerived(destination.ClientFamily),
 		FromNodeConsensus:          source.ConsensusMode, ToNodeConsensus: destination.ConsensusMode,
 		FromNodeClientVersion: source.ClientVersion, ToNodeClientVersion: destination.ClientVersion,
-		HandoffStrategy:                 strategy,
-		TowerFileWillBeTransferred:      towerFileWillBeTransferred,
-		TowerFileAvailableAtDestination: towerFileWillBeTransferred && !destination.IsNativeFiredancer,
-		ActiveIdentityPubkey:            source.Identities.Active.PubKey(),
-		VoteAccountPubkey:               source.VoteAccount,
-		IsDryRunFailover:                dryRun,
-		IdentityTransitionRPCPatchURL:   local.IdentityTransitionRPCPatchURL,
+		HandoffStrategy:            strategy,
+		TowerFileWillBeTransferred: towerFileWillBeTransferred,
+		TowerFileAvailableAtDestination: towerFileWillBeTransferred && !destination.IsNativeFiredancer &&
+			destination.Consensus != ConsensusAlpenglow && destination.ConsensusMode != ConsensusAlpenglow,
+		ActiveIdentityPubkey:          source.Identities.Active.PubKey(),
+		VoteAccountPubkey:             source.VoteAccount,
+		IsDryRunFailover:              dryRun,
+		IdentityTransitionRPCPatchURL: local.IdentityTransitionRPCPatchURL,
 	}
 }
 

@@ -185,6 +185,15 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 	if err := failover.ValidateConsensus(v.RPCAddress, v.Consensus); err != nil {
 		return fmt.Errorf("validator.failover.consensus.mode does not match local RPC: %w", err)
 	}
+	declaredClientConsensus := strings.ToLower(strings.TrimSpace(cfg.Client.Consensus))
+	if declaredClientConsensus != "" && declaredClientConsensus != "auto" && declaredClientConsensus != v.Consensus {
+		return fmt.Errorf("validator.client.consensus %q disagrees with validator.failover.consensus.mode %q", declaredClientConsensus, v.Consensus)
+	}
+	if v.ThisNodeIsNativeFiredancer && v.Consensus != failover.ConsensusTower {
+		return fmt.Errorf("native Firedancer handoffs currently support only tower consensus")
+	}
+	v.ConsensusMode = v.Consensus
+	v.TowerFileAvailableAtDestination = v.Consensus == failover.ConsensusTower && !v.ThisNodeIsNativeFiredancer
 	if v.Consensus == "tower" {
 		if err = v.configureTowerFile(cfg.Tower); err != nil {
 			return err
@@ -299,8 +308,11 @@ func (v *Validator) configureClient(cfg ClientConfig) error {
 	if consensus == "" || consensus == "auto" {
 		consensus = "tower"
 	}
-	if consensus != "tower" {
-		return fmt.Errorf("unsupported validator.client.consensus %q: only tower is supported", consensus)
+	if consensus != "tower" && consensus != "alpenglow" {
+		return fmt.Errorf("unsupported validator.client.consensus %q: must be tower or alpenglow", consensus)
+	}
+	if family == "firedancer" && consensus != "tower" {
+		return fmt.Errorf("native Firedancer handoffs currently support only tower consensus")
 	}
 	v.ClientFamily = family
 	v.ConsensusMode = consensus

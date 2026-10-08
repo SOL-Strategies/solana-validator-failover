@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
-	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/quic-go/quic-go"
 	"github.com/sol-strategies/solana-validator-failover/internal/constants"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
@@ -19,6 +18,7 @@ import (
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
+	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
 // MonitorConfig holds the configuration for a failover monitor
@@ -307,6 +307,12 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		strategy = HandoffStrategyOnchain
 	}
 	s.failoverStream.SetHandoffStrategy(strategy)
+	if strategy == HandoffStrategyOnchain && (activeInfo.Consensus == ConsensusAlpenglow || passiveInfo.Consensus == ConsensusAlpenglow ||
+		activeInfo.ConsensusMode == ConsensusAlpenglow || passiveInfo.ConsensusMode == ConsensusAlpenglow) {
+		s.failoverStream.SetErrorMessage("native Firedancer handoffs currently support only tower consensus")
+		_ = s.failoverStream.Encode()
+		return
+	}
 	if strategy == HandoffStrategyOnchain {
 		sourceActivePubkey := activeInfo.Identities.Active.PubKey()
 		destinationActivePubkey := passiveInfo.Identities.Active.PubKey()

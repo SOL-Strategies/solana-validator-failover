@@ -48,6 +48,8 @@ By default, `run` executes in **dry-run mode**: the consensus state file is sync
 
 Set `validator.failover.consensus.mode` on both nodes to `tower` or `alpenglow`. The default is `tower`. At startup, the configured mode is checked against the validator's local RPC; a mismatch, migration, or unknown state prevents startup. The handshake checks both nodes again and requires the same Alpenglow genesis slot. For Alpenglow, remove `--require-tower` from any explicitly configured identity command. Vote history is read from each node's `validator.ledger_dir`; no separate directory setting is needed. Upgrade both failover binaries together before running failover.
 
+Native Firedancer handoffs currently support Tower consensus only. Leave `validator.client.consensus` as `auto` to follow `validator.failover.consensus.mode`; an explicit client consensus must match that mode. The combined Alpenglow and native handoff protocol uses wire version 5, so both peers must run the updated binary.
+
 > ⚠️ **Who you run this as matters.** The user must have:
 > - Permission to run set-identity commands for the validator
 > - Read/write permission on the tower or vote-history file — verify inherited permissions after a dry-run
