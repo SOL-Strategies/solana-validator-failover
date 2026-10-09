@@ -175,6 +175,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 {{- if .VoteHistoryWillBeTransferred }}
 
   {{ Purple (printf "%d — sync %s file" (Step) (stateLabel .ActiveNodeInfo.Consensus)) }}
+{{- if .IsDryRun }} {{ LightGrey "(temporary dry-run copy; removed afterward)" }}{{ end }}
         {{ Muted "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.VoteHistoryFile) }}
       {{ Active "+" false }} {{ Muted "destination =" }} {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.HistoryDestinationFile) }}{{ if gt .ActiveNodeInfo.VoteHistoryFileSizeBytes 0 }}
         {{ Muted "size        =" }} {{ LightGrey (FormatBytes .ActiveNodeInfo.VoteHistoryFileSizeBytes) }}{{ end }}

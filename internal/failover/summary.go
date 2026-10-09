@@ -113,7 +113,7 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 
 
 {{ if .VoteHistoryWillBeTransferred }}
-  {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}
+  {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}{{ if .IsDryRun }} {{ Muted "(pre-demotion dry-run snapshot)" }}{{ end }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .HistorySyncDuration) }}
         {{ Muted "size     =" }} {{ LightGrey (FormatBytes .VoteHistoryFileSizeBytes) }}
 {{ else }}

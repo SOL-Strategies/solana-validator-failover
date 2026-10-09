@@ -429,12 +429,12 @@ func (c *Client) Start() (startErr error) {
 		}
 	}
 	var snapshot *os.File
-	if !skipHistoryTransfer && !c.failoverStream.GetIsDryRunFailover() {
+	if !skipHistoryTransfer {
 		c.failoverStream.SetActiveNodeSyncVoteHistoryStartTime()
 		var err error
 		snapshot, err = captureStateFile(c.activeNodeInfo.VoteHistoryFile)
 		if err != nil {
-			abortDestinationHandoff("failed to capture outgoing vote history", err)
+			abortDestinationHandoff("failed to capture outgoing vote history snapshot", err)
 			return
 		}
 		defer snapshot.Close()

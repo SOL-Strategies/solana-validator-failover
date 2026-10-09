@@ -44,7 +44,7 @@ solana-validator-failover run --not-a-drill
 solana-validator-failover run
 ```
 
-By default, `run` executes in **dry-run mode**: it displays and simulates the handoff without executing identity commands or writing history files or directories. Pass `--not-a-drill` on the **passive** node to execute for real.
+By default, `run` executes in **dry-run mode**: it displays and simulates the handoff without executing identity commands. When history transfer is enabled, it sends the current source snapshot, verifies the digest, and installs it at a temporary destination path that is removed when the dry run ends. A missing native Firedancer import directory is created with `0700` permissions and left in place. The source remains voting during a dry run, so its snapshot may not include history written before an actual demotion. Pass `--not-a-drill` on the **passive** node to execute for real.
 
 Release 0.2.0 supports **Alpenglow only**, with Agave/Jito-Solana ↔ Agave/Jito-Solana, Agave/Jito-Solana ↔ native Firedancer, and native Firedancer ↔ native Firedancer failovers. Both nodes verify consensus through their own local RPC at startup and handshake, including matching Alpenglow genesis slots. Unavailable RPC, migration, or disagreement prevents failover.
 
@@ -151,7 +151,7 @@ Override the directory with `validator.vote_history.import_dir`. Before demotion
 
 Firedancer activation uses `--vote-history-file` pointing to that exact import file. With transfer enabled, custom activation commands must supply exactly one matching flag. A different path, missing value, missing flag, or duplicate flag is rejected before demotion. Validation and execution share argument parsing, including quoted paths. Files imported into Firedancer must not exceed 32,688 bytes. See [Firedancer history documentation](https://docs.firedancer.io/api/firedancer-cli.html#set-identity).
 
-`--skip-history-transfer` bypasses history preflight, creation, transfer, installation, and deletion. Version and consensus checks still apply, and operator identity/rollback commands are executed as configured. Dry runs never create history directories or files. The former `--skip-tower-sync` flag now returns an error directing operators to `--skip-history-transfer`, even when supplied as `=false`.
+`--skip-history-transfer` bypasses history preflight, creation, transfer, installation, and deletion. Version and consensus checks still apply, and operator identity/rollback commands are executed as configured. The former `--skip-tower-sync` flag now returns an error directing operators to `--skip-history-transfer`, even when supplied as `=false`.
 
 ### Upgrading to 0.2.0
 

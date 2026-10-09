@@ -21,10 +21,6 @@ func prepareHistoryDestination(path string, native, dryRun bool, logger *log.Log
 	dir := filepath.Dir(path)
 	info, err := os.Lstat(dir)
 	if os.IsNotExist(err) && native {
-		if dryRun {
-			logger.Info("dry run: would create vote-history import directory", "path", dir, "permissions", "0700")
-			return nil
-		}
 		if err := os.MkdirAll(filepath.Dir(dir), 0700); err != nil {
 			return err
 		}
@@ -36,7 +32,11 @@ func prepareHistoryDestination(path string, native, dryRun bool, logger *log.Log
 			if err := os.Chmod(dir, 0700); err != nil {
 				return err
 			}
-			logger.Warn("vote-history import directory was missing; created it", "path", dir, "permissions", "0700")
+			if dryRun {
+				logger.Warn("dry run created the vote-history import directory", "path", dir, "permissions", "0700")
+			} else {
+				logger.Warn("vote-history import directory was missing; created it", "path", dir, "permissions", "0700")
+			}
 		}
 		info, err = os.Lstat(dir)
 	}
@@ -47,6 +47,24 @@ func prepareHistoryDestination(path string, native, dryRun bool, logger *log.Log
 		return fmt.Errorf("history destination is not a directory: %s", dir)
 	}
 	return nil
+}
+
+// createDryRunHistoryDestination reserves a unique path beside the configured
+// destination. The real receiver atomically installs the transferred file at
+// this path; the caller removes it when the dry run ends. Keeping it in the
+// same directory exercises the actual destination filesystem without
+// replacing a history file that a later activation may use.
+func createDryRunHistoryDestination(path string) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), ".solana-validator-failover-dry-run-history-*")
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	return name, nil
 }
 
 // resolveHistoryDirectory resolves existing parents without creating a directory.

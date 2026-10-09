@@ -261,6 +261,16 @@ func (s *Server) handleStream(stream *quic.Stream) {
 }
 
 func (s *Server) handleFailoverStream(stream *quic.Stream) {
+	var dryRunHistoryPath string
+	defer func() {
+		if dryRunHistoryPath == "" {
+			return
+		}
+		if err := os.Remove(dryRunHistoryPath); err != nil && !os.IsNotExist(err) {
+			s.logger.Warn("failed to remove temporary dry-run vote history", "path", dryRunHistoryPath, "err", err)
+		}
+	}()
+
 	// read the message and parse it into a Stream struct
 	s.failoverStream = NewFailoverStream(stream)
 	if s.failoverStream.Decode() != nil {
@@ -527,9 +537,15 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 			_ = s.failoverStream.Encode()
 			return
 		}
-		if !s.isDryRunFailover {
-			if err := preflightStateDestination(path, 1); err != nil {
-				s.failoverStream.SetErrorMessagef("cannot receive vote history: %v", err)
+		if err := preflightStateDestination(path, 1); err != nil {
+			s.failoverStream.SetErrorMessagef("cannot receive vote history: %v", err)
+			_ = s.failoverStream.Encode()
+			return
+		}
+		if s.isDryRunFailover {
+			dryRunHistoryPath, err = createDryRunHistoryDestination(path)
+			if err != nil {
+				s.failoverStream.SetErrorMessagef("cannot prepare temporary dry-run vote history destination: %v", err)
 				_ = s.failoverStream.Encode()
 				return
 			}
@@ -559,22 +575,27 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 		return
 	}
 	if transferHistory {
-		s.logger.Infof("waiting for vote history from %s", activeNodeInfo.Hostname)
+		if s.isDryRunFailover {
+			s.logger.Infof("dry run: receiving current vote-history snapshot from %s into a temporary file", activeNodeInfo.Hostname)
+		} else {
+			s.logger.Infof("waiting for vote history from %s", activeNodeInfo.Hostname)
+		}
 		path := passiveInfo.VoteHistoryFile
 		if passiveInfo.IsNativeFiredancer {
 			path = passiveInfo.VoteHistoryImportFile
 		}
-		if !s.isDryRunFailover {
-			limit := int64(0)
-			if passiveInfo.IsNativeFiredancer {
-				limit = NativeHistoryMaxSize
-			}
-			if err := s.failoverStream.receiveStateFileLimited(path, limit); err != nil {
-				s.failoverStream.SetErrorMessagef("vote-history transfer failed before activation: %v", err)
-				s.failoverStream.SetRollbackRequired(true)
-				_ = s.failoverStream.Encode()
-				return
-			}
+		if s.isDryRunFailover {
+			path = dryRunHistoryPath
+		}
+		limit := int64(0)
+		if passiveInfo.IsNativeFiredancer {
+			limit = NativeHistoryMaxSize
+		}
+		if err := s.failoverStream.receiveStateFileLimited(path, limit); err != nil {
+			s.failoverStream.SetErrorMessagef("vote-history transfer failed before activation: %v", err)
+			s.failoverStream.SetRollbackRequired(true)
+			_ = s.failoverStream.Encode()
+			return
 		}
 		if err := s.failoverStream.Decode(); err != nil {
 			s.logger.Error("failed to receive transfer metadata", "err", err)
