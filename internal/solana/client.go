@@ -1,13 +1,10 @@
 package solana
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -67,30 +64,6 @@ type ClientInterface interface {
 	GetLocalNodeVersion() (string, error)
 	GetLocalIdentity(ctx context.Context) (string, error)
 	GetVoteAccountState(ctx context.Context, votePubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error)
-}
-
-// IdentityTransitionStatus describes the optional Agave/Jito RPC extension
-// used when handing an Agave-derived validator to native Firedancer.
-type IdentityTransitionStatus struct {
-	Version         uint64  `json:"version"`
-	Sequence        uint64  `json:"sequence"`
-	State           string  `json:"state"`
-	Consensus       string  `json:"consensus"`
-	CurrentIdentity string  `json:"currentIdentity"`
-	FromIdentity    string  `json:"fromIdentity"`
-	ToIdentity      string  `json:"toIdentity"`
-	VoteAccount     string  `json:"voteAccount"`
-	LastVoteSlot    uint64  `json:"lastVoteSlot"`
-	TowerRootSlot   uint64  `json:"towerRootSlot"`
-	Error           *string `json:"error"`
-}
-
-// IdentityTransitionClient is optional. Its absence means the peer is an
-// unpatched Agave/Jito validator and requires the explicitly confirmed slot
-// fallback for Agave-derived to native Firedancer handoffs.
-type IdentityTransitionClient interface {
-	GetIdentityTransitionStatus(context.Context) (*IdentityTransitionStatus, error)
-	ProbeIdentityTransitionStatus(context.Context) (bool, error)
 }
 
 // ContextSlotClient exposes a cancellable network slot request for long
@@ -282,58 +255,6 @@ func (c *Client) networkGetLeaderSchedule(ctx context.Context) (rpc.GetLeaderSch
 	return nil, networkExhaustedError("getLeaderSchedule", errs)
 }
 
-type identityTransitionRPCResponse struct {
-	JSONRPC string                    `json:"jsonrpc"`
-	Result  *IdentityTransitionStatus `json:"result"`
-	Error   *jsonrpc.RPCError         `json:"error"`
-}
-
-func (c *Client) GetIdentityTransitionStatus(ctx context.Context) (*IdentityTransitionStatus, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "identityTransitionStatus", "params": []any{}})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.localRPCURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("identityTransitionStatus RPC request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("identityTransitionStatus RPC returned HTTP %s", resp.Status)
-	}
-	var decoded identityTransitionRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("decode identityTransitionStatus response: %w", err)
-	}
-	if decoded.Error != nil {
-		return nil, decoded.Error
-	}
-	if decoded.Result == nil {
-		return nil, fmt.Errorf("identityTransitionStatus RPC returned no result")
-	}
-	return decoded.Result, nil
-}
-
-func (c *Client) ProbeIdentityTransitionStatus(ctx context.Context) (bool, error) {
-	status, err := c.GetIdentityTransitionStatus(ctx)
-	if err != nil {
-		var rpcErr *jsonrpc.RPCError
-		if errors.As(err, &rpcErr) && rpcErr.Code == jsonRPCMethodNotFound {
-			return false, nil
-		}
-		return false, err
-	}
-	return status != nil, nil
-}
-
 func (c *Client) GetCurrentSlotContext(ctx context.Context) (uint64, error) {
 	return c.GetCurrentSlotContextWithCommitment(ctx, rpc.CommitmentConfirmed)
 }
@@ -370,7 +291,9 @@ func (c *Client) IsLocalNodeHealthy() bool {
 
 // GetLocalNodeVersion returns the solana-core version string from the local validator's getVersion RPC call.
 func (c *Client) GetLocalNodeVersion() (string, error) {
-	result, err := c.localRPCClient.GetVersion(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := c.localRPCClient.GetVersion(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get local node version: %w", err)
 	}

@@ -2,7 +2,6 @@ package failover
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
@@ -34,11 +33,7 @@ func runRollback(dir hooks.RollbackDirectionConfig, envMap map[string]string, di
 		logger.Errorf("rollback %s: no command configured — cannot execute rollback set-identity", dirName)
 	} else {
 		logger.Warn(fmt.Sprintf("rollback %s: running set-identity command", dirName), "command", dir.ResolvedCmd)
-		cmdErr = utils.RunCommand(utils.RunCommandParams{
-			CommandSlice: strings.Split(dir.ResolvedCmd, " "),
-			DryRun:       isDryRun,
-			LogDebug:     logger.GetLevel() <= log.DebugLevel,
-		})
+		cmdErr = utils.RunIdentityCommand(dir.ResolvedCmd, isDryRun, logger.GetLevel() <= log.DebugLevel)
 		if cmdErr != nil {
 			logger.Error(fmt.Sprintf("rollback %s: set-identity command failed", dirName), "err", cmdErr)
 		} else {

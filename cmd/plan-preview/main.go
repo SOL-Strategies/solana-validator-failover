@@ -3,9 +3,9 @@
 //
 // Usage:
 //
-//	go run ./cmd/plan-preview              # dry run, no hooks, with tower sync
+//	go run ./cmd/plan-preview              # dry run, no hooks, with history transfer
 //	go run ./cmd/plan-preview --hooks      # include example pre/post hooks
-//	go run ./cmd/plan-preview --skip-tower # omit tower file sync step
+//	go run ./cmd/plan-preview --skip-history-transfer # omit vote-history transfer step
 //	go run ./cmd/plan-preview --real       # render as a real failover (not dry run)
 //	go run ./cmd/plan-preview --rollback   # include example rollback configuration
 //	go run ./cmd/plan-preview --jito       # simulate jito-solana where gossip and local RPC versions differ
@@ -24,15 +24,15 @@ import (
 
 func main() {
 	withHooks := flag.Bool("hooks", false, "include example pre/post hooks")
-	skipTower := flag.Bool("skip-tower", false, "skip tower file sync step")
+	skipHistory := flag.Bool("skip-history-transfer", false, "skip vote-history transfer step")
 	real := flag.Bool("real", false, "render as a real failover (not a dry run)")
 	withRollback := flag.Bool("rollback", false, "include example rollback configuration")
 	jito := flag.Bool("jito", false, "simulate jito-solana where gossip and local RPC versions differ")
 	flag.Parse()
 
-	activeClientVersion := "2.1.14"
+	activeClientVersion := "4.3.0"
 	activeClientVersionRPC := ""
-	passiveClientVersion := "2.1.14"
+	passiveClientVersion := "4.3.0"
 	passiveClientVersionRPC := ""
 	if *jito {
 		activeClientVersion = "4.32768.2"
@@ -42,13 +42,13 @@ func main() {
 	}
 
 	activeNode := failover.NodeInfo{
-		Hostname:           "sol-validator-1",
-		PublicIP:           "203.0.113.10",
-		ClientVersion:      activeClientVersion,
-		ClientVersionRPC:   activeClientVersionRPC,
-		SetIdentityCommand: "agave-validator --ledger /mnt/ledger set-identity /home/solana/passive-1-identity.json",
-		TowerFile:          "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
-		TowerFileSizeBytes: 121856,
+		Hostname:                 "sol-validator-1",
+		PublicIP:                 "203.0.113.10",
+		ClientVersion:            activeClientVersion,
+		ClientVersionRPC:         activeClientVersionRPC,
+		SetIdentityCommand:       "agave-validator --ledger /mnt/ledger set-identity /home/solana/passive-1-identity.json",
+		VoteHistoryFile:          "/mnt/ledger/vote_history-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
+		VoteHistoryFileSizeBytes: 121856,
 		Identities: &identities.Identities{
 			Active:  &identities.Identity{KeyFile: "/home/solana/active-identity.json", PubKeyStr: "456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM"},
 			Passive: &identities.Identity{KeyFile: "/home/solana/passive-1-identity.json", PubKeyStr: "PassV1Kq8YxZd3NvQ7eLmT4bF9wR2cUjHnXsAoPiGkEy"},
@@ -60,8 +60,8 @@ func main() {
 		PublicIP:           "203.0.113.20",
 		ClientVersion:      passiveClientVersion,
 		ClientVersionRPC:   passiveClientVersionRPC,
-		SetIdentityCommand: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json --require-tower",
-		TowerFile:          "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
+		SetIdentityCommand: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json",
+		VoteHistoryFile:    "/mnt/ledger/vote_history-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
 		Identities: &identities.Identities{
 			Active:  &identities.Identity{KeyFile: "/home/solana/active-identity.json", PubKeyStr: "456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM"},
 			Passive: &identities.Identity{KeyFile: "/home/solana/passive-2-identity.json", PubKeyStr: "PassV2Lp9ZyXe4OwR8fMuS5cG1vT3dVkInBqHjNrEaFb"},
@@ -95,7 +95,7 @@ func main() {
 		exampleRollback = hooks.RollbackConfig{
 			Enabled: true,
 			ToActive: hooks.RollbackDirectionConfig{
-				ResolvedCmd: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json --require-tower",
+				ResolvedCmd: "agave-validator --ledger /mnt/ledger set-identity /home/solana/active-identity.json",
 				Hooks: hooks.RollbackHooksConfig{
 					Post: hooks.Hooks{
 						{Name: "notify-rollback", Command: "curl", Args: []string{"-X", "POST", "https://hooks.slack.com/rollback"}},
@@ -109,14 +109,14 @@ func main() {
 	}
 
 	data := failover.PlanData{
-		IsDryRun:                   !*real,
-		SkipTowerSync:              *skipTower,
-		TowerFileWillBeTransferred: !*skipTower,
-		ActiveNodeInfo:             activeNode,
-		PassiveNodeInfo:            passiveNode,
-		AppVersion:                 "dev",
-		Hooks:                      exampleHooks,
-		Rollback:                   exampleRollback,
+		IsDryRun:                     !*real,
+		SkipHistoryTransfer:          *skipHistory,
+		VoteHistoryWillBeTransferred: !*skipHistory,
+		ActiveNodeInfo:               activeNode,
+		PassiveNodeInfo:              passiveNode,
+		AppVersion:                   "dev",
+		Hooks:                        exampleHooks,
+		Rollback:                     exampleRollback,
 	}
 
 	rendered, err := failover.RenderFailoverPlan(data)

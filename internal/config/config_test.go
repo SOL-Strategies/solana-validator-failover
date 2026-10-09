@@ -54,7 +54,7 @@ validator:
 	assert.Equal(t, DefaultLogLevel, cfg.Log.Level)
 	assert.Equal(t, DefaultLogFormat, cfg.Log.Format)
 	assert.Equal(t, "testnet", cfg.Validator.Cluster)
-	assert.Equal(t, "tower", cfg.Validator.Failover.Consensus.Mode)
+	assert.Equal(t, "alpenglow", cfg.Validator.Failover.Consensus.Mode)
 	assert.Equal(t, DefaultSetIdentityActiveCmdTemplate, cfg.Validator.Failover.SetIdentityActiveCmdTemplate)
 	assert.Equal(t, "http://localhost:8899", cfg.Validator.RPCAddress)
 	assert.Equal(t, "/tmp/ledger", cfg.Validator.LedgerDir)
@@ -155,7 +155,7 @@ validator:
 	assert.Equal(t, DefaultFailoverMinimumTimeToLeaderSlot, cfg.Validator.Failover.MinimumTimeToLeaderSlot)             // default
 	assert.Equal(t, DefaultFailoverMonitorCreditSamplesCount, cfg.Validator.Failover.Monitor.CreditSamples.Count)       // default
 	assert.Equal(t, DefaultFailoverMonitorCreditSamplesInterval, cfg.Validator.Failover.Monitor.CreditSamples.Interval) // default
-	assert.Equal(t, DefaultTowerFileNameTemplate, cfg.Validator.Tower.FileNameTemplate)                                 // default
+	assert.Empty(t, cfg.Validator.Tower.FileNameTemplate)                                                               // default
 }
 
 func TestLoadFromConfigFile_WithLogConfig(t *testing.T) {

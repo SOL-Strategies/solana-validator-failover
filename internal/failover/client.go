@@ -3,13 +3,11 @@ package failover
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
-	"strings"
+	"os"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
 	"github.com/quic-go/quic-go"
@@ -34,24 +32,15 @@ type ClientConfig struct {
 	LocalRPCClient                 *rpc.Client
 	SolanaRPCClient                solana.ClientInterface
 	RPCURL                         string
-	SkipTowerSync                  bool
+	SkipHistoryTransfer            bool
 	Rollback                       hooks.RollbackConfig
 	AutoConfirm                    bool
-	FallbackWaitSlots              uint64
 	// TLSConfig is an optional mTLS config. When non-nil, the client presents its
 	// certificate to the server and verifies the server's certificate against the CA.
 	// When nil, server certificate verification is skipped (InsecureSkipVerify).
 	TLSConfig           *tls.Config
 	HandoffTimeout      time.Duration
 	HandoffPollInterval time.Duration
-}
-
-type identityTransitionFailedError struct {
-	message string
-}
-
-func (e *identityTransitionFailedError) Error() string {
-	return e.message
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
@@ -70,13 +59,12 @@ type Client struct {
 	rpcURL                         string
 	serverName                     string
 	serverAddress                  string
-	skipTowerSync                  bool
+	skipHistoryTransfer            bool
 	rollback                       hooks.RollbackConfig
 	tlsConfig                      *tls.Config // non-nil when mTLS is enabled
 	handoffTimeout                 time.Duration
 	handoffPollInterval            time.Duration
 	autoConfirm                    bool
-	fallbackWaitSlots              uint64
 	failure                        error
 }
 
@@ -111,13 +99,12 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		rpcURL:                         config.RPCURL,
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
-		skipTowerSync:                  config.SkipTowerSync,
+		skipHistoryTransfer:            config.SkipHistoryTransfer,
 		rollback:                       config.Rollback,
 		tlsConfig:                      clientTLSConfig,
 		handoffTimeout:                 config.HandoffTimeout,
 		handoffPollInterval:            config.HandoffPollInterval,
 		autoConfirm:                    config.AutoConfirm,
-		fallbackWaitSlots:              config.FallbackWaitSlots,
 	}
 
 	err = client.connectToServer()
@@ -176,113 +163,6 @@ func waitForLocalIdentity(ctx context.Context, rpcClient solana.ClientInterface,
 	}
 }
 
-func confirmSlotFallback(autoConfirm bool, waitSlots uint64) error {
-	if waitSlots == 0 {
-		waitSlots = nativeFallbackWaitSlots
-	}
-	if autoConfirm {
-		return nil
-	}
-	confirmed := false
-	err := huh.NewForm(huh.NewGroup(huh.NewConfirm().
-		Title(fmt.Sprintf("identityTransitionStatus failed; wait %d finalized slots before activating native Firedancer?", waitSlots)).
-		Value(&confirmed))).Run()
-	if err != nil {
-		return err
-	}
-	if !confirmed {
-		return fmt.Errorf("%d-slot fallback declined", waitSlots)
-	}
-	return nil
-}
-
-func negotiatedFallbackWaitSlots(stream *Stream, configured uint64) uint64 {
-	if waitSlots := stream.GetFallbackWaitSlots(); waitSlots > 0 {
-		return waitSlots
-	}
-	if configured > 0 {
-		return configured
-	}
-	return nativeFallbackWaitSlots
-}
-
-func waitForIdentityTransition(ctx context.Context, client solana.IdentityTransitionClient, sequence uint64, expectedIdentity, expectedVoteAccount string, poll time.Duration) (uint64, error) {
-	if poll <= 0 {
-		poll = 500 * time.Millisecond
-	}
-	var lastErr error
-	for {
-		status, err := client.GetIdentityTransitionStatus(ctx)
-		if err == nil {
-			if status.Sequence >= sequence && status.State == "failed" {
-				message := "identity transition failed"
-				if status.Error != nil && *status.Error != "" {
-					message += ": " + *status.Error
-				}
-				return 0, &identityTransitionFailedError{message: message}
-			}
-			if status.Sequence >= sequence && status.State == "complete" && status.CurrentIdentity == expectedIdentity &&
-				(status.ToIdentity == "" || status.ToIdentity == expectedIdentity) &&
-				(expectedVoteAccount == "" || status.VoteAccount == "" || status.VoteAccount == expectedVoteAccount) {
-				return status.LastVoteSlot, nil
-			}
-			lastErr = fmt.Errorf("identity transition status is not complete for %s (sequence=%d state=%s)", expectedIdentity, status.Sequence, status.State)
-		} else {
-			lastErr = err
-		}
-		timer := time.NewTimer(poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return 0, lastErr
-		case <-timer.C:
-		}
-	}
-}
-
-func waitForFinalizedVoteAccount(ctx context.Context, client solana.ClientInterface, voteAccount, expectedNode string, targetSlot uint64, poll time.Duration, progress func(lastVote uint64, err error)) error {
-	if poll <= 0 {
-		poll = 500 * time.Millisecond
-	}
-	var lastVote uint64
-	var lastErr error
-	for {
-		account, err := client.GetVoteAccountState(ctx, voteAccount, false, rpc.CommitmentFinalized)
-		if err == nil && account != nil {
-			lastErr = nil
-			lastVote = account.LastVote
-			if expectedNode != "" && account.NodePubkey.String() != expectedNode {
-				err = fmt.Errorf("vote account %s belongs to node %s, expected source node %s", voteAccount, account.NodePubkey, expectedNode)
-			} else if lastVote >= targetSlot {
-				return nil
-			}
-		}
-		if err != nil {
-			lastErr = err
-		}
-		if progress != nil {
-			progress(lastVote, lastErr)
-		}
-		timer := time.NewTimer(poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			if lastErr != nil {
-				return fmt.Errorf("vote account %s did not reach finalized slot %d (last_vote=%d): %w", voteAccount, targetSlot, lastVote, lastErr)
-			}
-			return fmt.Errorf("vote account %s did not reach finalized slot %d (last_vote=%d): %w", voteAccount, targetSlot, lastVote, ctx.Err())
-		case <-timer.C:
-		}
-	}
-}
-
-func maxSlotGap(target, observed uint64) uint64 {
-	if target > observed {
-		return target - observed
-	}
-	return 0
-}
-
 func (c *Client) setFailure(message string, failure error) {
 	if failure == nil {
 		c.failure = fmt.Errorf("%s", message)
@@ -328,22 +208,27 @@ func (c *Client) Start() (startErr error) {
 		}
 		startErr = c.failure
 	}()
-	recoverBeforeDestinationActivation := func(message string, failure error) {
-		c.logger.Error(message, "err", failure)
-		c.setFailure(message, failure)
-		if c.rollback.Enabled {
-			c.logger.Warn("handoff failed before destination activation; reverting this node to active")
-			if rollbackErr := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{
-				isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
-				isPostFailover:   true,
-			}), c.failoverStream.GetIsDryRunFailover(), c.logger); rollbackErr != nil {
-				c.logger.Error("rollback to active failed — manual intervention required", "err", rollbackErr)
-			}
+	state, err := DetectConsensus(c.rpcURL)
+	if err != nil {
+		c.setFailure("cannot verify source consensus", err)
+		return
+	}
+	if state.Mode != ConsensusAlpenglow {
+		c.setFailure("source local RPC does not report Alpenglow", nil)
+		return
+	}
+	c.activeNodeInfo.Consensus = state.Mode
+	c.activeNodeInfo.ConsensusGenesisSlot = state.GenesisSlot
+	if c.activeNodeInfo.IsNativeFiredancer {
+		version, err := c.solanaRPCClient.GetLocalNodeVersion()
+		if err != nil {
+			c.setFailure("cannot verify source Firedancer version", err)
 			return
 		}
-		c.logger.Error("rollback disabled — this node is passive and destination activation has not begun; manual intervention required")
-		if c.rollback.ToActive.ResolvedCmd != "" {
-			c.logger.Errorf("to recover this node to active: %s", c.rollback.ToActive.ResolvedCmd)
+		c.activeNodeInfo.ClientVersionRPC = version
+		if err := ValidateNativeVersion(c.activeNodeInfo); err != nil {
+			c.setFailure("unsupported native Firedancer version", err)
+			return
 		}
 	}
 	abortDestinationHandoff := func(message string, failure error) {
@@ -354,7 +239,18 @@ func (c *Client) Start() (startErr error) {
 		c.failoverStream.SetHandoffAborted(true)
 		c.failoverStream.SetErrorMessage(reason)
 		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error("failed to send handoff abort to destination", "err", err)
+			c.setFailure("failed to acknowledge handoff abort", err)
+			return
+		}
+		if err := c.failoverStream.Decode(); err != nil {
+			c.setFailure("failed to receive abort acknowledgement", err)
+			return
+		}
+		c.setFailure(message, failure)
+		if c.failoverStream.GetRollbackRequired() && c.rollback.Enabled {
+			if err := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{isPostFailover: true}), c.failoverStream.GetIsDryRunFailover(), c.logger); err != nil {
+				c.logger.Error("source rollback failed", "err", err)
+			}
 		}
 	}
 
@@ -386,30 +282,6 @@ func (c *Client) Start() (startErr error) {
 		return
 	}
 
-	// Native Firedancer handoffs reconcile on-chain vote state, so resolve an
-	// omitted vote account before sending initial node information. Legacy
-	// tower-file handoffs do not use VoteAccount and must not acquire a new
-	// cluster-RPC prerequisite.
-	if c.activeNodeInfo.IsNativeFiredancer && c.activeNodeInfo.VoteAccount == "" {
-		lookupCtx, lookupCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-		resolver, supportsContext := c.solanaRPCClient.(solana.ContextVoteAccountClient)
-		if !supportsContext {
-			lookupCancel()
-			err := fmt.Errorf("RPC client does not support context-aware vote-account lookup")
-			c.logger.Error("failed to resolve source vote account before sending failover information", "err", err)
-			c.setFailure("failed to resolve source vote account", err)
-			return
-		}
-		account, _, lookupErr := resolver.GetCreditRankedVoteAccountFromPubkeyContext(lookupCtx, c.activeNodeInfo.Identities.Active.PubKey())
-		lookupCancel()
-		if lookupErr != nil {
-			c.logger.Error("failed to resolve source vote account before sending failover information", "err", lookupErr)
-			c.setFailure("failed to resolve source vote account", lookupErr)
-			return
-		}
-		c.activeNodeInfo.VoteAccount = account.VotePubkey.String()
-	}
-
 	// send message with your own info
 	c.failoverStream.SetActiveNodeInfo(c.activeNodeInfo)
 	c.failoverStream.SetActiveRollbackEnabled(c.rollback.Enabled)
@@ -438,33 +310,6 @@ func (c *Client) Start() (startErr error) {
 		return
 	}
 
-	// Probe only when the negotiated direction can require the Agave/Jito
-	// transition RPC. Legacy tower-file handoffs never acquire this dependency.
-	if c.failoverStream.GetProbeIdentityTransitionRPC() {
-		info := c.failoverStream.GetActiveNodeInfo()
-		available := false
-		if probeClient, ok := c.solanaRPCClient.(solana.IdentityTransitionClient); ok {
-			probeCtx, probeCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			var probeErr error
-			available, probeErr = probeClient.ProbeIdentityTransitionStatus(probeCtx)
-			probeCancel()
-			if probeErr != nil {
-				c.logger.Warn("identity transition RPC probe failed; configured slot fallback may be required", "err", probeErr)
-			}
-		}
-		info.IdentityTransitionRPCAvailable = available
-		c.failoverStream.SetActiveNodeInfo(info)
-		c.failoverStream.SetIdentityTransitionRPCAvailable(available)
-		if err := c.failoverStream.Encode(); err != nil {
-			c.setFailure("failed to send identity transition RPC capability", err)
-			return
-		}
-		if err := c.failoverStream.Decode(); err != nil {
-			c.setFailure("failed to receive negotiated handoff strategy", err)
-			return
-		}
-	}
-
 	// ensure server is running the same version of this program
 	serverVersion := c.failoverStream.GetPassiveNodeInfo().SolanaValidatorFailoverVersion
 	clientVersion := pkgconstants.AppVersion
@@ -486,71 +331,38 @@ func (c *Client) Start() (startErr error) {
 		return
 	}
 	if c.failoverStream.GetPassiveNodeInfo().Consensus != c.activeNodeInfo.Consensus {
-		c.logger.Fatal("passive node consensus mode does not match active node")
+		c.setFailure("passive node consensus mode does not match active node", nil)
 		return
 	}
 	if c.activeNodeInfo.Consensus == ConsensusAlpenglow && c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot != c.activeNodeInfo.ConsensusGenesisSlot {
-		c.logger.Fatalf("Alpenglow genesis mismatch: active slot %d, passive slot %d", c.activeNodeInfo.ConsensusGenesisSlot, c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot)
+		c.setFailure("Alpenglow genesis mismatch", nil)
 		return
 	}
 	if command := c.failoverStream.GetActiveRollbackCommand(); command != "" {
 		c.rollback.ToActive.ResolvedCmd = command
 	}
 
-	// Get skipTowerSync from the server's message (server is the authority on this)
-	skipTowerSync := c.failoverStream.GetSkipTowerSync()
-
-	// Probe native Firedancer metrics before demoting the source. The actual
-	// watermark is captured again immediately before the identity change, but
-	// an unavailable endpoint must not strand this validator in passive state
-	// first.
-	var preDemotionNativeVoteSlot uint64
-	var nativeWatermarkCapturedAt time.Time
-	var preDemotionTransitionSequence uint64
-	var preDemotionTransitionVoteSlot uint64
-	var transitionClient solana.IdentityTransitionClient
-	if !skipTowerSync && c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain {
-		sourceInfo := c.failoverStream.GetActiveNodeInfo()
-		if sourceInfo.IsNativeFiredancer {
-			metricsCtx, metricsCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			var metricsErr error
-			_, metricsErr = ReadNativeTowerVoteSlot(metricsCtx, sourceInfo.MetricsAddress)
-			metricsCancel()
-			if metricsErr != nil {
-				c.setFailure("failed to validate native Firedancer metrics before switching to passive", metricsErr)
-				c.logger.Error("failed to validate native Firedancer metrics before switching to passive", "err", metricsErr)
-				return
-			}
+	// Get skipHistoryTransfer from the server's message (server is the authority on this)
+	skipHistoryTransfer := c.failoverStream.GetSkipHistoryTransfer()
+	if !skipHistoryTransfer {
+		file, err := os.Open(c.activeNodeInfo.VoteHistoryFile)
+		if err != nil {
+			c.setFailure("cannot read outgoing vote history before demotion", err)
+			return
 		}
-		if sourceInfo := c.failoverStream.GetActiveNodeInfo(); !sourceInfo.IsNativeFiredancer &&
-			c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && c.failoverStream.GetIdentityTransitionRPCAvailable() {
-			var ok bool
-			transitionClient, ok = c.solanaRPCClient.(solana.IdentityTransitionClient)
-			if !ok {
-				c.setFailure("identity transition RPC was negotiated but is unavailable locally", nil)
-				return
-			}
-			statusCtx, statusCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			status, statusErr := transitionClient.GetIdentityTransitionStatus(statusCtx)
-			statusCancel()
-			if statusErr != nil {
-				patchURL := sourceInfo.IdentityTransitionRPCPatchURL
-				if patchURL == "" {
-					patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
-				}
-				c.logger.Warn("identityTransitionStatus is unavailable; the hosted validator patch is available at", "url", patchURL)
-				waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
-				if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr != nil {
-					c.setFailure("failed to read identity transition status before demotion", statusErr)
-					return
-				}
-				c.failoverStream.SetSlotFallbackRequired(true)
-				c.failoverStream.SetFallbackWaitSlots(waitSlots)
-				transitionClient = nil
-			} else {
-				preDemotionTransitionSequence = status.Sequence
-				preDemotionTransitionVoteSlot = status.LastVoteSlot
-			}
+		info, err := file.Stat()
+		_ = file.Close()
+		if err != nil {
+			c.setFailure("cannot stat outgoing vote history", err)
+			return
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			c.setFailure("outgoing vote history must be a nonempty regular file", nil)
+			return
+		}
+		if c.failoverStream.GetPassiveNodeInfo().IsNativeFiredancer && info.Size() > NativeHistoryMaxSize {
+			c.setFailure("outgoing vote history exceeds Firedancer's 32688-byte limit", nil)
+			return
 		}
 	}
 
@@ -587,29 +399,6 @@ func (c *Client) Start() (startErr error) {
 	// set the failover start slot to the current slot (we're now early in this slot)
 	c.failoverStream.SetFailoverStartSlot(slot)
 
-	// The local and peer consensus states were verified during the handshake.
-	// Do not add another RPC check here; use that accepted handshake state.
-	// The preflight metrics request only proves that the endpoint is usable.
-	// Capture the handoff watermark as late as possible, immediately before the
-	// identity switch, so the interval in which the old identity could submit a
-	// later vote is minimized.
-	if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && !skipTowerSync {
-		sourceInfo := c.failoverStream.GetActiveNodeInfo()
-		if sourceInfo.IsNativeFiredancer {
-			metricsCtx, metricsCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			var metricsErr error
-			preDemotionNativeVoteSlot, metricsErr = ReadNativeTowerVoteSlot(metricsCtx, sourceInfo.MetricsAddress)
-			metricsCancel()
-			if metricsErr != nil {
-				c.setFailure("failed to capture native Firedancer vote watermark before switching to passive", metricsErr)
-				c.logger.Error("failed to capture native Firedancer vote watermark before switching to passive", "err", metricsErr)
-				return
-			}
-			nativeWatermarkCapturedAt = time.Now()
-			c.logger.Info("captured native Firedancer vote watermark before demotion", "captured_slot", preDemotionNativeVoteSlot)
-		}
-	}
-
 	// set identity to passive
 	dryRunPrefix := ""
 	if c.failoverStream.GetIsDryRunFailover() {
@@ -622,11 +411,7 @@ func (c *Client) Start() (startErr error) {
 
 	c.failoverStream.SetActiveNodeSetIdentityStartTime()
 
-	err = utils.RunCommand(utils.RunCommandParams{
-		CommandSlice: strings.Split(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, " "),
-		DryRun:       c.failoverStream.GetIsDryRunFailover(),
-		LogDebug:     c.logger.GetLevel() <= log.DebugLevel,
-	})
+	err = utils.RunIdentityCommand(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, c.failoverStream.GetIsDryRunFailover(), c.logger.GetLevel() <= log.DebugLevel)
 	if err != nil {
 		c.logger.Error("failed to set identity to passive", "err", err)
 		c.setFailure("failed to set identity to passive", err)
@@ -634,194 +419,55 @@ func (c *Client) Start() (startErr error) {
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
-	if !nativeWatermarkCapturedAt.IsZero() {
-		c.logger.Info("native Firedancer identity switch completed after watermark capture", "captured_slot", preDemotionNativeVoteSlot, "capture_to_identity_switch", time.Since(nativeWatermarkCapturedAt).Round(time.Millisecond))
-	}
-	if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain && !skipTowerSync {
-		c.failoverStream.SetHandoffEvidenceStartTime()
-	}
-
-	if c.activeNodeInfo.Consensus == "alpenglow" {
-		c.logger.Infof("sending vote history to %s", c.failoverStream.GetPassiveNodeInfo().Hostname)
-		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-		if err := c.failoverStream.sendStateFile(c.activeNodeInfo.TowerFile); err != nil {
-			c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
+	if !c.failoverStream.GetIsDryRunFailover() {
+		ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+		identityErr := waitForLocalIdentity(ctx, c.solanaRPCClient, c.activeNodeInfo.Identities.Passive.PubKey(), c.handoffPollInterval)
+		cancel()
+		if identityErr != nil {
+			abortDestinationHandoff("source passive identity could not be verified", identityErr)
 			return
 		}
-		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
-		// Streamed state transfer uses separate gob frames. Send the updated
-		// message so the passive node receives the start time and start slot
-		// used to calculate the final summary.
-		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error("failed to send Alpenglow failover timing metadata", "err", err)
+	}
+	var snapshot *os.File
+	if !skipHistoryTransfer && !c.failoverStream.GetIsDryRunFailover() {
+		c.failoverStream.SetActiveNodeSyncVoteHistoryStartTime()
+		var err error
+		snapshot, err = captureStateFile(c.activeNodeInfo.VoteHistoryFile)
+		if err != nil {
+			abortDestinationHandoff("failed to capture outgoing vote history", err)
 			return
 		}
-	} else if skipTowerSync {
-		c.logger.Info("skipping tower file sync")
-		// Don't send anything - server won't wait for tower file when skipTowerSync is true
-	} else if c.failoverStream.GetHandoffStrategy() == HandoffStrategyOnchain {
-		if !c.failoverStream.GetIsDryRunFailover() {
-			identityCtx, identityCancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			identityErr := waitForLocalIdentity(identityCtx, c.solanaRPCClient, c.activeNodeInfo.Identities.Passive.PubKey(), c.handoffPollInterval)
-			identityCancel()
-			if identityErr != nil {
-				recoverBeforeDestinationActivation("failed to verify passive identity after set-identity", identityErr)
+		defer snapshot.Close()
+		defer os.Remove(snapshot.Name())
+		info, err := snapshot.Stat()
+		if err != nil {
+			abortDestinationHandoff("failed to stat outgoing history snapshot", err)
+			return
+		}
+		c.failoverStream.GetActiveNodeInfo().VoteHistoryFileSizeBytes = info.Size()
+		if c.failoverStream.GetPassiveNodeInfo().IsNativeFiredancer && info.Size() > NativeHistoryMaxSize {
+			abortDestinationHandoff("outgoing history exceeds Firedancer's 32688-byte limit", nil)
+			return
+		}
+	}
+	if err := c.failoverStream.Encode(); err != nil {
+		c.setFailure("failed to acknowledge source demotion", err)
+		return
+	}
+	if !skipHistoryTransfer {
+		if snapshot != nil {
+			if err := c.failoverStream.sendOpenStateFile(snapshot); err != nil {
+				c.setFailure("vote history transfer failed after demotion", err)
 				return
 			}
 		}
-		sourceInfo := c.failoverStream.GetActiveNodeInfo()
-		var tip uint64
-		var tipErr error
-		if sourceInfo.IsNativeFiredancer {
-			// Unpatched Firedancer exposes an unlabelled metric. After an identity
-			// switch it may reflect replay or the newly loaded passive identity, so
-			// the post-switch value cannot prove anything about the old identity.
-			// Use the sample captured immediately before demotion and establish the
-			// authoritative barrier from finalized on-chain vote state below.
-			tip = preDemotionNativeVoteSlot
-			c.logger.Info("using pre-demotion native Firedancer vote watermark", "frozen_slot", tip, "capture_to_identity_switch", time.Since(nativeWatermarkCapturedAt).Round(time.Millisecond))
-		} else if c.failoverStream.GetSlotFallbackRequired() {
-			// The server will enforce the conservative post-demotion slot barrier.
-			tip = 0
-		} else {
-			if tipErr == nil {
-				if transitionClient != nil && c.failoverStream.GetIsDryRunFailover() {
-					// The identity command is intentionally not executed in a dry run,
-					// so no new transition sequence can appear. Use the sampled value
-					// for the plan without waiting for an impossible state change.
-					tip = preDemotionTransitionVoteSlot
-				} else if transitionClient != nil {
-					ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-					tip, tipErr = waitForIdentityTransition(ctx, transitionClient, preDemotionTransitionSequence, sourceInfo.Identities.Passive.PubKey(), sourceInfo.VoteAccount, c.handoffPollInterval)
-					cancel()
-					if tipErr != nil {
-						var transitionFailedErr *identityTransitionFailedError
-						if errors.As(tipErr, &transitionFailedErr) {
-							c.logger.Error("identity transition failed; refusing slot fallback", "err", tipErr)
-						} else {
-							patchURL := sourceInfo.IdentityTransitionRPCPatchURL
-							if patchURL == "" {
-								patchURL = IdentityTransitionPatchURL(sourceInfo.ClientVersionRPC, pkgconstants.AppVersion)
-							}
-							c.logger.Warn("identityTransitionStatus did not complete; install the hosted validator patch for future fast handoffs", "url", patchURL)
-							waitSlots := negotiatedFallbackWaitSlots(c.failoverStream, c.fallbackWaitSlots)
-							if fallbackErr := confirmSlotFallback(c.autoConfirm, waitSlots); fallbackErr == nil {
-								c.failoverStream.SetSlotFallbackRequired(true)
-								c.failoverStream.SetFallbackWaitSlots(waitSlots)
-								tipErr = nil
-								tip = 0
-							}
-						}
-					}
-				} else {
-					tip = 0
-				}
-			}
-		}
-		if tipErr != nil {
-			if sourceInfo.IsNativeFiredancer && !c.failoverStream.GetIsDryRunFailover() {
-				// The source must establish the finalized on-chain barrier before
-				// the destination receives evidence and begins reconciliation.
-				abortDestinationHandoff("native Firedancer watermark was not observed at finalized commitment", tipErr)
-			}
-			recoverBeforeDestinationActivation("failed to determine frozen tower vote", tipErr)
-			return
-		}
-		if sourceInfo.IsNativeFiredancer && !c.failoverStream.GetIsDryRunFailover() && tip > 0 {
-			reconciliationStarted := time.Now()
-			c.logger.Info("waiting for native Firedancer tower watermark to reach finalized on-chain vote", "vote_account", sourceInfo.VoteAccount, "frozen_slot", tip, "commitment", rpc.CommitmentFinalized, "timeout", handoffTimeout(c.handoffTimeout), "poll_interval", c.handoffPollInterval)
-			ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
-			lastProgress := time.Now()
-			finalizedErr := waitForFinalizedVoteAccount(ctx, c.solanaRPCClient, sourceInfo.VoteAccount, sourceInfo.Identities.Active.PubKey(), tip, c.handoffPollInterval, func(lastVote uint64, err error) {
-				if time.Since(lastProgress) < 5*time.Second {
-					return
-				}
-				c.logger.Info("still waiting for native Firedancer tower watermark to finalize on-chain", "frozen_slot", tip, "network_last_vote", lastVote, "slot_gap", maxSlotGap(tip, lastVote), "elapsed", time.Since(reconciliationStarted).Round(time.Second), "err", err)
-				lastProgress = time.Now()
-			})
-			cancel()
-			if finalizedErr != nil {
-				abortDestinationHandoff("native Firedancer tower watermark did not reach finalized commitment", finalizedErr)
-				recoverBeforeDestinationActivation("failed to confirm native Firedancer tower watermark on-chain", finalizedErr)
-				return
-			}
-			c.logger.Info("native Firedancer tower watermark reached finalized on-chain vote", "frozen_slot", tip, "elapsed", time.Since(reconciliationStarted).Round(time.Millisecond))
-		}
-		c.failoverStream.SetFrozenTowerSlot(tip)
-		c.failoverStream.SetHandoffEvidenceEndTime()
+		c.failoverStream.SetActiveNodeSyncVoteHistoryEndTime()
 		if err := c.failoverStream.Encode(); err != nil {
-			// A write error is ambiguous: the peer may have received and acted on
-			// the complete frame even though this side observed a transport error.
-			// Never reactivate the source automatically in this state.
-			c.logger.Error("failed to send on-chain handoff evidence", "err", err)
-			c.setFailure("failed to send on-chain handoff evidence", err)
-			c.logger.Error("CRITICAL: evidence delivery status is unknown after this node switched to passive; destination may be reconciling or active — check gossip and intervene manually")
-			if c.rollback.ToActive.ResolvedCmd != "" {
-				c.logger.Errorf("if this node needs to revert to active after confirming the destination is passive: %s", c.rollback.ToActive.ResolvedCmd)
-			}
-			return
-		}
-		if err := c.failoverStream.Decode(); err != nil {
-			c.logger.Error("failed waiting for on-chain reconciliation", "err", err)
-			c.setFailure("failed waiting for on-chain reconciliation", err)
-			if wentPassive {
-				c.logger.Error("CRITICAL: connection lost or protocol failed after this node switched to passive; destination state is unknown — check gossip and intervene manually")
-			}
-			return
-		}
-		if !c.failoverStream.GetReconciliationComplete() {
-			reason := c.failoverStream.GetErrorMessage()
-			if reason == "" {
-				reason = "peer rejected on-chain reconciliation without a reason"
-			}
-			c.logger.Error("on-chain reconciliation rejected", "err", reason)
-			c.setFailure("on-chain reconciliation rejected", fmt.Errorf("%s", reason))
-			if wentPassive {
-				if c.rollback.Enabled {
-					c.logger.Warn("reconciliation was rejected before destination activation; reverting this node to active")
-					if rbErr := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{
-						isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
-						isPostFailover:   true,
-					}), c.failoverStream.GetIsDryRunFailover(), c.logger); rbErr != nil {
-						c.logger.Error("rollback to active failed — manual intervention required", "err", rbErr)
-					}
-				} else {
-					c.logger.Error("CRITICAL: this node remains passive and destination activation did not begin — manual intervention required")
-					if c.rollback.ToActive.ResolvedCmd != "" {
-						c.logger.Errorf("to recover this node: %s", c.rollback.ToActive.ResolvedCmd)
-					}
-				}
-			}
+			c.setFailure("failed to send transfer metadata", err)
 			return
 		}
 	} else {
-		c.logger.Infof("sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
-
-		// Read the tower file into TowerFileBytes
-		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-		err = c.failoverStream.GetActiveNodeInfo().SetTowerFileBytes()
-		if err != nil {
-			c.logger.Error(fmt.Sprintf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
-			c.setFailure("failed to read tower file", err)
-			return
-		}
-		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
-
-		// Send the updated node info with tower file bytes
-		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error(fmt.Sprintf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
-			c.setFailure("failed to send tower file bytes", err)
-			if wentPassive {
-				c.logger.Error(
-					"CRITICAL: tower sync failed after this node switched to passive — " +
-						"the passive node has not changed identity; check gossip and intervene manually if needed",
-				)
-				if c.rollback.ToActive.ResolvedCmd != "" {
-					c.logger.Errorf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
-				}
-			}
-			return
-		}
+		c.logger.Info("history transfer skipped")
 	}
 
 	// wait for confirmation from server that failover is complete
@@ -1045,7 +691,7 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_PASSIVE_IDENTITY_PUBKEY"] = c.failoverStream.GetPassiveNodeInfo().Identities.Passive.PubKey()
 	envMap["PEER_NODE_CLIENT_VERSION"] = c.failoverStream.GetPassiveNodeInfo().ClientVersion
 	envMap["PEER_NODE_CLIENT_VERSION_LOCAL_RPC"] = c.failoverStream.GetPassiveNodeInfo().ClientVersionRPC
-	AddHandoffTemplateEnv(envMap, *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), c.failoverStream.GetHandoffStrategy(), c.failoverStream.GetTowerFileWillBeTransferred())
+	AddHandoffTemplateEnv(envMap, *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), c.failoverStream.GetHandoffStrategy(), c.failoverStream.GetVoteHistoryWillBeTransferred())
 
 	return envMap
 }

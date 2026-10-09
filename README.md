@@ -9,7 +9,7 @@ Simple p2p Solana validator failovers. This tool helps automate **planned** fail
 A QUIC-based program that orchestrates safe, fast failovers between Solana validators. [This post](https://solstrategies.io/blog/quic-solana-validator-failovers) covers the background in more detail. In summary, it coordinates three steps across both nodes:
 
 1. Active validator sets identity to passive
-2. Tower file synced from active to passive validator
+2. Alpenglow vote history transferred from active to passive validator
 3. Passive validator sets identity to active
 
 Convenience safety checks, bells, and whistles:
@@ -44,15 +44,17 @@ solana-validator-failover run --not-a-drill
 solana-validator-failover run
 ```
 
-By default, `run` executes in **dry-run mode**: the consensus state file is synced and all timings are recorded, but set-identity commands are not executed. This is useful for gauging failover speed under real network conditions without committing. Pass `--not-a-drill` on the **passive** node to execute for real.
+By default, `run` executes in **dry-run mode**: it displays and simulates the handoff without executing identity commands or writing history files or directories. Pass `--not-a-drill` on the **passive** node to execute for real.
 
-Set `validator.failover.consensus.mode` on both nodes to `tower` or `alpenglow`. The default is `tower`. At startup, the configured mode is checked against the validator's local RPC; a mismatch, migration, or unknown state prevents startup. The handshake checks both nodes again and requires the same Alpenglow genesis slot. For Alpenglow, remove `--require-tower` from any explicitly configured identity command. Vote history is read from each node's `validator.ledger_dir`; no separate directory setting is needed. Upgrade both failover binaries together before running failover.
+Release 0.2.0 supports **Alpenglow only**, with Agave/Jito-Solana ↔ Agave/Jito-Solana, Agave/Jito-Solana ↔ native Firedancer, and native Firedancer ↔ native Firedancer failovers. Both nodes verify consensus through their own local RPC at startup and handshake, including matching Alpenglow genesis slots. Unavailable RPC, migration, or disagreement prevents failover.
 
-Native Firedancer handoffs currently support Tower consensus only. Leave `validator.client.consensus` as `auto` to follow `validator.failover.consensus.mode`; an explicit client consensus must match that mode. The combined Alpenglow and native handoff protocol uses wire version 5, so both peers must run the updated binary.
+Native Firedancer requires **v26.10.0 or newer**, checked against the configured binary and running validator. This floor is based on native history import/export and standard identity-switch semantics; v26.10.0 is a [testnet release](https://github.com/firedancer-io/firedancer/releases/tag/v26.10.0), not a mainnet deployment recommendation. Tower and Frankendancer configurations are unsupported. Both failover binaries must be upgraded together: this release uses **wire version 6**.
+
+Validator patches and custom identity-transition RPC are no longer required. `firedancer wait` is optional and can be configured as a normal pre-hook; the failover tool does not invoke or rely on it.
 
 > ⚠️ **Who you run this as matters.** The user must have:
 > - Permission to run set-identity commands for the validator
-> - Read/write permission on the tower or vote-history file — verify inherited permissions after a dry-run
+> - Read/write permission on the vote-history files and destination directory — verify inherited permissions after a dry-run
 
 ### Flags
 
@@ -63,7 +65,7 @@ Native Firedancer handoffs currently support Tower consensus only. Leave `valida
 | `--not-a-drill`                | `false` | Execute failover for real. Effective on the passive node; ignored on the active node.                                                                             |
 | `--no-wait-for-healthy`        | `false` | Skip waiting for the node to report healthy at `<rpc_address>/health`.                                                                                            |
 | `--no-min-time-to-leader-slot` | `false` | Skip waiting for the active node to have no leader slots in the next `min_time_to_leader_slot` window. Effective on the active node; ignored on the passive node. |
-| `--skip-tower-sync`            | `false` | Skip syncing the tower file in Tower mode. Unavailable in Alpenglow mode.                                                                                           |
+| `--skip-history-transfer`      | `false` | Skip Alpenglow history transfer; the passive node controls this choice.                                                                                           |
 | `-y, --yes`                    | `false` | Skip all interactive confirmation prompts.                                                                                                                        |
 | `--to-peer <name\|ip>`         | —       | When run on the active node, auto-select a peer by its configured name or IP address, skipping the interactive selector. Ignored on the passive node.             |
 
@@ -119,24 +121,41 @@ Download and install the latest [release](https://github.com/SOL-Strategies/sola
 
 2. **Some focus and appreciation of what you're doing** — these can be high pucker factor operations regardless of tooling.
 
-3. **Local validator started with `--full-rpc-api`** — this tool calls `getClusterNodes` on the local RPC, which requires the validator to be started with the `--full-rpc-api` flag (Agave/Firedancer). For resilient peer discovery, configure a private cluster RPC that also supports `getClusterNodes`; it is used when the local validator's gossip view does not contain the peer.
+3. **Local validator RPC methods** — the local RPC must provide `getClusterNodes` (requires `--full-rpc-api` on Agave-derived validators), `getAccountInfo` at finalized commitment, and Alpenglow's `getAgGenesisCert`. The last two are used to verify the validator's local consensus phase and Alpenglow genesis slot; a cluster RPC is not used for this safety check. For resilient peer discovery, configure a private cluster RPC that supports `getClusterNodes`; it is used when the local validator's gossip view does not contain the peer.
 
-For Agave-derived → native Firedancer handoffs, patched Agave/Jito builds may
-expose the optional `identityTransitionStatus` RPC. When it is available, the
-handoff waits for the exact final vote watermark before activating Firedancer.
-If it is unavailable, the confirmation plan explicitly warns the operator and
-offers the conservative configured slot fallback (512 slots by default). A
-native Firedancer → Agave-derived handoff remains possible without the RPC,
-but warns that a later fast failback will not be available.
+### Vote history and native Firedancer
 
-Native Firedancer exposes its local tower watermark as `tower_vote_slot`. For
-unpatched Firedancer, the source captures that metric immediately before the
-identity switch and waits for the captured slot to reach finalized state on
-chain before activation. The unlabelled metric cannot prove the exact final
-old-identity tower tip after the switch, so the capture-to-switch interval is
-the remaining best-effort safety window. If the source is substantially ahead
-of the cluster RPC, increase `validator.failover.handoff.timeout` to allow
-finalized reconciliation to complete; the default is two minutes.
+With transfer enabled, the source runs its passive identity command, verifies its identity through local RPC, then captures and transfers its outgoing history. The destination verifies the transfer digest and installs history atomically before activating. Each validator applies its own consensus rules using that history.
+
+```text
+Verify versions and local Alpenglow on both nodes
+                      |
+Validate commands and preflight destination storage
+                      |
+Demote source and verify passive identity
+                      |
+Capture history ------+------> Verify and install history
+                                      |
+                              Activate and verify identity
+```
+
+`validator.vote_history.dir` selects the source export directory and defaults to `validator.ledger_dir`. Agave-derived destinations restore history from that directory. Native Firedancer must enable `[tiles.votor.write_vote_history_file]` and configure `[paths.vote_history]` to match it.
+
+Incoming Firedancer history is installed separately, by default at:
+
+```text
+<ledger_dir>/solana-validator-failover/vote_history-<active identity>.bin
+```
+
+Override the directory with `validator.vote_history.import_dir`. Before demotion, the tool creates a missing import directory with permissions `0700` and logs a warning identifying it. Imported files use `0600` and belong to the failover process's user. Existing directory permissions and ownership are preserved. Identity commands run under another user need operator-managed read access. The import directory must differ from Firedancer's live export directory: its writer keeps files open, so external replacement can disrupt its bookkeeping.
+
+Firedancer activation uses `--vote-history-file` pointing to that exact import file. With transfer enabled, custom activation commands must supply exactly one matching flag. A different path, missing value, missing flag, or duplicate flag is rejected before demotion. Validation and execution share argument parsing, including quoted paths. Files imported into Firedancer must not exceed 32,688 bytes. See [Firedancer history documentation](https://docs.firedancer.io/api/firedancer-cli.html#set-identity).
+
+`--skip-history-transfer` bypasses history preflight, creation, transfer, installation, and deletion. Version and consensus checks still apply, and operator identity/rollback commands are executed as configured. Dry runs never create history directories or files. The former `--skip-tower-sync` flag now returns an error directing operators to `--skip-history-transfer`, even when supplied as `=false`.
+
+### Upgrading to 0.2.0
+
+Remove `validator.tower`, Tower identity flags, and handoff `commitment`, `fallback_timeout`, and `fallback_wait_slots` settings. Replace Tower template/hook metadata with `VoteHistoryFile`, `VoteHistoryImportFile`, and `VoteHistoryWillBeTransferred`; the handoff strategy is `vote-history`. No validator patch installation or finalization-based slot fallback is used.
 
 ## Configuration
 
@@ -160,12 +179,11 @@ validator:
   # Commands remain fully operator-controlled. Auto recognizes common binaries;
   # set family explicitly when validator.bin is a wrapper or script.
   client:
-    # one of: auto, agave, jito-solana, frankendancer, firedancer
+    # one of: auto, agave, jito-solana, firedancer
     family: auto
-    # currently only tower is supported
+    # Alpenglow only; auto follows the failover consensus setting
     consensus: auto
     # config_path: /home/solana/firedancer/config.toml
-    # metrics_address: http://127.0.0.1:7999
     # vote_account: <vote-account-pubkey>
 
   # (required) cluster this validator runs on
@@ -216,27 +234,18 @@ validator:
   # note: the validator must be started with --full-rpc-api (required for getClusterNodes)
   rpc_address: http://localhost:8899
 
-  # tower file config (required only when failover.consensus.mode is tower)
-  tower:
-    # (required) directory hosting the tower file
-    dir: /mnt/accounts/tower
+  # Export/restore directory, default: validator.ledger_dir.
+  # For native Firedancer, match paths.vote_history and enable
+  # tiles.votor.write_vote_history_file in its TOML configuration.
+  vote_history:
+    dir: /mnt/ledger
+    # Native Firedancer import directory, default: <ledger_dir>/solana-validator-failover.
+    # Must be separate from its live export directory.
+    import_dir: /mnt/ledger/solana-validator-failover
 
-    # when passive, delete the tower file if one exists before starting a failover server
-    # default: false
-    auto_empty_when_passive: false
-
-    # golang template to identify the tower file within tower.dir
-    # available to the template is an .Identities object
-    # default: "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
-    file_name_template: "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
-
-  # failover configuration
   failover:
-    # tower (default) or alpenglow; configure identically on both nodes.
-    # Alpenglow transfers vote_history-<active identity>.bin from validator.ledger_dir.
-    # The mode must agree with the local validator's on-chain genesis certificate.
     consensus:
-      mode: tower
+      mode: alpenglow
     # failover server config (runs on passive node taking over from active node)
     server:
       # default: 9898 - QUIC (udp) port to listen on
@@ -286,33 +295,20 @@ validator:
     # Directional fields are populated after the peer is negotiated:
     # {{ .FromNodeIsNativeFiredancer }} / {{ .ToNodeIsNativeFiredancer }} - bools
     # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - client family strings
-    # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
-    # {{ .TowerFileAvailableAtDestination }} - bool; safe condition for --require-tower
-	# {{ .IdentityTransitionRPCPatchURL }} - URL for the hosted identityTransitionStatus patch index
-    # For example:
-    #   {{ if .TowerFileAvailableAtDestination }}--require-tower{{ end }}
-    # Go templates use `not` or `ne`; for example:
-    #   {{ if not .FromNodeIsNativeFiredancer }}--require-tower{{ end }}
-    # In Alpenglow mode omit --require-tower from explicit commands.
-    # defaults shown below; native Firedancer uses its set-identity syntax and
-    # tower-free handoffs, while Agave-derived clients retain the legacy form
-    set_identity_active_cmd_template: "{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Active.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}{{ if .TowerFileAvailableAtDestination }} --require-tower{{ end }}{{ end }}"
-    set_identity_passive_cmd_template: "{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ .ClientConfigPath }}{{ end }} {{ .Identities.Passive.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}{{ end }}"
+    # {{ .HandoffStrategy }} - "vote-history"
+    # {{ .VoteHistoryFile }} - local export/Agave restore path
+    # {{ .VoteHistoryImportFile }} - native Firedancer import path
+    # {{ .VoteHistoryWillBeTransferred }} - negotiated transfer choice
+    # Built-in commands handle both client families; omit overrides to use them.
+    # Example native Firedancer activation override:
+    # set_identity_active_cmd_template: '{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ printf "%q" .ClientConfigPath }}{{ end }} {{ printf "%q" .Identities.Active.KeyFile }}{{ if .VoteHistoryWillBeTransferred }} --vote-history-file {{ printf "%q" .VoteHistoryImportFile }}{{ end }}'
+    # Example Agave-derived activation override:
+    # set_identity_active_cmd_template: '{{ .Bin }} --ledger {{ printf "%q" .LedgerDir }} set-identity {{ printf "%q" .Identities.Active.KeyFile }}'
 
-    # Native Firedancer handoffs do not transfer an Agave tower file. The
-    # finalized on-chain vote state is reconciled before this command runs.
+    # Deadlines for local identity verification after commands.
     handoff:
-      commitment: finalized # finalized or confirmed
       timeout: 2m
       poll_interval: 500ms
-      # Reconciliation uses the cluster RPC as the completion authority. The
-      # local validator RPC is also polled for readiness diagnostics, but a
-      # client that does not expose the vote account locally does not block a
-      # finalized cluster observation.
-      # Used only after explicit confirmation when Agave/Jito cannot provide
-      # identityTransitionStatus while handing off to native Firedancer.
-      fallback_timeout: 10m
-      fallback_wait_slots: 512
 
     # failover peers - keys are vanity names shown in program output and usable with --to-peer
     # configure one peer per passive validator you may want to fail over to
@@ -372,8 +368,9 @@ validator:
     # {{ .ThisNodeIsNativeFiredancer }} / {{ .PeerNodeIsNativeFiredancer }} - bools
     # {{ .FromNodeClientFamily }} / {{ .ToNodeClientFamily }} - directional family strings
     # {{ .FromNodeIsNativeFiredancer }} / {{ .ToNodeIsNativeFiredancer }} - directional bools
-    # {{ .HandoffStrategy }} - "tower-file" or "onchain-reconcile"
-    # {{ .TowerFileWillBeTransferred }} - bool
+    # {{ .HandoffStrategy }} - "vote-history"
+    # {{ .VoteHistoryWillBeTransferred }} - bool
+    # {{ .VoteHistoryFile }} / {{ .VoteHistoryImportFile }} - local history paths
     #
     # Standard environment variables passed to hook commands (SOLANA_VALIDATOR_FAILOVER_*):
     # ------------------------------------------------------------------------------------------------------------
@@ -399,8 +396,10 @@ validator:
     # SOLANA_VALIDATOR_FAILOVER_PEER_NODE_CLIENT_FAMILY                = peer client family
     # SOLANA_VALIDATOR_FAILOVER_FROM_NODE_IS_NATIVE_FIREDANCER         = "true|false"
     # SOLANA_VALIDATOR_FAILOVER_TO_NODE_IS_NATIVE_FIREDANCER           = "true|false"
-    # SOLANA_VALIDATOR_FAILOVER_HANDOFF_STRATEGY                       = "tower-file|onchain-reconcile"
-    # SOLANA_VALIDATOR_FAILOVER_TOWER_FILE_WILL_BE_TRANSFERRED         = "true|false"
+    # SOLANA_VALIDATOR_FAILOVER_HANDOFF_STRATEGY                       = "vote-history"
+    # SOLANA_VALIDATOR_FAILOVER_VOTE_HISTORY_FILE = local export/restore path
+    # SOLANA_VALIDATOR_FAILOVER_VOTE_HISTORY_IMPORT_FILE = native import path
+    # SOLANA_VALIDATOR_FAILOVER_VOTE_HISTORY_WILL_BE_TRANSFERRED         = "true|false"
     hooks:
       # hooks to run before failover - errors in pre hooks optionally abort failover
       pre:
@@ -446,67 +445,13 @@ validator:
     # original roles.
     #
     # IMPORTANT LIMITATIONS — read before enabling:
-    # - Rollback is only triggered by an explicit signal from the passive node. If the network
-    #   connection drops after the passive node successfully sets its identity to active, no
-    #   automatic rollback occurs (to prevent the risk of two active validators). The operator
-    #   must check gossip and intervene manually.
-    # - If the rollback itself fails, the cluster may still be left without an active leader.
-    #   Rollback failures are logged at ERROR level with manual recovery commands.
-    # - Both nodes must have rollback enabled and configured identically for coordination to work.
-    # - Rollback hooks are always run (pre then post), even if the set-identity command fails.
-    rollback:
-      # default: false — opt-in
-      enabled: false
-
-      # Configuration for reverting the active node (which switched to passive) back to active.
-      # Triggered when the passive node signals that it failed to become active.
-      to_active:
-        # Go template for the rollback set-identity command.
-        # Supports the same template fields as set_identity_active_cmd_template.
-        # When empty, defaults to set_identity_active_cmd_template.
-        cmd_template: ""
-        hooks:
-          # run after the rollback set-identity command (always runs, even if cmd failed)
-          post:
-            - name: notify-rollback-to-active
-              command: ./scripts/notify_rollback.sh
-              args: ["to-active"]
-
-      # Configuration for re-asserting the passive node's passive identity when it failed to
-      # become active. Triggered on the passive node when set-identity-to-active fails.
-      to_passive:
-        # Go template for the rollback set-identity command.
-        # Supports the same template fields as set_identity_passive_cmd_template.
-        # When empty, defaults to set_identity_passive_cmd_template.
-        cmd_template: ""
-        hooks:
-          # run after the rollback set-identity command (always runs, even if cmd failed)
-          post:
-            - name: notify-rollback-to-passive
-              command: ./scripts/notify_rollback.sh
-              args: ["to-passive"]
-
-# update check configuration
-update:
-  # check for a new release on startup and print a warning if one is available
-  # default: true
-  # override with the --no-update-check CLI flag
-  check_on_startup: true
-```
-
-## Rollback
-
-`failover.rollback` is an opt-in feature that attempts to automatically revert both nodes to their original roles if a failover fails after identities have started changing.
-
-### When it triggers
-
-Rollback is only triggered by an **explicit signal** from the passive node. Specifically: after the active node has switched to passive and sent the tower file, if the passive node's `set-identity-to-active` command fails, it signals the active node to revert before exiting.
+    # - Source rollback requires an explicit acknowledgement that destination activation has not begun. A failed activation command or lost completion acknowledgement may mean that the destination already signed votes, so source reactivation requires manual recovery with appropriate history. If enabled, destination rollback can reassert its passive identity after an activation command failure.
 
 ### What it does
 
 | Node                                             | Rollback action                                                           |
 | ------------------------------------------------ | ------------------------------------------------------------------------- |
-| Active node (was active, became passive)         | Runs `set-identity-to-active` command → `rollback.to_active` post-hooks   |
+| Source node, before destination activation | On explicit rollback signal, runs `set-identity-to-active` → `rollback.to_active` post-hooks |
 | Passive node (tried and failed to become active) | Runs `set-identity-to-passive` command → `rollback.to_passive` post-hooks |
 
 Post-hooks always run even if the set-identity command fails. Pre hooks are intentionally not supported for rollback: a pre hook with `must_succeed: true` could block the rollback set-identity command from running, which would defeat the purpose of rollback.

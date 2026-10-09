@@ -31,7 +31,7 @@ Ctrl+L
 Sleep 300ms
 
 # Run london (passive, dry run — no --not-a-drill, no --yes so the prompt is shown)
-Type `./bin/solana-validator-failover-dev-linux-amd64 run --config integration/configs/demo-london.yaml`
+Type `./bin/solana-validator-failover-dev-linux-amd64 run --skip-history-transfer --config integration/configs/demo-london.yaml`
 Enter
 
 # Timeline (real time):

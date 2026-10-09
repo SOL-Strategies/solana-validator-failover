@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	"github.com/solana-foundation/solana-go/v2"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/identities"
 	solanapkg "github.com/sol-strategies/solana-validator-failover/internal/solana"
+	"github.com/solana-foundation/solana-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,11 +101,8 @@ func (tv *TestValidator) NewFromConfig(cfg *Config) error {
 		return err
 	}
 
-	// tower file configure
-	err = tv.configureTowerFile(cfg.Tower)
-	if err != nil {
-		return err
-	}
+	// Configure the history path for this dependency-isolated fixture.
+	tv.VoteHistoryFile = filepath.Join(tv.LedgerDir, "vote_history-"+tv.Identities.Active.PubKey()+".bin")
 
 	// set identity commands configure
 	err = tv.configureSetIdenttiyCommands(cfg.Failover)
@@ -671,7 +668,6 @@ func TestNewFromConfig_Success(t *testing.T) {
 	assert.Equal(t, ledgerDir, testValidator.LedgerDir)
 	assert.Equal(t, "192.168.1.100", testValidator.PublicIP)
 	assert.Equal(t, "test-validator", testValidator.Hostname)
-	assert.True(t, testValidator.TowerFileAutoDeleteWhenPassive)
 	assert.Len(t, testValidator.Peers, 2)
 	assert.Equal(t, "192.168.1.100:9898", testValidator.Peers["peer1"].Address)
 	assert.Equal(t, "192.168.1.101:9898", testValidator.Peers["peer2"].Address)
@@ -825,8 +821,7 @@ func TestValidator_BasicProperties(t *testing.T) {
 			Client:  "agave-validator",
 			Version: "1.16.0",
 		},
-		MinimumTimeToLeaderSlot:        5 * time.Minute,
-		TowerFileAutoDeleteWhenPassive: true,
+		MinimumTimeToLeaderSlot: 5 * time.Minute,
 	}
 
 	assert.Equal(t, "/usr/local/bin/agave-validator", validator.Bin)
@@ -836,7 +831,6 @@ func TestValidator_BasicProperties(t *testing.T) {
 	assert.Equal(t, "agave-validator", validator.BinMetadata.Client)
 	assert.Equal(t, "1.16.0", validator.BinMetadata.Version)
 	assert.Equal(t, 5*time.Minute, validator.MinimumTimeToLeaderSlot)
-	assert.True(t, validator.TowerFileAutoDeleteWhenPassive)
 }
 
 func TestValidator_CommandTemplates(t *testing.T) {

@@ -20,6 +20,7 @@ type Config struct {
 	LedgerDir           string            `mapstructure:"ledger_dir"`
 	Client              ClientConfig      `mapstructure:"client"`
 	Tower               TowerConfig       `mapstructure:"tower"`
+	VoteHistory         VoteHistoryConfig `mapstructure:"vote_history"`
 	Name                string            `mapstructure:"name"`      // optional display name used in plans/logs; defaults to OS hostname
 	PublicIP            string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
 }
@@ -27,14 +28,19 @@ type Config struct {
 // ClientConfig describes the validator implementation behind the operator's
 // identity commands. It is metadata only; commands remain operator supplied.
 type ClientConfig struct {
-	Family         string `mapstructure:"family"`
-	Consensus      string `mapstructure:"consensus"`
-	ConfigPath     string `mapstructure:"config_path"`
-	MetricsAddress string `mapstructure:"metrics_address"`
-	VoteAccount    string `mapstructure:"vote_account"`
+	Family      string `mapstructure:"family"`
+	Consensus   string `mapstructure:"consensus"`
+	ConfigPath  string `mapstructure:"config_path"`
+	VoteAccount string `mapstructure:"vote_account"`
 }
 
-// TowerConfig is the configuration for the towerfile
+// VoteHistoryConfig separates validator exports from managed native imports.
+type VoteHistoryConfig struct {
+	Dir       string `mapstructure:"dir"`
+	ImportDir string `mapstructure:"import_dir"`
+}
+
+// TowerConfig is retained only to report a migration error for old configs.
 type TowerConfig struct {
 	Dir                  string `mapstructure:"dir"`
 	AutoEmptyWhenPassive bool   `mapstructure:"auto_empty_when_passive"`
@@ -63,14 +69,13 @@ type ConsensusConfig struct {
 }
 
 type HandoffConfig struct {
-	Commitment              string `mapstructure:"commitment"`
-	Timeout                 string `mapstructure:"timeout"`
-	PollInterval            string `mapstructure:"poll_interval"`
-	FallbackTimeout         string `mapstructure:"fallback_timeout"`
-	FallbackWaitSlots       uint64 `mapstructure:"fallback_wait_slots"`
-	TimeoutDuration         time.Duration
-	PollIntervalDuration    time.Duration
-	FallbackTimeoutDuration time.Duration
+	Commitment           string `mapstructure:"commitment"`
+	Timeout              string `mapstructure:"timeout"`
+	PollInterval         string `mapstructure:"poll_interval"`
+	FallbackTimeout      string `mapstructure:"fallback_timeout"`
+	FallbackWaitSlots    uint64 `mapstructure:"fallback_wait_slots"`
+	TimeoutDuration      time.Duration
+	PollIntervalDuration time.Duration
 }
 
 // TLSConfig holds the optional mTLS configuration for the QUIC connection between validators.

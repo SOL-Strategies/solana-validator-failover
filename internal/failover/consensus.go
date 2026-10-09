@@ -13,7 +13,7 @@ import (
 	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
-// ConsensusTower and ConsensusAlpenglow are the supported validator consensus modes.
+// ConsensusTower is recognized for rejection; only ConsensusAlpenglow is supported.
 const (
 	ConsensusTower     = "tower"
 	ConsensusAlpenglow = "alpenglow"

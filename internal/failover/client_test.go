@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/solana"
@@ -22,55 +21,6 @@ func newTestClient(mock solana.ClientInterface) *Client {
 		solanaRPCClient: mock,
 	}
 	return c
-}
-
-type identityTransitionStatusMock struct {
-	status *solana.IdentityTransitionStatus
-}
-
-func (m identityTransitionStatusMock) GetIdentityTransitionStatus(context.Context) (*solana.IdentityTransitionStatus, error) {
-	return m.status, nil
-}
-
-func (m identityTransitionStatusMock) ProbeIdentityTransitionStatus(context.Context) (bool, error) {
-	return true, nil
-}
-
-func TestWaitForIdentityTransitionRejectsTerminalFailure(t *testing.T) {
-	transitionError := "failed to load new vote history"
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	_, err := waitForIdentityTransition(ctx, identityTransitionStatusMock{
-		status: &solana.IdentityTransitionStatus{
-			Sequence: 2,
-			State:    "failed",
-			Error:    &transitionError,
-		},
-	}, 1, "expected-identity", "expected-vote-account", time.Millisecond)
-
-	var terminalError *identityTransitionFailedError
-	require.ErrorAs(t, err, &terminalError)
-	require.Contains(t, err.Error(), transitionError)
-}
-
-func TestWaitForIdentityTransitionAcceptsCurrentSequence(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	got, err := waitForIdentityTransition(ctx, identityTransitionStatusMock{
-		status: &solana.IdentityTransitionStatus{
-			Sequence:        2,
-			State:           "complete",
-			CurrentIdentity: "expected-identity",
-			ToIdentity:      "expected-identity",
-			VoteAccount:     "expected-vote-account",
-			LastVoteSlot:    123,
-		},
-	}, 2, "expected-identity", "expected-vote-account", time.Millisecond)
-
-	require.NoError(t, err)
-	require.Equal(t, uint64(123), got)
 }
 
 func TestTLSServerNameFromAddress(t *testing.T) {

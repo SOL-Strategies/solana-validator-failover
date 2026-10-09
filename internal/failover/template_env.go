@@ -3,8 +3,8 @@ package failover
 import "fmt"
 
 // AddHandoffTemplateEnv adds directional metadata to hook environments.
-// The keys are additive so existing hook scripts remain unchanged.
-func AddHandoffTemplateEnv(env map[string]string, source, destination NodeInfo, local, peer NodeInfo, strategy string, towerFileWillBeTransferred bool) {
+// Vote-history keys replace the former Tower-specific metadata.
+func AddHandoffTemplateEnv(env map[string]string, source, destination NodeInfo, local, peer NodeInfo, strategy string, voteHistoryWillBeTransferred bool) {
 	env["THIS_NODE_CLIENT_FAMILY"] = local.ClientFamily
 	env["PEER_NODE_CLIENT_FAMILY"] = peer.ClientFamily
 	env["THIS_NODE_IS_NATIVE_FIREDANCER"] = fmt.Sprintf("%t", local.IsNativeFiredancer)
@@ -16,8 +16,7 @@ func AddHandoffTemplateEnv(env map[string]string, source, destination NodeInfo, 
 	env["FROM_NODE_IS_AGAVE_DERIVED"] = fmt.Sprintf("%t", isAgaveDerived(source.ClientFamily))
 	env["TO_NODE_IS_AGAVE_DERIVED"] = fmt.Sprintf("%t", isAgaveDerived(destination.ClientFamily))
 	env["HANDOFF_STRATEGY"] = strategy
-	env["TOWER_FILE_WILL_BE_TRANSFERRED"] = fmt.Sprintf("%t", towerFileWillBeTransferred)
-	env["TOWER_FILE_AVAILABLE_AT_DESTINATION"] = fmt.Sprintf("%t", towerFileWillBeTransferred && !destination.IsNativeFiredancer &&
-		destination.Consensus != ConsensusAlpenglow && destination.ConsensusMode != ConsensusAlpenglow)
-	env["IDENTITY_TRANSITION_RPC_PATCH_URL"] = local.IdentityTransitionRPCPatchURL
+	env["VOTE_HISTORY_WILL_BE_TRANSFERRED"] = fmt.Sprintf("%t", voteHistoryWillBeTransferred)
+	env["VOTE_HISTORY_FILE"] = local.VoteHistoryFile
+	env["VOTE_HISTORY_IMPORT_FILE"] = local.VoteHistoryImportFile
 }

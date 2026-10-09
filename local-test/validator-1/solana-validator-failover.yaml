@@ -10,9 +10,11 @@ validator:
     passive: ./local-test/validator-1/passive-identity.json
   rpc_address: http://localhost:8899
   ledger_dir: ./local-test/validator-1/ledger
-  tower:
-    dir: ./local-test/validator-1/tower
+  vote_history:
+    # Defaults to ledger_dir; Firedancer must configure the same export directory.
   failover:
+    consensus:
+      mode: alpenglow
     tls:
       enabled: true
       ca_cert: ./integration/test-tls/ca.crt

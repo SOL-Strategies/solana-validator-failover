@@ -11,10 +11,12 @@ validator:
     passive: ./integration/test-keys/validator-1-passive.json
   rpc_address: http://localhost:8899?validator=chicago
   ledger_dir: ./integration/test-ledgers/chicago
-  tower:
-    dir: ./integration/test-towers/chicago
+  vote_history:
+    # Defaults to ledger_dir; Firedancer must configure the same export directory.
   average_slot_duration: 400ms
   failover:
+    consensus:
+      mode: alpenglow
     tls:
       enabled: true
       ca_cert: ./integration/test-tls/ca.crt

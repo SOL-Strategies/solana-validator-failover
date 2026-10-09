@@ -10,23 +10,14 @@ import (
 func TestRenderIdentityCommandDirectionalNativeFields(t *testing.T) {
 	template := `cmd {{ if not .FromNodeIsNativeFiredancer }}--require-tower{{ end }} {{ .HandoffStrategy }} {{ .ToNodeClientFamily }}`
 	data := CommandTemplateData{
-		FromNodeIsNativeFiredancer:      true,
-		HandoffStrategy:                 HandoffStrategyOnchain,
-		ToNodeClientFamily:              "agave",
-		TowerFileAvailableAtDestination: false,
+		FromNodeIsNativeFiredancer: true,
+		HandoffStrategy:            HandoffStrategyVoteHistory,
+		ToNodeClientFamily:         "agave",
 	}
-	data.TowerFileWillBeTransferred = false
+	data.VoteHistoryWillBeTransferred = false
 	got, err := RenderIdentityCommand(template, data)
 	require.NoError(t, err)
-	require.Equal(t, "cmd  onchain-reconcile agave", got)
-}
-
-func TestRenderIdentityCommandLegacyTowerFlag(t *testing.T) {
-	template := `cmd{{ if .TowerFileAvailableAtDestination }} --require-tower{{ end }}`
-	data := CommandTemplateData{TowerFileWillBeTransferred: true, TowerFileAvailableAtDestination: true}
-	got, err := RenderIdentityCommand(template, data)
-	require.NoError(t, err)
-	require.Equal(t, "cmd --require-tower", got)
+	require.Equal(t, "cmd  vote-history agave", got)
 }
 
 func TestRenderIdentityCommandSupportsNeqAlias(t *testing.T) {
@@ -42,32 +33,32 @@ func TestRenderIdentityCommandInvalidTemplate(t *testing.T) {
 
 func TestRenderIdentityCommandPreservesHostnameAlias(t *testing.T) {
 	ids := &identities.Identities{Active: &identities.Identity{}, Passive: &identities.Identity{}}
-	data := NewCommandTemplateData(NodeInfo{Hostname: "validator-a", Identities: ids}, NodeInfo{}, NodeInfo{Identities: ids}, NodeInfo{Identities: ids}, HandoffStrategyTowerFile, true, false)
+	data := NewCommandTemplateData(NodeInfo{Hostname: "validator-a", Identities: ids}, NodeInfo{}, NodeInfo{Identities: ids}, NodeInfo{Identities: ids}, HandoffStrategyVoteHistory, true, false)
 	got, err := RenderIdentityCommand("{{ .Hostname }}", data)
 	require.NoError(t, err)
 	require.Equal(t, "validator-a", got)
 }
 
-func TestTowerTransferHonoursSkipTowerSync(t *testing.T) {
+func TestHistoryTransferHonoursSkipHistoryTransfer(t *testing.T) {
 	s := &Stream{}
-	s.SetHandoffStrategy(HandoffStrategyTowerFile)
-	if !s.GetTowerFileWillBeTransferred() {
-		t.Fatal("expected tower transfer for legacy handoff")
+	s.SetHandoffStrategy(HandoffStrategyVoteHistory)
+	if !s.GetVoteHistoryWillBeTransferred() {
+		t.Fatal("expected history transfer")
 	}
-	s.SetSkipTowerSync(true)
-	if s.GetTowerFileWillBeTransferred() {
-		t.Fatal("skip-tower-sync must disable transfer")
+	s.SetSkipHistoryTransfer(true)
+	if s.GetVoteHistoryWillBeTransferred() {
+		t.Fatal("skip-history-transfer must disable transfer")
 	}
-	s.SetSkipTowerSync(false)
-	s.SetHandoffStrategy(HandoffStrategyOnchain)
-	if s.GetTowerFileWillBeTransferred() {
-		t.Fatal("on-chain handoff must not transfer a tower")
+	s.SetSkipHistoryTransfer(false)
+	s.SetHandoffStrategy(HandoffStrategyVoteHistory)
+	if !s.GetVoteHistoryWillBeTransferred() {
+		t.Fatal("expected history transfer")
 	}
 	// Verify setter order is also safe.
-	s.SetHandoffStrategy(HandoffStrategyTowerFile)
-	s.SetSkipTowerSync(true)
-	if s.GetTowerFileWillBeTransferred() {
-		t.Fatal("skip-tower-sync must win regardless of setter order")
+	s.SetHandoffStrategy(HandoffStrategyVoteHistory)
+	s.SetSkipHistoryTransfer(true)
+	if s.GetVoteHistoryWillBeTransferred() {
+		t.Fatal("skip-history-transfer must win regardless of setter order")
 	}
 }
 
@@ -76,25 +67,9 @@ func TestRenderNegotiatedRollbackUsesNegotiatedIdentityFallbacks(t *testing.T) {
 	active, passive, err := renderNegotiatedRollbackCommands(
 		NodeInfo{ClientFamily: "agave", Identities: ids, SetIdentityActiveCommandTemplate: "active {{ .HandoffStrategy }} {{ .ToNodeClientFamily }}"},
 		NodeInfo{ClientFamily: "firedancer", Identities: ids, SetIdentityPassiveCommandTemplate: "passive {{ .HandoffStrategy }} {{ .FromNodeClientFamily }}"},
-		"passive-node-rollback", HandoffStrategyOnchain, false, false,
+		"passive-node-rollback", HandoffStrategyVoteHistory, false, false,
 	)
 	require.NoError(t, err)
-	require.Equal(t, "active onchain-reconcile firedancer", active)
-	require.Equal(t, "passive onchain-reconcile agave", passive)
-}
-
-func TestRenderNegotiatedRollbackKeepsSourceTowerSafetyWhenSkippingTransfer(t *testing.T) {
-	ids := &identities.Identities{Active: &identities.Identity{}, Passive: &identities.Identity{}}
-	active, _, err := renderNegotiatedRollbackCommands(
-		NodeInfo{
-			ClientFamily:                     "agave",
-			Identities:                       ids,
-			TowerFileSizeBytes:               128,
-			SetIdentityActiveCommandTemplate: "active{{ if .TowerFileAvailableAtDestination }} --require-tower{{ end }}",
-		},
-		NodeInfo{ClientFamily: "agave", Identities: ids},
-		"", HandoffStrategyTowerFile, false, false,
-	)
-	require.NoError(t, err)
-	require.Equal(t, "active --require-tower", active)
+	require.Equal(t, "active vote-history firedancer", active)
+	require.Equal(t, "passive vote-history agave", passive)
 }

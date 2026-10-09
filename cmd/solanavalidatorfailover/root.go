@@ -67,6 +67,9 @@ func init() {
 }
 
 func persistentPreRun(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("skip-tower-sync") {
+		return fmt.Errorf("--skip-tower-sync is no longer supported. For Alpenglow failovers, use --skip-history-transfer")
+	}
 	cfg, err := config.NewFromFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)

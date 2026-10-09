@@ -14,8 +14,8 @@ fi
 # Process arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --version)
-            echo "0.505.20216 (44f9f393d167138abe1c819f7424990a56e1913e)"
+        --version|version)
+            echo "26.10.0 (44f9f393d167138abe1c819f7424990a56e1913e)"
             exit 0
             ;;
         set-identity)

@@ -114,15 +114,16 @@ type HookTemplateData struct {
 	PeerNodeClientFamily          string
 	PeerNodeIsNativeFiredancer    bool
 
-	FromNodeClientFamily            string
-	ToNodeClientFamily              string
-	FromNodeIsNativeFiredancer      bool
-	ToNodeIsNativeFiredancer        bool
-	FromNodeIsAgaveDerived          bool
-	ToNodeIsAgaveDerived            bool
-	HandoffStrategy                 string
-	TowerFileWillBeTransferred      bool
-	TowerFileAvailableAtDestination bool
+	FromNodeClientFamily         string
+	ToNodeClientFamily           string
+	FromNodeIsNativeFiredancer   bool
+	ToNodeIsNativeFiredancer     bool
+	FromNodeIsAgaveDerived       bool
+	ToNodeIsAgaveDerived         bool
+	HandoffStrategy              string
+	VoteHistoryWillBeTransferred bool
+	VoteHistoryFile              string
+	VoteHistoryImportFile        string
 }
 
 // newHookTemplateData creates a HookTemplateData from an envMap
@@ -167,9 +168,10 @@ func newHookTemplateData(envMap map[string]string) HookTemplateData {
 	data.FromNodeIsAgaveDerived = envMap["FROM_NODE_IS_AGAVE_DERIVED"] == "true"
 	data.ToNodeIsAgaveDerived = envMap["TO_NODE_IS_AGAVE_DERIVED"] == "true"
 	data.HandoffStrategy = envMap["HANDOFF_STRATEGY"]
-	data.TowerFileWillBeTransferred = envMap["TOWER_FILE_WILL_BE_TRANSFERRED"] == "true"
-	data.TowerFileAvailableAtDestination = envMap["TOWER_FILE_AVAILABLE_AT_DESTINATION"] == "true"
+	data.VoteHistoryWillBeTransferred = envMap["VOTE_HISTORY_WILL_BE_TRANSFERRED"] == "true"
 
+	data.VoteHistoryFile = envMap["VOTE_HISTORY_FILE"]
+	data.VoteHistoryImportFile = envMap["VOTE_HISTORY_IMPORT_FILE"]
 	return data
 }
 

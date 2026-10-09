@@ -22,7 +22,7 @@ Type `curl -sf -X POST -H 'Content-Type: application/json' -d '{"action":"reset"
 Enter
 Sleep 300ms
 # Start london (passive, dry run — no --not-a-drill, --yes auto-confirm) in background
-Type `(./bin/solana-validator-failover-dev-linux-amd64 run --config integration/configs/demo-london.yaml --yes) >/dev/null 2>&1 & disown`
+Type `(./bin/solana-validator-failover-dev-linux-amd64 run --skip-history-transfer --config integration/configs/demo-london.yaml --yes) >/dev/null 2>&1 & disown`
 Enter
 Sleep 1s
 

@@ -15,11 +15,11 @@ import (
 
 // SummaryData holds all data needed to render the post-failover summary.
 type SummaryData struct {
-	IsDryRun      bool
-	SkipTowerSync bool
-	// TowerFileWillBeTransferred is the negotiated transfer decision. It is
-	// distinct from SkipTowerSync for native/on-chain handoffs.
-	TowerFileWillBeTransferred bool
+	IsDryRun            bool
+	SkipHistoryTransfer bool
+	// VoteHistoryWillBeTransferred is the negotiated transfer decision. It is
+	// distinct from SkipHistoryTransfer for native/on-chain handoffs.
+	VoteHistoryWillBeTransferred bool
 
 	// OrigActiveNode is the node that initiated the failover (was active, now passive).
 	// OrigPassiveNode is the node that received the failover (was passive, now active).
@@ -28,10 +28,8 @@ type SummaryData struct {
 
 	// Timing
 	OrigActiveSetIdentityDuration  time.Duration
-	HandoffEvidenceDuration        time.Duration
-	ReconciliationDuration         time.Duration
-	TowerSyncDuration              time.Duration
-	TowerFileSizeBytes             int64
+	HistorySyncDuration            time.Duration
+	VoteHistoryFileSizeBytes       int64
 	OrigPassiveSetIdentityDuration time.Duration
 	TotalDuration                  time.Duration
 
@@ -101,14 +99,8 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	// labelWidth is the display width of the widest section label so that the
 	// timing info on each header line aligns vertically.
 	labelWidth := max(len(data.OrigActiveNode.Hostname), len(data.OrigPassiveNode.Hostname))
-	if data.TowerFileWillBeTransferred {
+	if data.VoteHistoryWillBeTransferred {
 		labelWidth = max(labelWidth, len("> "+stateLabel(data.OrigActiveNode.Consensus)))
-	}
-	if data.HandoffEvidenceDuration > 0 {
-		labelWidth = max(labelWidth, len("> evidence"))
-	}
-	if data.ReconciliationDuration > 0 {
-		labelWidth = max(labelWidth, len("> reconcile"))
 	}
 
 	tpl, err := template.New("failoverSummary").Funcs(funcMap).Parse(`
@@ -118,18 +110,14 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
         {{ Muted "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
-{{ if gt .HandoffEvidenceDuration 0 }}
-  {{ LightGrey "handoff evidence" }}
-        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .HandoffEvidenceDuration) }}
-{{ end }}
-{{ if gt .ReconciliationDuration 0 }}
-  {{ LightGrey "reconcile" }}
-        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .ReconciliationDuration) }}
-{{ end }}
-{{ if .TowerFileWillBeTransferred }}
+
+
+{{ if .VoteHistoryWillBeTransferred }}
   {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}
-        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
-        {{ Muted "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .HistorySyncDuration) }}
+        {{ Muted "size     =" }} {{ LightGrey (FormatBytes .VoteHistoryFileSizeBytes) }}
+{{ else }}
+  {{ LightGrey "history transfer skipped" }}
 {{ end }}
   {{ Active .OrigPassiveNode.Hostname true }}
         {{ Muted "role     =" }} {{ Active "active" false }}
@@ -149,16 +137,14 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
 		"IsDryRun":                       data.IsDryRun,
-		"SkipTowerSync":                  data.SkipTowerSync,
-		"TowerFileWillBeTransferred":     data.TowerFileWillBeTransferred,
+		"SkipHistoryTransfer":            data.SkipHistoryTransfer,
+		"VoteHistoryWillBeTransferred":   data.VoteHistoryWillBeTransferred,
 		"OrigActiveNode":                 data.OrigActiveNode,
 		"OrigPassiveNode":                data.OrigPassiveNode,
 		"LabelWidth":                     labelWidth,
 		"OrigActiveSetIdentityDuration":  data.OrigActiveSetIdentityDuration,
-		"HandoffEvidenceDuration":        data.HandoffEvidenceDuration,
-		"ReconciliationDuration":         data.ReconciliationDuration,
-		"TowerSyncDuration":              data.TowerSyncDuration,
-		"TowerFileSizeBytes":             data.TowerFileSizeBytes,
+		"HistorySyncDuration":            data.HistorySyncDuration,
+		"VoteHistoryFileSizeBytes":       data.VoteHistoryFileSizeBytes,
 		"OrigPassiveSetIdentityDuration": data.OrigPassiveSetIdentityDuration,
 		"TotalDuration":                  data.TotalDuration,
 		"FailoverStartSlot":              data.FailoverStartSlot,

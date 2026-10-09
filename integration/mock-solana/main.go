@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -116,6 +118,43 @@ func (s *MockSolanaServer) handleRPC(w http.ResponseWriter, r *http.Request) {
 
 	var result any
 	switch method {
+	case "getVersion":
+		version := "4.3.0"
+		if r.URL.Query().Get("validator") == "london" {
+			version = "26.10.0"
+		}
+		result = map[string]any{"solana-core": version, "feature-set": 12345}
+	case "getIdentity":
+		name := r.URL.Query().Get("validator")
+		s.mu.RLock()
+		identity := validatorMeta[name].passivePubkey
+		if name == s.activeValidator {
+			identity = activePubkey
+		}
+		s.mu.RUnlock()
+		result = map[string]any{"identity": identity}
+	case "getAccountInfo":
+		params, _ := req["params"].([]any)
+		key := ""
+		if len(params) > 0 {
+			key, _ = params[0].(string)
+		}
+		var value any
+		var data []byte
+		switch key {
+		case "A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS":
+			data = make([]byte, 9)
+			data[0] = 1
+			binary.LittleEndian.PutUint64(data[1:], startSlot-100)
+		case "42Ym56TQ7AKFThRv5nyoSABq5ZPgE2TLKo8BALZEtoU1":
+			data = []byte{1}
+		}
+		if data != nil {
+			value = map[string]any{"data": []any{base64.StdEncoding.EncodeToString(data), "base64"}, "owner": "11111111111111111111111111111111", "lamports": 1, "executable": false, "rentEpoch": 0}
+		}
+		result = map[string]any{"context": map[string]any{"slot": s.slotCounter.Load()}, "value": value}
+	case "getAgGenesisCert":
+		result = map[string]any{"block": map[string]any{"slot": startSlot - 100}}
 	case "getClusterNodes":
 		result = s.getClusterNodes()
 	case "getHealth":

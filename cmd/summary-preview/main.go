@@ -3,10 +3,9 @@
 //
 // Usage:
 //
-//	go run ./cmd/summary-preview                 # real failover, with tower sync
+//	go run ./cmd/summary-preview                 # real failover, with history transfer
 //	go run ./cmd/summary-preview --dry-run       # render as a dry run
-//	go run ./cmd/summary-preview --skip-tower    # omit tower file sync step
-//	go run ./cmd/summary-preview --onchain       # include on-chain timing sections
+//	go run ./cmd/summary-preview --skip-history-transfer    # omit vote-history transfer step
 //	go run ./cmd/summary-preview --credits       # include vote credit rank data
 package main
 
@@ -23,26 +22,19 @@ import (
 
 func main() {
 	isDryRun := flag.Bool("dry-run", false, "render as a dry run")
-	skipTower := flag.Bool("skip-tower", false, "skip tower file sync step")
-	onchain := flag.Bool("onchain", false, "include on-chain handoff timing sections")
+	skipHistory := flag.Bool("skip-history-transfer", false, "skip vote-history transfer step")
 	withCredits := flag.Bool("credits", false, "include vote credit rank data")
 	flag.Parse()
 
-	var handoffEvidenceDuration, reconciliationDuration time.Duration
 	totalDuration := 445 * time.Millisecond
-	if *onchain {
-		handoffEvidenceDuration = 26*time.Second + 277*time.Millisecond
-		reconciliationDuration = 14*time.Second + 534*time.Millisecond
-		totalDuration = 210*time.Millisecond + handoffEvidenceDuration + reconciliationDuration + 155*time.Millisecond
-	}
 
 	// Mirror the mock nodes from plan-preview so the two tools stay consistent.
 	origActiveNode := failover.NodeInfo{
-		Hostname:       "sol-validator-1",
-		PublicIP:       "203.0.113.10",
-		ClientVersion:  "2.1.14",
-		TowerFile:      "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
-		TowerFileBytes: make([]byte, 12_345),
+		Hostname:                 "sol-validator-1",
+		PublicIP:                 "203.0.113.10",
+		ClientVersion:            "4.3.0",
+		VoteHistoryFile:          "/mnt/ledger/vote_history-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
+		VoteHistoryFileSizeBytes: 12_345,
 		Identities: &identities.Identities{
 			Active:  &identities.Identity{KeyFile: "/home/solana/active-identity.json", PubKeyStr: "456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM"},
 			Passive: &identities.Identity{KeyFile: "/home/solana/passive-1-identity.json", PubKeyStr: "PassV1Kq8YxZd3NvQ7eLmT4bF9wR2cUjHnXsAoPiGkEy"},
@@ -50,10 +42,10 @@ func main() {
 	}
 
 	origPassiveNode := failover.NodeInfo{
-		Hostname:      "sol-validator-2",
-		PublicIP:      "203.0.113.20",
-		ClientVersion: "2.1.14",
-		TowerFile:     "/mnt/accounts/tower/tower-1_9-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
+		Hostname:        "sol-validator-2",
+		PublicIP:        "203.0.113.20",
+		ClientVersion:   "4.3.0",
+		VoteHistoryFile: "/mnt/ledger/vote_history-456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM.bin",
 		Identities: &identities.Identities{
 			Active:  &identities.Identity{KeyFile: "/home/solana/active-identity.json", PubKeyStr: "456bAij7ryiCALQcYx4n47uUdop5d18camjTcedppAbM"},
 			Passive: &identities.Identity{KeyFile: "/home/solana/passive-2-identity.json", PubKeyStr: "PassV2Lp9ZyXe4OwR8fMuS5cG1vT3dVkInBqHjNrEaFb"},
@@ -61,18 +53,16 @@ func main() {
 	}
 
 	data := failover.SummaryData{
-		IsDryRun:                   *isDryRun,
-		SkipTowerSync:              *skipTower,
-		TowerFileWillBeTransferred: !*skipTower,
+		IsDryRun:                     *isDryRun,
+		SkipHistoryTransfer:          *skipHistory,
+		VoteHistoryWillBeTransferred: !*skipHistory,
 
 		OrigActiveNode:  origActiveNode,
 		OrigPassiveNode: origPassiveNode,
 
 		OrigActiveSetIdentityDuration:  210 * time.Millisecond,
-		HandoffEvidenceDuration:        handoffEvidenceDuration,
-		ReconciliationDuration:         reconciliationDuration,
-		TowerSyncDuration:              80 * time.Millisecond,
-		TowerFileSizeBytes:             12_345,
+		HistorySyncDuration:            80 * time.Millisecond,
+		VoteHistoryFileSizeBytes:       12_345,
 		OrigPassiveSetIdentityDuration: 155 * time.Millisecond,
 		TotalDuration:                  totalDuration,
 

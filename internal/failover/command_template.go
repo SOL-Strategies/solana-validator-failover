@@ -13,50 +13,49 @@ import (
 // identity commands. The legacy fields intentionally mirror Validator so
 // existing templates continue to work.
 type CommandTemplateData struct {
-	Bin              string
-	LedgerDir        string
-	ClientConfigPath string
-	Identities       *identities.Identities
-	TowerFile        string
-	Name             string
+	Bin                   string
+	LedgerDir             string
+	ClientConfigPath      string
+	Identities            *identities.Identities
+	VoteHistoryFile       string
+	VoteHistoryImportFile string
+	Name                  string
 	// Hostname is retained as an alias for Name for backwards compatibility.
 	Hostname   string
 	PublicIP   string
 	RPCAddress string
 
-	ThisNodeClientFamily            string
-	PeerNodeClientFamily            string
-	FromNodeClientFamily            string
-	ToNodeClientFamily              string
-	ThisNodeIsNativeFiredancer      bool
-	PeerNodeIsNativeFiredancer      bool
-	FromNodeIsNativeFiredancer      bool
-	ToNodeIsNativeFiredancer        bool
-	FromNodeIsAgaveDerived          bool
-	ToNodeIsAgaveDerived            bool
-	FromNodeConsensus               string
-	ToNodeConsensus                 string
-	FromNodeClientVersion           string
-	ToNodeClientVersion             string
-	HandoffStrategy                 string
-	TowerFileWillBeTransferred      bool
-	TowerFileAvailableAtDestination bool
-	ActiveIdentityPubkey            string
-	VoteAccountPubkey               string
-	IsDryRunFailover                bool
-	IdentityTransitionRPCPatchURL   string
+	ThisNodeClientFamily         string
+	PeerNodeClientFamily         string
+	FromNodeClientFamily         string
+	ToNodeClientFamily           string
+	ThisNodeIsNativeFiredancer   bool
+	PeerNodeIsNativeFiredancer   bool
+	FromNodeIsNativeFiredancer   bool
+	ToNodeIsNativeFiredancer     bool
+	FromNodeIsAgaveDerived       bool
+	ToNodeIsAgaveDerived         bool
+	FromNodeConsensus            string
+	ToNodeConsensus              string
+	FromNodeClientVersion        string
+	ToNodeClientVersion          string
+	HandoffStrategy              string
+	VoteHistoryWillBeTransferred bool
+	ActiveIdentityPubkey         string
+	VoteAccountPubkey            string
+	IsDryRunFailover             bool
 }
 
 func isAgaveDerived(family string) bool {
-	return family == "agave" || family == "jito-solana" || family == "frankendancer" || family == "unknown"
+	return family == "agave" || family == "jito-solana"
 }
 
 // NewCommandTemplateData builds a directional context. local is the node on
 // which the command will run; source and destination are the failover roles.
-func NewCommandTemplateData(local, peer, source, destination NodeInfo, strategy string, towerFileWillBeTransferred, dryRun bool) CommandTemplateData {
+func NewCommandTemplateData(local, peer, source, destination NodeInfo, strategy string, voteHistoryWillBeTransferred, dryRun bool) CommandTemplateData {
 	return CommandTemplateData{
 		Bin: local.Bin, LedgerDir: local.LedgerDir, ClientConfigPath: local.ClientConfigPath, Identities: local.Identities,
-		TowerFile: local.TowerFile, Name: local.Hostname, Hostname: local.Hostname, PublicIP: local.PublicIP,
+		VoteHistoryFile: local.VoteHistoryFile, VoteHistoryImportFile: local.VoteHistoryImportFile, Name: local.Hostname, Hostname: local.Hostname, PublicIP: local.PublicIP,
 		RPCAddress:           local.RPCAddress,
 		ThisNodeClientFamily: local.ClientFamily, PeerNodeClientFamily: peer.ClientFamily,
 		FromNodeClientFamily: source.ClientFamily, ToNodeClientFamily: destination.ClientFamily,
@@ -68,14 +67,11 @@ func NewCommandTemplateData(local, peer, source, destination NodeInfo, strategy 
 		ToNodeIsAgaveDerived:       isAgaveDerived(destination.ClientFamily),
 		FromNodeConsensus:          source.ConsensusMode, ToNodeConsensus: destination.ConsensusMode,
 		FromNodeClientVersion: source.ClientVersion, ToNodeClientVersion: destination.ClientVersion,
-		HandoffStrategy:            strategy,
-		TowerFileWillBeTransferred: towerFileWillBeTransferred,
-		TowerFileAvailableAtDestination: towerFileWillBeTransferred && !destination.IsNativeFiredancer &&
-			destination.Consensus != ConsensusAlpenglow && destination.ConsensusMode != ConsensusAlpenglow,
-		ActiveIdentityPubkey:          source.Identities.Active.PubKey(),
-		VoteAccountPubkey:             source.VoteAccount,
-		IsDryRunFailover:              dryRun,
-		IdentityTransitionRPCPatchURL: local.IdentityTransitionRPCPatchURL,
+		HandoffStrategy:              strategy,
+		VoteHistoryWillBeTransferred: voteHistoryWillBeTransferred,
+		ActiveIdentityPubkey:         source.Identities.Active.PubKey(),
+		VoteAccountPubkey:            source.VoteAccount,
+		IsDryRunFailover:             dryRun,
 	}
 }
 

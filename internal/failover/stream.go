@@ -122,54 +122,28 @@ func (s Stream) GetIsDryRunFailover() bool {
 	return s.message.IsDryRunFailover
 }
 
-// SetSkipTowerSync sets the skip tower sync flag
-func (s *Stream) SetSkipTowerSync(skipTowerSync bool) {
-	s.message.SkipTowerSync = skipTowerSync
-	s.refreshTowerTransfer()
+// SetSkipHistoryTransfer sets the skip history transfer flag
+func (s *Stream) SetSkipHistoryTransfer(skipHistoryTransfer bool) {
+	s.message.SkipHistoryTransfer = skipHistoryTransfer
+	s.refreshHistoryTransfer()
 }
 
 func (s *Stream) SetHandoffStrategy(strategy string) {
 	s.message.HandoffStrategy = strategy
-	s.refreshTowerTransfer()
+	s.refreshHistoryTransfer()
 }
 
-func (s *Stream) refreshTowerTransfer() {
-	s.message.TowerFileWillBeTransferred = s.message.HandoffStrategy == HandoffStrategyTowerFile && !s.message.SkipTowerSync
+func (s *Stream) refreshHistoryTransfer() {
+	s.message.VoteHistoryWillBeTransferred = s.message.HandoffStrategy == HandoffStrategyVoteHistory && !s.message.SkipHistoryTransfer
 }
 
 func (s Stream) GetHandoffStrategy() string { return s.message.HandoffStrategy }
 
-func (s Stream) GetTowerFileWillBeTransferred() bool { return s.message.TowerFileWillBeTransferred }
-
-func (s *Stream) SetFrozenTowerSlot(slot uint64) { s.message.FrozenTowerSlot = slot }
-
-func (s Stream) GetFrozenTowerSlot() uint64 { return s.message.FrozenTowerSlot }
+func (s Stream) GetVoteHistoryWillBeTransferred() bool { return s.message.VoteHistoryWillBeTransferred }
 
 func (s *Stream) SetHandoffAborted(aborted bool) { s.message.HandoffAborted = aborted }
 
 func (s Stream) GetHandoffAborted() bool { return s.message.HandoffAborted }
-
-func (s *Stream) SetIdentityTransitionRPCAvailable(v bool) {
-	s.message.IdentityTransitionRPCAvailable = v
-}
-func (s Stream) GetIdentityTransitionRPCAvailable() bool {
-	return s.message.IdentityTransitionRPCAvailable
-}
-func (s *Stream) SetSlotFallbackRequired(v bool) { s.message.SlotFallbackRequired = v }
-func (s Stream) GetSlotFallbackRequired() bool   { return s.message.SlotFallbackRequired }
-func (s *Stream) SetFallbackWaitSlots(v uint64)  { s.message.FallbackWaitSlots = v }
-func (s Stream) GetFallbackWaitSlots() uint64    { return s.message.FallbackWaitSlots }
-func (s *Stream) SetHandoffWarning(v string)     { s.message.HandoffWarning = v }
-func (s *Stream) SetHandoffWarningf(format string, args ...any) {
-	s.message.HandoffWarning = fmt.Sprintf(format, args...)
-}
-func (s Stream) GetHandoffWarning() string             { return s.message.HandoffWarning }
-func (s *Stream) SetProbeIdentityTransitionRPC(v bool) { s.message.ProbeIdentityTransitionRPC = v }
-func (s Stream) GetProbeIdentityTransitionRPC() bool   { return s.message.ProbeIdentityTransitionRPC }
-
-func (s *Stream) SetReconciliationComplete(done bool) { s.message.ReconciliationComplete = done }
-
-func (s Stream) GetReconciliationComplete() bool { return s.message.ReconciliationComplete }
 
 func (s *Stream) SetRollbackCommands(active, passive string) {
 	s.message.ActiveRollbackCommand = active
@@ -180,9 +154,9 @@ func (s Stream) GetActiveRollbackCommand() string { return s.message.ActiveRollb
 
 func (s Stream) GetPassiveRollbackCommand() string { return s.message.PassiveRollbackCommand }
 
-// GetSkipTowerSync returns the skip tower sync flag
-func (s Stream) GetSkipTowerSync() bool {
-	return s.message.SkipTowerSync
+// GetSkipHistoryTransfer returns the skip history transfer flag
+func (s Stream) GetSkipHistoryTransfer() bool {
+	return s.message.SkipHistoryTransfer
 }
 
 // SetIsSuccessfullyCompleted sets the is successfully completed
@@ -279,9 +253,9 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
 	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
 	data.HandoffStrategy = s.message.HandoffStrategy
-	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
-	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer &&
-		s.message.PassiveNodeInfo.Consensus != ConsensusAlpenglow && s.message.PassiveNodeInfo.ConsensusMode != ConsensusAlpenglow
+	data.VoteHistoryWillBeTransferred = s.message.VoteHistoryWillBeTransferred
+	data.VoteHistoryFile = s.message.ActiveNodeInfo.VoteHistoryFile
+	data.VoteHistoryImportFile = s.message.ActiveNodeInfo.VoteHistoryImportFile
 
 	return data
 }
@@ -329,9 +303,9 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
 	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
 	data.HandoffStrategy = s.message.HandoffStrategy
-	data.TowerFileWillBeTransferred = s.message.TowerFileWillBeTransferred
-	data.TowerFileAvailableAtDestination = s.message.TowerFileWillBeTransferred && !s.message.PassiveNodeInfo.IsNativeFiredancer &&
-		s.message.PassiveNodeInfo.Consensus != ConsensusAlpenglow && s.message.PassiveNodeInfo.ConsensusMode != ConsensusAlpenglow
+	data.VoteHistoryWillBeTransferred = s.message.VoteHistoryWillBeTransferred
+	data.VoteHistoryFile = s.message.PassiveNodeInfo.VoteHistoryFile
+	data.VoteHistoryImportFile = s.message.PassiveNodeInfo.VoteHistoryImportFile
 
 	return data
 }
@@ -339,25 +313,22 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 // ConfirmFailover is called by the passive node to proceed with the failover
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity
-// and tower file sync
+// and vote-history transfer
 func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hooks.RollbackConfig, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
 	data := PlanData{
-		IsDryRun:                   s.message.IsDryRunFailover,
-		SkipTowerSync:              s.message.SkipTowerSync,
-		HandoffStrategy:            s.message.HandoffStrategy,
-		TowerFileWillBeTransferred: s.message.TowerFileWillBeTransferred,
-		HandoffWarning:             s.message.HandoffWarning,
-		FallbackWaitSlots:          s.message.FallbackWaitSlots,
-		SlotFallbackRequired:       s.message.SlotFallbackRequired,
-		ActiveNodeInfo:             s.message.ActiveNodeInfo,
-		PassiveNodeInfo:            s.message.PassiveNodeInfo,
-		AppVersion:                 pkgconstants.AppVersion,
-		Hooks:                      failoverHooks,
-		Rollback:                   rollback,
-		ActivePreHookData:          s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
-		ActivePostHookData:         s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
-		PassivePreHookData:         s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
-		PassivePostHookData:        s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
+		IsDryRun:                     s.message.IsDryRunFailover,
+		SkipHistoryTransfer:          s.message.SkipHistoryTransfer,
+		HandoffStrategy:              s.message.HandoffStrategy,
+		VoteHistoryWillBeTransferred: s.message.VoteHistoryWillBeTransferred,
+		ActiveNodeInfo:               s.message.ActiveNodeInfo,
+		PassiveNodeInfo:              s.message.PassiveNodeInfo,
+		AppVersion:                   pkgconstants.AppVersion,
+		Hooks:                        failoverHooks,
+		Rollback:                     rollback,
+		ActivePreHookData:            s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
+		ActivePostHookData:           s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
+		PassivePreHookData:           s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
+		PassivePostHookData:          s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
 	}
 
 	rendered, err := RenderFailoverPlan(data)
@@ -408,23 +379,18 @@ func (s *Stream) GetFailoverSlotsDuration() uint64 {
 // BuildSummaryData builds a SummaryData from the current stream message state.
 // Call this after the failover is complete and all timing fields are set.
 func (s *Stream) BuildSummaryData() SummaryData {
-	stateFileSize := int64(len(s.message.ActiveNodeInfo.TowerFileBytes))
-	if s.message.ActiveNodeInfo.Consensus == "alpenglow" {
-		stateFileSize = s.message.ActiveNodeInfo.TowerFileSizeBytes
-	}
+	stateFileSize := s.message.ActiveNodeInfo.VoteHistoryFileSizeBytes
 	return SummaryData{
-		IsDryRun:                   s.message.IsDryRunFailover,
-		SkipTowerSync:              s.message.SkipTowerSync,
-		TowerFileWillBeTransferred: s.message.TowerFileWillBeTransferred,
+		IsDryRun:                     s.message.IsDryRunFailover,
+		SkipHistoryTransfer:          s.message.SkipHistoryTransfer,
+		VoteHistoryWillBeTransferred: s.message.VoteHistoryWillBeTransferred,
 
 		OrigActiveNode:  s.message.ActiveNodeInfo,
 		OrigPassiveNode: s.message.PassiveNodeInfo,
 
 		OrigActiveSetIdentityDuration:  s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime),
-		HandoffEvidenceDuration:        s.message.HandoffEvidenceEndTime.Sub(s.message.HandoffEvidenceStartTime),
-		ReconciliationDuration:         s.message.ReconciliationEndTime.Sub(s.message.ReconciliationStartTime),
-		TowerSyncDuration:              s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime),
-		TowerFileSizeBytes:             stateFileSize,
+		HistorySyncDuration:            s.message.PassiveNodeSyncVoteHistoryEndTime.Sub(s.message.ActiveNodeSyncVoteHistoryStartTime),
+		VoteHistoryFileSizeBytes:       stateFileSize,
 		OrigPassiveSetIdentityDuration: s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime),
 		TotalDuration:                  s.GetFailoverDuration(),
 
@@ -444,34 +410,14 @@ func (s *Stream) SetActiveNodeSetIdentityEndTime() {
 	s.message.ActiveNodeSetIdentityEndTime = time.Now()
 }
 
-// SetHandoffEvidenceStartTime marks the start of post-demotion evidence collection.
-func (s *Stream) SetHandoffEvidenceStartTime() {
-	s.message.HandoffEvidenceStartTime = time.Now()
+// SetActiveNodeSyncVoteHistoryStartTime sets the active node transfer vote history start time
+func (s *Stream) SetActiveNodeSyncVoteHistoryStartTime() {
+	s.message.ActiveNodeSyncVoteHistoryStartTime = time.Now()
 }
 
-// SetHandoffEvidenceEndTime marks the end of post-demotion evidence collection.
-func (s *Stream) SetHandoffEvidenceEndTime() {
-	s.message.HandoffEvidenceEndTime = time.Now()
-}
-
-// SetReconciliationStartTime marks the start of on-chain reconciliation.
-func (s *Stream) SetReconciliationStartTime() {
-	s.message.ReconciliationStartTime = time.Now()
-}
-
-// SetReconciliationEndTime marks the end of on-chain reconciliation.
-func (s *Stream) SetReconciliationEndTime() {
-	s.message.ReconciliationEndTime = time.Now()
-}
-
-// SetActiveNodeSyncTowerFileStartTime sets the active node sync tower file start time
-func (s *Stream) SetActiveNodeSyncTowerFileStartTime() {
-	s.message.ActiveNodeSyncTowerFileStartTime = time.Now()
-}
-
-// SetActiveNodeSyncTowerFileEndTime sets the active node sync tower file end time
-func (s *Stream) SetActiveNodeSyncTowerFileEndTime() {
-	s.message.ActiveNodeSyncTowerFileEndTime = time.Now()
+// SetActiveNodeSyncVoteHistoryEndTime sets the active node transfer vote history end time
+func (s *Stream) SetActiveNodeSyncVoteHistoryEndTime() {
+	s.message.ActiveNodeSyncVoteHistoryEndTime = time.Now()
 }
 
 // SetPassiveNodeSetIdentityStartTime sets the passive node set identity start time
@@ -484,9 +430,9 @@ func (s *Stream) SetPassiveNodeSetIdentityEndTime() {
 	s.message.PassiveNodeSetIdentityEndTime = time.Now()
 }
 
-// SetPassiveNodeSyncTowerFileEndTime sets the passive node sync tower file end time
-func (s *Stream) SetPassiveNodeSyncTowerFileEndTime() {
-	s.message.PassiveNodeSyncTowerFileEndTime = time.Now()
+// SetPassiveNodeSyncVoteHistoryEndTime sets the passive node transfer vote history end time
+func (s *Stream) SetPassiveNodeSyncVoteHistoryEndTime() {
+	s.message.PassiveNodeSyncVoteHistoryEndTime = time.Now()
 }
 
 // PullActiveIdentityVoteCreditsSample pulls a sample of the vote credits for the active identity
