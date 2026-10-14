@@ -15,8 +15,13 @@ type rpcRequest struct {
 	Params []json.RawMessage `json:"params"`
 }
 
-func consensusRPC(t *testing.T, feature, certificate bool, certMethod bool) *httptest.Server {
+type consensusRPCOpts struct {
+	feature, certificate, emptyCertificate, certMethod bool
+}
+
+func consensusRPC(t *testing.T, opts consensusRPCOpts) *httptest.Server {
 	t.Helper()
+	feature, certificate, emptyCertificate, certMethod := opts.feature, opts.certificate, opts.emptyCertificate, opts.certMethod
 	featureData := []byte{0}
 	if feature {
 		featureData = make([]byte, 9)
@@ -42,7 +47,10 @@ func consensusRPC(t *testing.T, feature, certificate bool, certMethod bool) *htt
 			case AlpenglowFeatureAccount:
 				value = map[string]any{"lamports": 1, "owner": "11111111111111111111111111111111", "data": []any{base64.StdEncoding.EncodeToString(featureData), "base64"}, "executable": false, "rentEpoch": 0}
 			case AlpenglowGenesisCertificateAccount:
-				if certificate {
+				switch {
+				case emptyCertificate:
+					value = map[string]any{"lamports": 100000000, "owner": "11111111111111111111111111111111", "data": []any{"", "base64"}, "executable": false, "rentEpoch": 0}
+				case certificate:
 					value = map[string]any{"lamports": 1, "owner": "11111111111111111111111111111111", "data": []any{"AQ==", "base64"}, "executable": false, "rentEpoch": 0}
 				}
 			}
@@ -70,20 +78,22 @@ func mustJSON(t *testing.T, v any) string {
 
 func TestDetectConsensus(t *testing.T) {
 	for _, tc := range []struct {
-		name                             string
-		feature, certificate, certMethod bool
-		wantMode                         string
-		wantGenesis                      uint64
-		wantErr                          bool
+		name                                               string
+		feature, certificate, emptyCertificate, certMethod bool
+		wantMode                                           string
+		wantGenesis                                        uint64
+		wantErr                                            bool
 	}{
 		{name: "tower", certMethod: true, wantMode: ConsensusTower},
 		{name: "migrating", feature: true, certMethod: true, wantMode: "migrating"},
 		{name: "alpenglow", feature: true, certificate: true, certMethod: true, wantMode: ConsensusAlpenglow, wantGenesis: 99},
 		{name: "contradictory certificate", certificate: true, certMethod: true, wantErr: true},
 		{name: "certificate rpc unsupported", feature: true, certificate: true, wantErr: true},
+		{name: "empty funded certificate account", emptyCertificate: true, certMethod: true, wantMode: ConsensusTower},
+		{name: "empty funded certificate account while migrating", feature: true, emptyCertificate: true, certMethod: true, wantMode: "migrating"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := consensusRPC(t, tc.feature, tc.certificate, tc.certMethod)
+			srv := consensusRPC(t, consensusRPCOpts{feature: tc.feature, certificate: tc.certificate, emptyCertificate: tc.emptyCertificate, certMethod: tc.certMethod})
 			defer srv.Close()
 			state, err := DetectConsensus(srv.URL)
 			if (err != nil) != tc.wantErr {
@@ -98,17 +108,19 @@ func TestDetectConsensus(t *testing.T) {
 
 func TestValidateConsensus(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode                    string
-		feature, certificate, wantErr bool
+		name, mode                                      string
+		feature, certificate, emptyCertificate, wantErr bool
 	}{
 		{name: "tower", mode: ConsensusTower},
 		{name: "tower mismatch", mode: ConsensusAlpenglow, wantErr: true},
 		{name: "alpenglow", mode: ConsensusAlpenglow, feature: true, certificate: true},
 		{name: "alpenglow mismatch", mode: ConsensusTower, feature: true, certificate: true, wantErr: true},
 		{name: "migration rejected", mode: ConsensusAlpenglow, feature: true, wantErr: true},
+		{name: "tower with empty funded certificate account", mode: ConsensusTower, emptyCertificate: true},
+		{name: "migration rejected with empty funded certificate account", mode: ConsensusAlpenglow, feature: true, emptyCertificate: true, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := consensusRPC(t, tc.feature, tc.certificate, true)
+			srv := consensusRPC(t, consensusRPCOpts{feature: tc.feature, certificate: tc.certificate, emptyCertificate: tc.emptyCertificate, certMethod: true})
 			defer srv.Close()
 			err := ValidateConsensus(srv.URL, tc.mode)
 			if (err != nil) != tc.wantErr {

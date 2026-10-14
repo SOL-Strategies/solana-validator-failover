@@ -57,8 +57,11 @@ func DetectConsensus(rpcURL string) (ConsensusState, error) {
 	if err != nil {
 		return ConsensusState{}, fmt.Errorf("cannot read Alpenglow certificate account from local RPC: %w", err)
 	}
+	// Anyone can transfer lamports to any address, which creates a system-owned
+	// account with no data. Such an account at the certificate address is not a
+	// genesis certificate and must be treated as absent.
 	if certificateExists && len(certificateData) == 0 {
-		return ConsensusState{}, fmt.Errorf("Alpenglow certificate account exists but has no data")
+		certificateExists = false
 	}
 
 	switch {
