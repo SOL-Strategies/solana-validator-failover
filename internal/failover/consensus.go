@@ -57,16 +57,16 @@ func DetectConsensus(rpcURL string) (ConsensusState, error) {
 	if err != nil {
 		return ConsensusState{}, fmt.Errorf("cannot read Alpenglow certificate account from local RPC: %w", err)
 	}
-	if certificateExists && len(certificateData) == 0 {
-		return ConsensusState{}, fmt.Errorf("Alpenglow certificate account exists but has no data")
-	}
+	// The address can be prefunded before migration. Like Agave's bank, only
+	// consider the certificate present when the account contains data.
+	certificatePresent := certificateExists && len(certificateData) > 0
 
 	switch {
-	case !featureActive && !certificateExists:
+	case !featureActive && !certificatePresent:
 		return ConsensusState{Mode: ConsensusTower}, nil
-	case featureActive && !certificateExists:
+	case featureActive && !certificatePresent:
 		return ConsensusState{Mode: "migrating"}, nil
-	case !featureActive && certificateExists:
+	case !featureActive && certificatePresent:
 		return ConsensusState{}, fmt.Errorf("Alpenglow certificate exists while its feature account is inactive")
 	default:
 		var response json.RawMessage
