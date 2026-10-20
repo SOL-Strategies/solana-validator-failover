@@ -123,7 +123,10 @@ func getConsensusAccount(ctx context.Context, client *rpc.Client, key solanago.P
 }
 
 func decodeFeatureActivation(data []byte, exists bool) (bool, error) {
-	if !exists {
+	// The address can be prefunded before activation, which leaves a
+	// system-owned account with no data. Like an absent account, that is an
+	// inactive feature.
+	if !exists || len(data) == 0 {
 		return false, nil
 	}
 	switch {
