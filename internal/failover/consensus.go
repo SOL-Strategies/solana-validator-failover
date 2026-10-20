@@ -123,23 +123,24 @@ func getConsensusAccount(ctx context.Context, client *rpc.Client, key solanago.P
 }
 
 func decodeFeatureActivation(data []byte, exists bool) (bool, error) {
-	// The address can be prefunded before activation, which leaves a
-	// system-owned account with no data. Like an absent account, that is an
-	// inactive feature.
+	// A feature account holds a bincode Option<u64> activation slot. The
+	// address can be prefunded before the feature is submitted (system-owned,
+	// no data), the feature program then allocates it as None (tag 0, usually
+	// 9 bytes with zero padding) until the activation epoch, and finally
+	// Some(slot) (tag 1 followed by the slot).
 	if !exists || len(data) == 0 {
 		return false, nil
 	}
-	switch {
-	case len(data) == 1 && data[0] == 0:
+	switch data[0] {
+	case 0:
 		return false, nil
-	case len(data) == 9 && data[0] == 1:
-		_ = binary.LittleEndian.Uint64(data[1:]) // Validate the bincode Option<u64> payload.
+	case 1:
+		if len(data) < 9 {
+			return false, fmt.Errorf("unexpected feature account data length/tag: %d/%d", len(data), data[0])
+		}
+		_ = binary.LittleEndian.Uint64(data[1:9])
 		return true, nil
 	default:
-		var tag byte
-		if len(data) > 0 {
-			tag = data[0]
-		}
-		return false, fmt.Errorf("unexpected feature account data length/tag: %d/%d", len(data), tag)
+		return false, fmt.Errorf("unexpected feature account data length/tag: %d/%d", len(data), data[0])
 	}
 }
