@@ -117,7 +117,7 @@ Download and install the latest [release](https://github.com/SOL-Strategies/sola
 
 2. **Some focus and appreciation of what you're doing** — these can be high pucker factor operations regardless of tooling.
 
-3. **Local validator started with `--full-rpc-api`** — this tool calls `getClusterNodes` on the local RPC, which requires the validator to be started with the `--full-rpc-api` flag (Agave/Firedancer). For resilient peer discovery, configure a private cluster RPC that also supports `getClusterNodes`; it is used when the local validator's gossip view does not contain the peer.
+3. **Local RPC supports account reads and gossip discovery** — startup calls local `getAccountInfo` to validate consensus in both Tower and Alpenglow modes, and peer discovery calls `getClusterNodes`. For Agave/Jito, start the validator with `--full-rpc-api`. For Frankendancer (`fdctl`), set `full_api = true` under `[rpc]` in its TOML configuration. Native Firedancer uses `[tiles.rpc]`; verify that the configured endpoint and validator version support the required methods rather than applying Agave's flag. Alpenglow mode additionally requires `getAgGenesisCert`. For resilient peer discovery, configure a private cluster RPC that also supports `getClusterNodes`; gossip discovery falls back to it, but local consensus validation cannot.
 
 ## Configuration
 
@@ -176,7 +176,8 @@ validator:
 
   # local rpc address of node this program runs on
   # default: http://localhost:8899
-  # note: the validator must be started with --full-rpc-api (required for getClusterNodes)
+  # requires getAccountInfo and getClusterNodes (Agave/Jito: --full-rpc-api;
+  # Frankendancer: [rpc] full_api = true). Alpenglow also requires getAgGenesisCert.
   rpc_address: http://localhost:8899
 
   # tower file config (required only when failover.consensus.mode is tower)
@@ -443,6 +444,14 @@ Post-hooks always run even if the set-identity command fails. Pre hooks are inte
 ### Rollback is shown in the failover plan
 
 When `rollback.enabled: true`, the pre-failover plan shows the rollback commands that would run on each node if the failover fails, giving operators visibility before they confirm.
+
+## Troubleshooting local RPC capabilities
+
+If startup reports `local RPC method getAccountInfo is unavailable` with JSON-RPC code `-32601`, enable full RPC on the local validator: `--full-rpc-api` for Agave/Jito, or `full_api = true` under `[rpc]` for Frankendancer (`fdctl`). Restart the validator with the updated configuration before retrying failover. This check runs in Tower mode too; it reads local accounts to verify the configured consensus mode. A cluster RPC URL cannot replace this local check.
+
+For native Firedancer, verify its `[tiles.rpc]` endpoint and method support for the installed version. If using a proxy, ensure it routes and permits the required methods. An unavailable method does not establish that a particular startup flag is missing. If `getAgGenesisCert` is unavailable, also verify that the validator version supports that Alpenglow RPC method.
+
+The tool reports these failures through its existing RPC calls, without additional startup probes. Connection, authentication, and other RPC errors retain their original diagnostics. Missing account data is handled by consensus detection and is not treated as a missing method.
 
 ## Troubleshooting gossip peer discovery
 

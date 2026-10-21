@@ -138,7 +138,7 @@ func (v *Validator) NewFromConfig(cfg *Config) error {
 		return fmt.Errorf("validator.failover.consensus.mode must be tower or alpenglow, got %q", v.Consensus)
 	}
 	if err := failover.ValidateConsensus(v.RPCAddress, v.Consensus); err != nil {
-		return fmt.Errorf("validator.failover.consensus.mode does not match local RPC: %w", err)
+		return fmt.Errorf("failed to validate configured consensus mode against local RPC: %w", err)
 	}
 	if v.Consensus == "tower" {
 		if err = v.configureTowerFile(cfg.Tower); err != nil {

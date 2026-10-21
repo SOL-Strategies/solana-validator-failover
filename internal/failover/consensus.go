@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sol-strategies/solana-validator-failover/internal/solana"
 	solanago "github.com/solana-foundation/solana-go/v2"
 	"github.com/solana-foundation/solana-go/v2/rpc"
 )
@@ -71,7 +72,7 @@ func DetectConsensus(rpcURL string) (ConsensusState, error) {
 	default:
 		var response json.RawMessage
 		if err := client.RPCCallForInto(ctx, &response, "getAgGenesisCert", nil); err != nil {
-			return ConsensusState{}, fmt.Errorf("cannot read Alpenglow genesis slot from local RPC: %w", err)
+			return ConsensusState{}, fmt.Errorf("cannot read Alpenglow genesis slot from local RPC: %w", solana.WrapLocalRPCMethodError("getAgGenesisCert", err))
 		}
 		if bytes.Equal(bytes.TrimSpace(response), []byte("null")) {
 			return ConsensusState{}, fmt.Errorf("Alpenglow certificate account exists but getAgGenesisCert returned null")
@@ -114,7 +115,7 @@ func getConsensusAccount(ctx context.Context, client *rpc.Client, key solanago.P
 		return nil, false, 0, nil
 	}
 	if err != nil {
-		return nil, false, 0, err
+		return nil, false, 0, solana.WrapLocalRPCMethodError("getAccountInfo", err)
 	}
 	if result == nil || result.Value == nil || result.Value.Data == nil {
 		return nil, false, 0, fmt.Errorf("RPC returned an incomplete account response")
