@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/solana-foundation/solana-go/v2/rpc/jsonrpc"
+	"github.com/stretchr/testify/require"
 )
 
 type rpcRequest struct {
@@ -102,10 +105,46 @@ func TestDetectConsensus(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("DetectConsensus() error = %v; wantErr %v", err, tc.wantErr)
 			}
+			if tc.name == "certificate rpc unsupported" {
+				require.ErrorContains(t, err, "local RPC method getAgGenesisCert is unavailable")
+				require.ErrorContains(t, err, "validator version supports the Alpenglow")
+			}
 			if err == nil && (state.Mode != tc.wantMode || state.GenesisSlot != tc.wantGenesis) {
 				t.Fatalf("state = %+v, want mode %q genesis %d", state, tc.wantMode, tc.wantGenesis)
 			}
 		})
+	}
+}
+
+func TestValidateConsensusMissingAccountMethod(t *testing.T) {
+	for _, mode := range []string{ConsensusTower, ConsensusAlpenglow} {
+		for _, failOnRequest := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/account%d", mode, failOnRequest), func(t *testing.T) {
+				requests := 0
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request rpcRequest
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+					require.Equal(t, "getAccountInfo", request.Method)
+					requests++
+					w.Header().Set("Content-Type", "application/json")
+					if requests == failOnRequest {
+						_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":1}`)
+						return
+					}
+					_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","result":{"context":{"slot":100},"value":null},"id":1}`)
+				}))
+				defer srv.Close()
+
+				err := ValidateConsensus(srv.URL, mode)
+				require.ErrorContains(t, err, "local RPC method getAccountInfo is unavailable")
+				require.ErrorContains(t, err, "--full-rpc-api")
+				require.ErrorContains(t, err, "[rpc] full_api = true")
+				var rpcErr *jsonrpc.RPCError
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, -32601, rpcErr.Code)
+				require.Equal(t, failOnRequest, requests)
+			})
+		}
 	}
 }
 

@@ -2,7 +2,6 @@ package solana
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -12,12 +11,7 @@ import (
 	"github.com/charmbracelet/log"
 	solanago "github.com/solana-foundation/solana-go/v2"
 	"github.com/solana-foundation/solana-go/v2/rpc"
-	"github.com/solana-foundation/solana-go/v2/rpc/jsonrpc"
 )
-
-// jsonRPCMethodNotFound is the standard JSON-RPC 2.0 error code for "Method not found".
-// See: https://www.jsonrpc.org/specification#error_object
-const jsonRPCMethodNotFound = -32601
 
 // RPCClientInterface defines the interface for RPC client operations - a solana rpc client interface
 type RPCClientInterface interface {
@@ -143,17 +137,9 @@ func (c *Client) NodeFromPubkey(pubkey string) (*Node, error) {
 func (c *Client) getClusterNodes() ([]*rpc.GetClusterNodesResult, error) {
 	nodes, err := c.localRPCClient.GetClusterNodes(context.Background())
 	if err != nil {
-		return nil, wrapLocalGetClusterNodesErr(err)
+		return nil, WrapLocalRPCMethodError("getClusterNodes", err)
 	}
 	return nodes, nil
-}
-
-func wrapLocalGetClusterNodesErr(err error) error {
-	var rpcErr *jsonrpc.RPCError
-	if errors.As(err, &rpcErr) && rpcErr.Code == jsonRPCMethodNotFound {
-		return fmt.Errorf("%w; start the local validator with --full-rpc-api to enable getClusterNodes", err)
-	}
-	return err
 }
 
 func (c *Client) nodeFromIP(ip string) (node *rpc.GetClusterNodesResult, err error) {
