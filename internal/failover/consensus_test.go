@@ -97,6 +97,12 @@ func TestDetectConsensus(t *testing.T) {
 		{name: "mainnet prefunded feature and certificate", feature: []byte{}, certificate: []byte{}, wantMode: ConsensusTower},
 		{name: "contradictory certificate prefunded feature", feature: []byte{}, certificate: []byte{1}, wantErr: true},
 		{name: "malformed feature", feature: []byte{2}, wantErr: true},
+		{name: "pending feature", feature: make([]byte, 9), wantMode: ConsensusTower},
+		{name: "pending feature with prefunded certificate", feature: make([]byte, 9), certificate: []byte{}, wantMode: ConsensusTower},
+		{name: "contradictory certificate pending feature", feature: make([]byte, 9), certificate: []byte{1}, wantErr: true},
+		{name: "active feature with trailing bytes", feature: append(append([]byte{}, activeFeature...), 0), wantMode: "migrating"},
+		{name: "truncated active feature", feature: []byte{1, 0, 0}, wantErr: true},
+		{name: "malformed feature with padding", feature: append([]byte{2}, make([]byte, 8)...), wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := consensusRPC(t, tc.feature, tc.certificate, tc.certMethod)
