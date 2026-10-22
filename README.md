@@ -104,7 +104,7 @@ solana-validator-failover run --to-peer backup-validator-region-x --yes
 
 ### Download binary
 
-Download and install the latest [release](https://github.com/SOL-Strategies/solana-validator-failover/releases) binary for your system.
+Download and install the latest [release](https://github.com/SOL-Strategies/solana-validator-failover/releases) binary for Linux amd64 or arm64. Linux is the supported build and runtime platform.
 
 ### From source
 
@@ -532,7 +532,7 @@ make dev
 # build locally
 make build
 
-# Build all four release platforms, compressed with SHA-256 checksums
+# Build Linux amd64 and arm64 releases, compressed with SHA-256 checksums
 make build-all
 ```
 
@@ -540,6 +540,6 @@ make build-all
 
 GitHub Actions tests and builds directly with `actions/setup-go`, using the patched Go version in `go.mod`. Docker is optional for local development and mock demos; release builds do not use it.
 
-Every branch push and PR to `main` runs the race-enabled tests and builds Linux/macOS archives for amd64 and arm64. Pushing a `v*` tag publishes the tested artifacts as a GitHub release. Each `.gz.sha256` file checksums its matching `.gz` archive; verify before decompression with `sha256sum -c <archive>.gz.sha256`.
+Every branch push and PR to `main` runs the race-enabled tests and builds Linux archives for amd64 and arm64. Pushing a `v*` tag publishes the tested artifacts as a GitHub release. Each `.gz.sha256` file checksums its matching `.gz` archive; verify before decompression with `sha256sum -c <archive>.gz.sha256`.
 
-Run `make smoke-test APP_VERSION=0.2.0` to verify the embedded binary version locally, or `make build-all APP_VERSION=0.2.0` to create the same four archives and checksums as CI. Builds do not format source files, rewrite module dependencies, or install development tools.
+Run `make smoke-test APP_VERSION=0.2.0` to verify the embedded binary version locally, or `make build-all APP_VERSION=0.2.0` to create the same two archives and checksums as CI. Builds do not format source files, rewrite module dependencies, or install development tools.
