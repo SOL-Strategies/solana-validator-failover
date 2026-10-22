@@ -123,7 +123,7 @@ func TestDetectConsensus(t *testing.T) {
 }
 
 func TestValidateConsensusMissingAccountMethod(t *testing.T) {
-	for _, mode := range []string{ConsensusTower, ConsensusAlpenglow} {
+	for _, mode := range []string{ConsensusAlpenglow} {
 		for _, failOnRequest := range []int{1, 2} {
 			t.Run(fmt.Sprintf("%s/account%d", mode, failOnRequest), func(t *testing.T) {
 				requests := 0
@@ -163,8 +163,8 @@ func TestValidateConsensus(t *testing.T) {
 		feature, certificate []byte
 		wantErr              bool
 	}{
-		{name: "tower", mode: ConsensusTower},
-		{name: "mainnet prefunded certificate", mode: ConsensusTower, certificate: []byte{}},
+		{name: "tower", mode: ConsensusTower, wantErr: true},
+		{name: "mainnet prefunded certificate", mode: ConsensusTower, certificate: []byte{}, wantErr: true},
 		{name: "prefunded certificate mode mismatch", mode: ConsensusAlpenglow, certificate: []byte{}, wantErr: true},
 		{name: "tower mismatch", mode: ConsensusAlpenglow, wantErr: true},
 		{name: "alpenglow", mode: ConsensusAlpenglow, feature: activeFeature, certificate: []byte{1}},

@@ -6,24 +6,30 @@ import (
 
 // Message represents the message data that can be encoded/decoded
 type Message struct {
-	CanProceed                       bool
-	ErrorMessage                     string
-	ActiveNodeInfo                   NodeInfo
-	PassiveNodeInfo                  NodeInfo
-	IsDryRunFailover                 bool
-	IsSuccessfullyCompleted          bool
-	SkipTowerSync                    bool
-	RollbackRequired                 bool
-	ActiveRollbackEnabled            bool
-	ActiveNodeSetIdentityStartTime   time.Time
-	ActiveNodeSetIdentityEndTime     time.Time
-	ActiveNodeSyncTowerFileStartTime time.Time
-	ActiveNodeSyncTowerFileEndTime   time.Time
-	PassiveNodeSetIdentityStartTime  time.Time
-	PassiveNodeSetIdentityEndTime    time.Time
-	PassiveNodeSyncTowerFileEndTime  time.Time
-	FailoverStartSlot                uint64
-	FailoverEndSlot                  uint64
-	// key is the identity pubkey
-	CreditSamples CreditSamples
+	TerminalAck                        bool
+	TerminalResult                     bool
+	CanProceed                         bool
+	ErrorMessage                       string
+	ActiveNodeInfo                     NodeInfo
+	PassiveNodeInfo                    NodeInfo
+	IsDryRunFailover                   bool
+	IsSuccessfullyCompleted            bool
+	HandoffStrategy                    string
+	VoteHistoryWillBeTransferred       bool
+	HandoffAborted                     bool
+	ActiveRollbackCommand              string
+	PassiveRollbackCommand             string
+	RollbackRequired                   bool
+	ActiveRollbackEnabled              bool
+	ActiveNodeSetIdentityStartTime     time.Time
+	ActiveNodeSetIdentityEndTime       time.Time
+	ActiveNodeSyncVoteHistoryStartTime time.Time
+	ActiveNodeSyncVoteHistoryEndTime   time.Time
+	PassiveNodeSetIdentityStartTime    time.Time
+	PassiveNodeSetIdentityEndTime      time.Time
+	PassiveNodeSyncVoteHistoryEndTime  time.Time
+	FailoverStartSlot                  uint64
+	FailoverEndSlot                    uint64
+	Voting                             VotingResult
+	VotingMonitoringEnabled            bool
 }

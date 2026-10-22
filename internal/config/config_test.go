@@ -27,16 +27,17 @@ validator:
       stream_timeout: 10m
     min_time_to_leader_slot: 10s
     monitor:
-      credit_samples:
-        count: 10
-        interval: 10s
+      voting:
+        enabled: true
+        timeout: 10s
+        poll_interval: 1s
     peers:
       peer1:
         address: localhost:8001
       peer2:
         address: localhost:8002
-  tower:
-    file_name_template: "tower-test-{{ .Identities.Active.PubKey }}.bin"
+  vote_history:
+    dir: /history
   identities:
     active: /path/to/active/key.json
     passive: /path/to/passive/key.json
@@ -54,7 +55,7 @@ validator:
 	assert.Equal(t, DefaultLogLevel, cfg.Log.Level)
 	assert.Equal(t, DefaultLogFormat, cfg.Log.Format)
 	assert.Equal(t, "testnet", cfg.Validator.Cluster)
-	assert.Equal(t, "tower", cfg.Validator.Failover.Consensus.Mode)
+	assert.Equal(t, "alpenglow", cfg.Validator.Failover.Consensus.Mode)
 	assert.Equal(t, DefaultSetIdentityActiveCmdTemplate, cfg.Validator.Failover.SetIdentityActiveCmdTemplate)
 	assert.Equal(t, "http://localhost:8899", cfg.Validator.RPCAddress)
 	assert.Equal(t, "/tmp/ledger", cfg.Validator.LedgerDir)
@@ -62,9 +63,8 @@ validator:
 	assert.Equal(t, "10s", cfg.Validator.Failover.Server.HeartbeatInterval)
 	assert.Equal(t, "10m", cfg.Validator.Failover.Server.StreamTimeout)
 	assert.Equal(t, "10s", cfg.Validator.Failover.MinimumTimeToLeaderSlot)
-	assert.Equal(t, 10, cfg.Validator.Failover.Monitor.CreditSamples.Count)
-	assert.Equal(t, "10s", cfg.Validator.Failover.Monitor.CreditSamples.Interval)
-	assert.Equal(t, "tower-test-{{ .Identities.Active.PubKey }}.bin", cfg.Validator.Tower.FileNameTemplate)
+	assert.True(t, cfg.Validator.Failover.Monitor.Voting.Enabled)
+	assert.Equal(t, "10s", cfg.Validator.Failover.Monitor.Voting.Timeout)
 	assert.Equal(t, "/path/to/active/key.json", cfg.Validator.Identities.Active)
 	assert.Equal(t, "/path/to/passive/key.json", cfg.Validator.Identities.Passive)
 
@@ -145,17 +145,17 @@ validator:
 	require.NoError(t, err)
 
 	// Verify defaults are set correctly
-	assert.Equal(t, DefaultBin, cfg.Validator.Bin)                                                                      // default
-	assert.Equal(t, DefaultLogLevel, cfg.Log.Level)                                                                     // default
-	assert.Equal(t, DefaultLogFormat, cfg.Log.Format)                                                                   // default
-	assert.Equal(t, DefaultCluster, cfg.Validator.Cluster)                                                              // from config
-	assert.Equal(t, DefaultFailoverServerPort, cfg.Validator.Failover.Server.Port)                                      // default
-	assert.Equal(t, DefaultFailoverServerHeartbeatInterval, cfg.Validator.Failover.Server.HeartbeatInterval)            // default
-	assert.Equal(t, DefaultFailoverServerStreamTimeout, cfg.Validator.Failover.Server.StreamTimeout)                    // default
-	assert.Equal(t, DefaultFailoverMinimumTimeToLeaderSlot, cfg.Validator.Failover.MinimumTimeToLeaderSlot)             // default
-	assert.Equal(t, DefaultFailoverMonitorCreditSamplesCount, cfg.Validator.Failover.Monitor.CreditSamples.Count)       // default
-	assert.Equal(t, DefaultFailoverMonitorCreditSamplesInterval, cfg.Validator.Failover.Monitor.CreditSamples.Interval) // default
-	assert.Equal(t, DefaultTowerFileNameTemplate, cfg.Validator.Tower.FileNameTemplate)                                 // default
+	assert.True(t, cfg.Validator.Failover.Monitor.Voting.Enabled)
+	assert.Equal(t, "2m", cfg.Validator.Failover.Monitor.Voting.Timeout)
+	assert.Equal(t, "1s", cfg.Validator.Failover.Monitor.Voting.PollInterval)
+	assert.Equal(t, DefaultBin, cfg.Validator.Bin)                                                           // default
+	assert.Equal(t, DefaultLogLevel, cfg.Log.Level)                                                          // default
+	assert.Equal(t, DefaultLogFormat, cfg.Log.Format)                                                        // default
+	assert.Equal(t, DefaultCluster, cfg.Validator.Cluster)                                                   // from config
+	assert.Equal(t, DefaultFailoverServerPort, cfg.Validator.Failover.Server.Port)                           // default
+	assert.Equal(t, DefaultFailoverServerHeartbeatInterval, cfg.Validator.Failover.Server.HeartbeatInterval) // default
+	assert.Equal(t, DefaultFailoverServerStreamTimeout, cfg.Validator.Failover.Server.StreamTimeout)         // default
+	assert.Equal(t, DefaultFailoverMinimumTimeToLeaderSlot, cfg.Validator.Failover.MinimumTimeToLeaderSlot)  // default
 }
 
 func TestLoadFromConfigFile_WithLogConfig(t *testing.T) {
@@ -251,9 +251,10 @@ validator:
       stream_timeout: 15m
     min_time_to_leader_slot: 20s
     monitor:
-      credit_samples:
-        count: 15
-        interval: 30s
+      voting:
+        enabled: false
+        timeout: 30s
+        poll_interval: 2s
     peers:
       peer1:
         address: peer1.private.net:9898
@@ -261,8 +262,8 @@ validator:
         address: peer2.private.net:9898
       peer3:
         address: peer3.private.net:9898
-  tower:
-    file_name_template: "custom-tower-{{ .Identities.Active.PubKey }}-{{ .Cluster }}.bin"
+  vote_history:
+    dir: /history
   identities:
     active: /keys/active.json
     passive: /keys/passive.json
@@ -294,14 +295,8 @@ validator:
 	assert.Equal(t, "30s", cfg.Validator.Failover.Server.HeartbeatInterval)
 	assert.Equal(t, "15m", cfg.Validator.Failover.Server.StreamTimeout)
 	assert.Equal(t, "20s", cfg.Validator.Failover.MinimumTimeToLeaderSlot)
-	assert.Equal(t, 15, cfg.Validator.Failover.Monitor.CreditSamples.Count)
-	assert.Equal(t, "30s", cfg.Validator.Failover.Monitor.CreditSamples.Interval)
-
-	// Verify tower configuration
-	assert.Equal(t,
-		"custom-tower-{{ .Identities.Active.PubKey }}-{{ .Cluster }}.bin",
-		cfg.Validator.Tower.FileNameTemplate,
-	)
+	assert.False(t, cfg.Validator.Failover.Monitor.Voting.Enabled)
+	assert.Equal(t, "30s", cfg.Validator.Failover.Monitor.Voting.Timeout)
 
 	// Verify identities
 	assert.Equal(t, "/keys/active.json", cfg.Validator.Identities.Active)
@@ -342,4 +337,20 @@ validator:
 
 	assert.Equal(t, "home-validator", cfg.Validator.Bin)
 	assert.Equal(t, "home-testnet", cfg.Validator.Cluster)
+}
+
+func TestRejectLegacyConfigEvenWhenEmptyOrFalse(t *testing.T) {
+	for _, body := range []string{
+		"validator:\n  tower: {}\n", "validator:\n  tower:\n    auto_empty_when_passive: false\n",
+		"validator:\n  tower:\n    dir: ''\n", "validator:\n  tower: null\n",
+		"validator:\n  failover:\n    monitor:\n      credit_samples: {}\n",
+		"validator:\n  failover:\n    monitor:\n      credit_samples:\n        count: 0\n",
+	} {
+		t.Run(body, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(body), 0600))
+			_, err := NewFromFile(path)
+			require.ErrorContains(t, err, "no longer supported")
+		})
+	}
 }

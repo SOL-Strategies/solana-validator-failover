@@ -11,7 +11,10 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.."
 
 MOCK_URL="http://localhost:8899"
+export MOCK_SOLANA_URL="$MOCK_URL"
 BINARY="./bin/solana-validator-failover-dev-linux-amd64"
+
+go run ./integration/prepare-history
 
 # Reset: chicago starts as active.
 curl -sf -X POST -H "Content-Type: application/json" \
@@ -20,9 +23,9 @@ curl -sf -X POST -H "Content-Type: application/json" \
 
 # Start chicago (active) in the background after a brief delay so london's
 # QUIC server is ready to accept the connection when chicago connects.
-(sleep 3 && "$BINARY" run --config integration/configs/demo-chicago.yaml \
+(sleep 3 && VALIDATOR_NAME=chicago "$BINARY" run --config integration/configs/demo-chicago.yaml \
     --to-peer london --yes) >/dev/null 2>&1 &
 disown $!
 
 # Exec london (passive) — replaces this shell so VHS records its output directly.
-exec "$BINARY" run --config integration/configs/demo-london.yaml --not-a-drill
+VALIDATOR_NAME=london exec "$BINARY" run --config integration/configs/demo-london.yaml --not-a-drill

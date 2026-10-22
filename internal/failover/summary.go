@@ -15,8 +15,7 @@ import (
 
 // SummaryData holds all data needed to render the post-failover summary.
 type SummaryData struct {
-	IsDryRun      bool
-	SkipTowerSync bool
+	IsDryRun bool
 
 	// OrigActiveNode is the node that initiated the failover (was active, now passive).
 	// OrigPassiveNode is the node that received the failover (was passive, now active).
@@ -25,8 +24,8 @@ type SummaryData struct {
 
 	// Timing
 	OrigActiveSetIdentityDuration  time.Duration
-	TowerSyncDuration              time.Duration
-	TowerFileSizeBytes             int64
+	HistorySyncDuration            time.Duration
+	VoteHistoryFileSizeBytes       int64
 	OrigPassiveSetIdentityDuration time.Duration
 	TotalDuration                  time.Duration
 
@@ -35,17 +34,15 @@ type SummaryData struct {
 	FailoverEndSlot   uint64
 	SlotsDuration     uint64
 
-	// Vote credit rank (optional, populated after credit monitoring)
-	HasVoteRankData bool
-	VoteRankDiff    int
-	VoteRankFirst   int
-	VoteRankLast    int
+	Voting                VotingResult
+	SuccessfullyCompleted bool
 }
 
 // RenderFailoverSummary renders the post-failover summary to a string.
 func RenderFailoverSummary(data SummaryData) (string, error) {
 	funcMap := template.FuncMap{
 		"stateLabel": stateLabel,
+		"trimPrefix": strings.TrimPrefix,
 		// truncPubkey uses ASCII "..." so byte-length == display-width.
 		"truncPubkey": func(s string) string {
 			if len(s) <= 16 {
@@ -96,8 +93,10 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	// labelWidth is the display width of the widest section label so that the
 	// timing info on each header line aligns vertically.
 	labelWidth := max(len(data.OrigActiveNode.Hostname), len(data.OrigPassiveNode.Hostname))
-	if !data.SkipTowerSync {
-		labelWidth = max(labelWidth, len("> "+stateLabel(data.OrigActiveNode.Consensus)))
+	labelWidth = max(labelWidth, len("> "+stateLabel(data.OrigActiveNode.Consensus)))
+	votingSlotDelta := uint64(0)
+	if data.Voting.LastSlot >= data.Voting.FirstSlot {
+		votingSlotDelta = data.Voting.LastSlot - data.Voting.FirstSlot
 	}
 
 	tpl, err := template.New("failoverSummary").Funcs(funcMap).Parse(`
@@ -107,21 +106,21 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
         {{ Muted "ip       =" }} {{ LightGrey .OrigActiveNode.PublicIP }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigActiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverStartSlot) }}
-{{ if not .SkipTowerSync }}
-  {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}
-        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .TowerSyncDuration) }}
-        {{ Muted "size     =" }} {{ LightGrey (FormatBytes .TowerFileSizeBytes) }}
-{{ end }}
+
+
+  {{ LightGrey (stateLabel .OrigActiveNode.Consensus) }}{{ if .IsDryRun }} {{ Muted "(pre-demotion dry-run snapshot)" }}{{ end }}
+        {{ Muted "took     =" }} {{ LightGrey (FormatDuration .HistorySyncDuration) }}
+        {{ Muted "size     =" }} {{ LightGrey (FormatBytes .VoteHistoryFileSizeBytes) }}
+
   {{ Active .OrigPassiveNode.Hostname true }}
         {{ Muted "role     =" }} {{ Active "active" false }}
         {{ Muted "identity =" }} {{ Active (truncPubkey .OrigPassiveNode.Identities.Active.PubKey) false }}
         {{ Muted "ip       =" }} {{ LightGrey .OrigPassiveNode.PublicIP }}
         {{ Muted "took     =" }} {{ LightGrey (FormatDuration .OrigPassiveSetIdentityDuration) }}
         {{ Muted "at_slot  =" }} {{ LightGrey (FormatSlot .FailoverEndSlot) }}
-{{ if .HasVoteRankData }}
-  {{ Purple "Vote credits:" }} {{ Muted "rank" }} {{ if gt .VoteRankDiff 0 }}{{ Active (printf "improved by +%d" .VoteRankDiff) false }}{{ else if lt .VoteRankDiff 0 }}{{ Passive (printf "worsened by %d" .VoteRankDiff) false }}{{ else }}{{ LightGrey "unchanged" }}{{ end }} {{ Muted (printf "(%d → %d)" .VoteRankFirst .VoteRankLast) }}
-{{ end }}
-  {{ if .IsDryRun }}{{ Blue (printf "✓ Dry run complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) }}{{ else }}{{ Active (printf "✓ Failover complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) false }}{{ end }}
+
+  {{ if .IsDryRun }}{{ Blue (printf "✓ Dry run complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) }}{{ else if .SuccessfullyCompleted }}{{ Active (printf "✓ Failover complete in %s%s" (FormatDuration .TotalDuration) (SlotsSuffix .SlotsDuration)) false }}{{ else }}{{ Passive "Identity handover completed; voting unverified" false }}{{ end }}
+  {{ if eq .Voting.Status "confirmed" }}{{ Active (printf "✓ Voting check confirmed in %s %s (%s → %s)" (FormatDuration .Voting.Duration) (trimPrefix (SlotsSuffix .VotingSlotDelta) ", ") (FormatSlot .Voting.FirstSlot) (FormatSlot .Voting.LastSlot)) false }}{{ else }}{{ Purple "Post-failover voting check:" }} {{ if eq .Voting.Status "disabled" }}{{ LightGrey "disabled" }}{{ else if eq .Voting.Status "dry-run" }}{{ LightGrey "not performed (dry run)" }}{{ else }}{{ Passive "unverified" false }}{{ end }}{{ end }}
 `)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
@@ -130,22 +129,20 @@ func RenderFailoverSummary(data SummaryData) (string, error) {
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
 		"IsDryRun":                       data.IsDryRun,
-		"SkipTowerSync":                  data.SkipTowerSync,
+		"Voting":                         data.Voting,
+		"VotingSlotDelta":                votingSlotDelta,
+		"SuccessfullyCompleted":          data.SuccessfullyCompleted,
 		"OrigActiveNode":                 data.OrigActiveNode,
 		"OrigPassiveNode":                data.OrigPassiveNode,
 		"LabelWidth":                     labelWidth,
 		"OrigActiveSetIdentityDuration":  data.OrigActiveSetIdentityDuration,
-		"TowerSyncDuration":              data.TowerSyncDuration,
-		"TowerFileSizeBytes":             data.TowerFileSizeBytes,
+		"HistorySyncDuration":            data.HistorySyncDuration,
+		"VoteHistoryFileSizeBytes":       data.VoteHistoryFileSizeBytes,
 		"OrigPassiveSetIdentityDuration": data.OrigPassiveSetIdentityDuration,
 		"TotalDuration":                  data.TotalDuration,
 		"FailoverStartSlot":              data.FailoverStartSlot,
 		"FailoverEndSlot":                data.FailoverEndSlot,
 		"SlotsDuration":                  data.SlotsDuration,
-		"HasVoteRankData":                data.HasVoteRankData,
-		"VoteRankDiff":                   data.VoteRankDiff,
-		"VoteRankFirst":                  data.VoteRankFirst,
-		"VoteRankLast":                   data.VoteRankLast,
 	}); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}

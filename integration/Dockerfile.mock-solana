@@ -1,6 +1,7 @@
-FROM golang:1.26.5-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache --upgrade git ca-certificates tzdata \
+    && update-ca-certificates
 
 WORKDIR /app
 
@@ -12,7 +13,8 @@ RUN GOOS=linux GOARCH=amd64 go build -mod=mod -o bin/mock-solana ./integration/m
 
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache --upgrade ca-certificates tzdata \
+    && update-ca-certificates
 
 RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup

@@ -12,21 +12,31 @@ type Config struct {
 	Bin                 string            `mapstructure:"bin"`
 	Cluster             string            `mapstructure:"cluster"`
 	ClusterRPCURL       string            `mapstructure:"cluster_rpc_url"`
+	ClusterRPCURLs      []string          `mapstructure:"cluster_rpc_urls"`
 	AverageSlotDuration string            `mapstructure:"average_slot_duration"`
 	Failover            FailoverConfig    `mapstructure:"failover"`
 	Identities          identities.Config `mapstructure:"identities"`
 	RPCAddress          string            `mapstructure:"rpc_address"`
 	LedgerDir           string            `mapstructure:"ledger_dir"`
-	Tower               TowerConfig       `mapstructure:"tower"`
+	Client              ClientConfig      `mapstructure:"client"`
+	VoteHistory         VoteHistoryConfig `mapstructure:"vote_history"`
 	Name                string            `mapstructure:"name"`      // optional display name used in plans/logs; defaults to OS hostname
 	PublicIP            string            `mapstructure:"public_ip"` // subject for removal once poor-man's testing setup is removed
 }
 
-// TowerConfig is the configuration for the towerfile
-type TowerConfig struct {
-	Dir                  string `mapstructure:"dir"`
-	AutoEmptyWhenPassive bool   `mapstructure:"auto_empty_when_passive"`
-	FileNameTemplate     string `mapstructure:"file_name_template"`
+// ClientConfig describes the validator implementation behind the operator's
+// identity commands. It is metadata only; commands remain operator supplied.
+type ClientConfig struct {
+	Family      string `mapstructure:"family"`
+	Consensus   string `mapstructure:"consensus"`
+	ConfigPath  string `mapstructure:"config_path"`
+	VoteAccount string `mapstructure:"vote_account"`
+}
+
+// VoteHistoryConfig separates validator exports from managed native imports.
+type VoteHistoryConfig struct {
+	Dir       string `mapstructure:"dir"`
+	ImportDir string `mapstructure:"import_dir"`
 }
 
 // FailoverConfig is the configuration for a failover
@@ -41,12 +51,23 @@ type FailoverConfig struct {
 	Peers                         PeersConfig          `mapstructure:"peers"`
 	Server                        ServerConfig         `mapstructure:"server"`
 	TLS                           TLSConfig            `mapstructure:"tls"`
+	Handoff                       HandoffConfig        `mapstructure:"handoff"`
 	IsDryRun                      bool
 }
 
 // ConsensusConfig selects the consensus state used during failover.
 type ConsensusConfig struct {
 	Mode string `mapstructure:"mode"`
+}
+
+type HandoffConfig struct {
+	Commitment           string `mapstructure:"commitment"`
+	Timeout              string `mapstructure:"timeout"`
+	PollInterval         string `mapstructure:"poll_interval"`
+	FallbackTimeout      string `mapstructure:"fallback_timeout"`
+	FallbackWaitSlots    uint64 `mapstructure:"fallback_wait_slots"`
+	TimeoutDuration      time.Duration
+	PollIntervalDuration time.Duration
 }
 
 // TLSConfig holds the optional mTLS configuration for the QUIC connection between validators.
@@ -69,14 +90,16 @@ type PeersConfig map[string]struct {
 
 // MonitorConfig holds the configuration for a failover monitor
 type MonitorConfig struct {
-	CreditSamples CreditSamplesConfig `mapstructure:"credit_samples"`
+	Voting VotingConfig `mapstructure:"voting"`
 }
 
-// CreditSamplesConfig holds the configuration for a failover monitor credit samples
-type CreditSamplesConfig struct {
-	Count            int           `mapstructure:"count"`
-	Interval         string        `mapstructure:"interval"`
-	IntervalDuration time.Duration // parsed duration, set during configuration
+// VotingConfig controls verification of certificate participation after activation.
+type VotingConfig struct {
+	Enabled              bool   `mapstructure:"enabled"`
+	Timeout              string `mapstructure:"timeout"`
+	PollInterval         string `mapstructure:"poll_interval"`
+	TimeoutDuration      time.Duration
+	PollIntervalDuration time.Duration
 }
 
 // ServerConfig holds the configuration for a failover server

@@ -1,6 +1,7 @@
 package solana
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 
 // MockClient is a mock implementation of ClientInterface for testing
 type MockClient struct {
+	resolveVoteAccount func(context.Context, string, string) (*rpc.VoteAccountsResult, error)
+	getSlotContext     func(context.Context, rpc.CommitmentType) (uint64, error)
 	// Node management
 	mockNode                     *Node
 	nodeFromIP                   func(ip string) (*Node, error)
@@ -21,9 +24,6 @@ type MockClient struct {
 	getLocalNodeHealth func() (string, error)
 	isLocalNodeHealthy func() bool
 
-	// Vote account methods
-	getCreditRankedVoteAccountFromPubkey func(pubkey string) (*rpc.VoteAccountsResult, int, error)
-
 	// Slot methods
 	getCurrentSlot func() (uint64, error)
 
@@ -32,6 +32,8 @@ type MockClient struct {
 
 	// Version methods
 	getLocalNodeVersion func() (string, error)
+	getLocalIdentity    func() (string, error)
+	getVoteAccountState func(string, bool, rpc.CommitmentType) (*rpc.VoteAccountsResult, error)
 }
 
 // NewMockClient creates a new mock client with default behaviors
@@ -84,12 +86,6 @@ func (m *MockClient) WithIsLocalNodeHealthy(fn func() bool) *MockClient {
 	return m
 }
 
-// WithGetCreditRankedVoteAccountFromPubkey sets a custom GetCreditRankedVoteAccountFromPubkey function
-func (m *MockClient) WithGetCreditRankedVoteAccountFromPubkey(fn func(pubkey string) (*rpc.VoteAccountsResult, int, error)) *MockClient {
-	m.getCreditRankedVoteAccountFromPubkey = fn
-	return m
-}
-
 // WithGetCurrentSlot sets a custom GetCurrentSlot function
 func (m *MockClient) WithGetCurrentSlot(fn func() (uint64, error)) *MockClient {
 	m.getCurrentSlot = fn
@@ -105,6 +101,16 @@ func (m *MockClient) WithGetTimeToNextLeaderSlotForPubkey(fn func(pubkey solana.
 // WithGetLocalNodeVersion sets a custom GetLocalNodeVersion function
 func (m *MockClient) WithGetLocalNodeVersion(fn func() (string, error)) *MockClient {
 	m.getLocalNodeVersion = fn
+	return m
+}
+
+func (m *MockClient) WithGetLocalIdentity(fn func() (string, error)) *MockClient {
+	m.getLocalIdentity = fn
+	return m
+}
+
+func (m *MockClient) WithGetVoteAccountState(fn func(string, bool, rpc.CommitmentType) (*rpc.VoteAccountsResult, error)) *MockClient {
+	m.getVoteAccountState = fn
 	return m
 }
 
@@ -136,14 +142,6 @@ func (m *MockClient) NodeFromIPWithExpectedPubkey(ip, expectedPubkey string) (*N
 		return m.nodeFromIPWithExpectedPubkey(ip, expectedPubkey)
 	}
 	return m.mockNode, nil
-}
-
-// GetCreditRankedVoteAccountFromPubkey implements ClientInterface.GetCreditRankedVoteAccountFromPubkey
-func (m *MockClient) GetCreditRankedVoteAccountFromPubkey(pubkey string) (*rpc.VoteAccountsResult, int, error) {
-	if m.getCreditRankedVoteAccountFromPubkey != nil {
-		return m.getCreditRankedVoteAccountFromPubkey(pubkey)
-	}
-	return nil, 0, nil
 }
 
 // GetCurrentSlot implements ClientInterface.GetCurrentSlot
@@ -188,6 +186,20 @@ func (m *MockClient) GetLocalNodeVersion() (string, error) {
 	}
 	// Default: return the same version as the gossip node so tests that don't care see no mismatch
 	return m.mockNode.Version(), nil
+}
+
+func (m *MockClient) GetLocalIdentity(_ context.Context) (string, error) {
+	if m.getLocalIdentity != nil {
+		return m.getLocalIdentity()
+	}
+	return m.mockNode.PubKey(), nil
+}
+
+func (m *MockClient) GetVoteAccountState(_ context.Context, pubkey string, local bool, commitment rpc.CommitmentType) (*rpc.VoteAccountsResult, error) {
+	if m.getVoteAccountState != nil {
+		return m.getVoteAccountState(pubkey, local, commitment)
+	}
+	return nil, errors.New("vote account state not configured")
 }
 
 // Helper function to create a string pointer
@@ -245,22 +257,6 @@ func (b *MockClientBuilder) WithHealthyNode() *MockClientBuilder {
 	return b
 }
 
-// WithVoteAccount configures the mock to return specific vote account data
-func (b *MockClientBuilder) WithVoteAccount(pubkey string, rank int, credits int64) *MockClientBuilder {
-	b.client.getCreditRankedVoteAccountFromPubkey = func(p string) (*rpc.VoteAccountsResult, int, error) {
-		if p == pubkey {
-			return &rpc.VoteAccountsResult{
-				NodePubkey: solana.MustPublicKeyFromBase58(pubkey),
-				EpochCredits: [][]uint64{
-					{1, uint64(credits), uint64(credits) / 2},
-				},
-			}, rank, nil
-		}
-		return nil, 0, errors.New("vote account not found")
-	}
-	return b
-}
-
 // WithLeaderSchedule configures the mock to simulate leader schedule behavior
 func (b *MockClientBuilder) WithLeaderSchedule(pubkey string, isOnSchedule bool, timeToNext time.Duration) *MockClientBuilder {
 	b.client.getTimeToNextLeaderSlotForPubkey = func(p solana.PublicKey) (bool, time.Duration, error) {
@@ -294,4 +290,32 @@ func NewMockNode(pubkey solana.PublicKey, version string) *Node {
 			Version: stringPtr(version),
 		},
 	}
+}
+
+// WithResolveVoteAccount sets the account discovery callback.
+func (m *MockClient) WithResolveVoteAccount(fn func(context.Context, string, string) (*rpc.VoteAccountsResult, error)) *MockClient {
+	m.resolveVoteAccount = fn
+	return m
+}
+
+// ResolveVoteAccount implements account discovery for tests.
+func (m *MockClient) ResolveVoteAccount(ctx context.Context, identity, configured string) (*rpc.VoteAccountsResult, error) {
+	if m.resolveVoteAccount != nil {
+		return m.resolveVoteAccount(ctx, identity, configured)
+	}
+	return m.GetVoteAccountState(ctx, configured, false, rpc.CommitmentFinalized)
+}
+
+// GetCurrentSlotContextWithCommitment implements commitment-aware slot lookup for tests.
+func (m *MockClient) GetCurrentSlotContextWithCommitment(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	if m.getSlotContext != nil {
+		return m.getSlotContext(ctx, commitment)
+	}
+	return m.GetCurrentSlot()
+}
+
+// WithGetSlotContext sets the cancellable slot lookup callback.
+func (m *MockClient) WithGetSlotContext(fn func(context.Context, rpc.CommitmentType) (uint64, error)) *MockClient {
+	m.getSlotContext = fn
+	return m
 }

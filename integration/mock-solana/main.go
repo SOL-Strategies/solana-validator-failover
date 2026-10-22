@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/solana-foundation/solana-go/v2/sysvar"
 )
 
 const (
@@ -47,10 +51,10 @@ func NewMockSolanaServer() *MockSolanaServer {
 		failNextSetActive: make(map[string]bool),
 	}
 	s.slotCounter.Store(startSlot)
-	// Increment slot every 400ms to simulate real Solana slot progression.
+	// Increment slot every 200ms to simulate real Solana slot progression.
 	// waitUntilStartOfNextSlot polls until the slot changes, so this must increment.
 	go func() {
-		for range time.Tick(400 * time.Millisecond) {
+		for range time.Tick(time.Duration(sysvar.MsPerSlot200) * time.Millisecond) {
 			s.slotCounter.Add(1)
 		}
 	}()
@@ -116,6 +120,43 @@ func (s *MockSolanaServer) handleRPC(w http.ResponseWriter, r *http.Request) {
 
 	var result any
 	switch method {
+	case "getVersion":
+		version := "4.3.0"
+		if r.URL.Query().Get("validator") == "london" {
+			version = "26.10.3"
+		}
+		result = map[string]any{"solana-core": version, "feature-set": 12345}
+	case "getIdentity":
+		name := r.URL.Query().Get("validator")
+		s.mu.RLock()
+		identity := validatorMeta[name].passivePubkey
+		if name == s.activeValidator {
+			identity = activePubkey
+		}
+		s.mu.RUnlock()
+		result = map[string]any{"identity": identity}
+	case "getAccountInfo":
+		params, _ := req["params"].([]any)
+		key := ""
+		if len(params) > 0 {
+			key, _ = params[0].(string)
+		}
+		var value any
+		var data []byte
+		switch key {
+		case "A1pengvuM6JEcyNuTnMqepBKhwHE3N6PmUrdATGawhJS":
+			data = make([]byte, 9)
+			data[0] = 1
+			binary.LittleEndian.PutUint64(data[1:], startSlot-100)
+		case "42Ym56TQ7AKFThRv5nyoSABq5ZPgE2TLKo8BALZEtoU1":
+			data = []byte{1}
+		}
+		if data != nil {
+			value = map[string]any{"data": []any{base64.StdEncoding.EncodeToString(data), "base64"}, "owner": "11111111111111111111111111111111", "lamports": 1, "executable": false, "rentEpoch": 0}
+		}
+		result = map[string]any{"context": map[string]any{"slot": s.slotCounter.Load()}, "value": value}
+	case "getAgGenesisCert":
+		result = map[string]any{"block": map[string]any{"slot": startSlot - 100}}
 	case "getClusterNodes":
 		result = s.getClusterNodes()
 	case "getHealth":
@@ -309,8 +350,7 @@ func (s *MockSolanaServer) getEpochInfo() map[string]any {
 }
 
 // getVoteAccounts returns the active validator's pubkey in Current[].
-// EpochCredits carries two epochs of data so the credit-rank monitor has
-// material to compare against.
+// lastVote models certificate participation; credits are not used by the monitor.
 func (s *MockSolanaServer) getVoteAccounts() VoteAccountsResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -336,20 +376,6 @@ func (s *MockSolanaServer) getVoteAccounts() VoteAccountsResult {
 				EpochCredits: [][]uint64{
 					{671, 350000, 0},
 					{672, 12500, 350000},
-				},
-				RootSlot: slot - 32,
-			},
-			// A second validator for rank comparison
-			{
-				VotePubkey:       "FakeVote111111111111111111111111111111111111",
-				NodePubkey:       "FakeNode111111111111111111111111111111111111",
-				ActivatedStake:   500_000_000_000,
-				EpochVoteAccount: true,
-				Commission:       0,
-				LastVote:         slot - 5,
-				EpochCredits: [][]uint64{
-					{671, 340000, 0},
-					{672, 11000, 340000},
 				},
 				RootSlot: slot - 32,
 			},
@@ -390,7 +416,10 @@ func main() {
 	http.HandleFunc("/public-ip", server.handlePublicIP)
 	http.HandleFunc("/fail-check", server.handleFailCheck)
 
-	port := ":8899"
+	port := os.Getenv("MOCK_SOLANA_ADDRESS")
+	if port == "" {
+		port = ":8899"
+	}
 	log.Printf("mock-solana starting on %s", port)
 	log.Printf("initial active validator: %q", server.activeValidator)
 	log.Printf("started at %s", time.Now().Format(time.RFC3339))

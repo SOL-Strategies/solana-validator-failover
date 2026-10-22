@@ -15,17 +15,18 @@ import (
 
 // PlanData holds all data needed to render the failover plan template.
 type PlanData struct {
-	IsDryRun            bool
-	SkipTowerSync       bool
-	ActiveNodeInfo      NodeInfo
-	PassiveNodeInfo     NodeInfo
-	AppVersion          string
-	Hooks               hooks.FailoverHooks
-	Rollback            hooks.RollbackConfig
-	ActivePreHookData   hooks.HookTemplateData
-	ActivePostHookData  hooks.HookTemplateData
-	PassivePreHookData  hooks.HookTemplateData
-	PassivePostHookData hooks.HookTemplateData
+	VotingMonitoringEnabled bool
+	IsDryRun                bool
+	HandoffStrategy         string
+	ActiveNodeInfo          NodeInfo
+	PassiveNodeInfo         NodeInfo
+	AppVersion              string
+	Hooks                   hooks.FailoverHooks
+	Rollback                hooks.RollbackConfig
+	ActivePreHookData       hooks.HookTemplateData
+	ActivePostHookData      hooks.HookTemplateData
+	PassivePreHookData      hooks.HookTemplateData
+	PassivePostHookData     hooks.HookTemplateData
 }
 
 // RenderFailoverPlan renders the failover confirmation plan to a string.
@@ -59,10 +60,10 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 			return humanize.Bytes(uint64(n))
 		},
 		// planSummaryLines builds the multi-line Plan: value. Each component
-		// (identity changes, tower sync, hooks) sits on its own line. Continuation
+		// (identity changes, history transfer, hooks) sits on its own line. Continuation
 		// lines are indented to align with the value start after "   Plan: ".
 		// The indent is 11 chars: 2 (template leading spaces) + 8 (label) + 1 (space).
-		"planSummaryLines": func(activeHostname, passiveHostname, consensus string, skipTowerSync bool, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
+		"planSummaryLines": func(activeHostname, passiveHostname, consensus string, h hooks.FailoverHooks, rollback hooks.RollbackConfig) string {
 			const indent = "           " // 11 spaces
 
 			arrow := style.RenderMutedString("→")
@@ -74,9 +75,7 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 
 			lines := []string{identityLine}
 
-			if !skipTowerSync {
-				lines = append(lines, style.RenderMutedString("1 "+stateLabel(consensus)+" sync"))
-			}
+			lines = append(lines, style.RenderMutedString("1 "+stateLabel(consensus)+" transfer"))
 
 			type entry struct {
 				label string
@@ -168,16 +167,16 @@ func RenderFailoverPlan(data PlanData) (string, error) {
         {{ Muted "ip        =" }} {{ LightGrey .ActiveNodeInfo.PublicIP }}
         {{ Muted "version   =" }} {{ LightGrey (FormatVersion .ActiveNodeInfo.ClientVersion .ActiveNodeInfo.ClientVersionRPC) }}
         {{ Muted "cmd       =" }} {{ LightGrey .ActiveNodeInfo.SetIdentityCommand }}
-{{- if not .SkipTowerSync }}
 
   {{ Purple (printf "%d — sync %s file" (Step) (stateLabel .ActiveNodeInfo.Consensus)) }}
-        {{ Muted "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.TowerFile) }}
-      {{ Active "+" false }} {{ Muted "destination =" }} {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.TowerFile) }}{{ if gt .ActiveNodeInfo.TowerFileSizeBytes 0 }}
-        {{ Muted "size        =" }} {{ LightGrey (FormatBytes .ActiveNodeInfo.TowerFileSizeBytes) }}{{ end }}
-{{- end }}
+{{- if .IsDryRun }} {{ LightGrey "(temporary dry-run copy; removed afterward)" }}{{ end }}
+        {{ Muted "source      =" }} {{ LightGrey (printf "%s:%s" .ActiveNodeInfo.Hostname .ActiveNodeInfo.VoteHistoryFile) }}
+      {{ Active "+" false }} {{ Muted "destination =" }} {{ LightGrey (printf "%s:%s" .PassiveNodeInfo.Hostname .PassiveNodeInfo.HistoryDestinationFile) }}{{ if gt .ActiveNodeInfo.VoteHistoryFileSizeBytes 0 }}
+        {{ Muted "size        =" }} {{ LightGrey (FormatBytes .ActiveNodeInfo.VoteHistoryFileSizeBytes) }}{{ end }}
 {{ if .Hooks.Pre.WhenPassive }}
   {{ Purple (printf "%d — run hooks %s pre-active" (Step) .PassiveNodeInfo.Hostname) }}
 {{ RenderHooks .Hooks.Pre.WhenPassive .PassiveNodeInfo.Hostname "pre" }}{{- end }}
+
   {{ $n := Step }}{{ Purple (printf "%d — set %s " $n .PassiveNodeInfo.Hostname) }}{{ Active "active" false }}
       {{ Warning "~" }} {{ Muted "role      =" }} {{ Passive (printf "%-15s" "passive") false }}  {{ Muted "→" }}  {{ Active (printf "%-15s" "active") false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
       {{ Warning "~" }} {{ Muted "identity  =" }} {{ Passive (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Passive.PubKey)) false }}  {{ Muted "→" }}  {{ Active (printf "%-15s" (truncPubkey .PassiveNodeInfo.Identities.Active.PubKey)) false }}{{ if .IsDryRun }}  {{ LightGrey "(dry run)" }}{{ end }}
@@ -197,9 +196,10 @@ func RenderFailoverPlan(data PlanData) (string, error) {
       {{ Warning "!" }} {{ Purple .PassiveNodeInfo.Hostname }} {{ Muted "→" }} {{ Passive "passive" false }}: {{ LightGrey .Rollback.ToPassive.ResolvedCmd }}
 {{- end }}
   {{ HRule }}
-  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .ActiveNodeInfo.Consensus .SkipTowerSync .Hooks .Rollback }}
+  {{ Purple " Voting:" }} {{ if .IsDryRun }}not performed (dry run){{ else if .VotingMonitoringEnabled }}verify certified participation{{ else }}verification disabled{{ end }}
+  {{ Purple "   Plan:" }} {{ planSummaryLines .ActiveNodeInfo.Hostname .PassiveNodeInfo.Hostname .ActiveNodeInfo.Consensus .Hooks .Rollback }}
   {{ Purple "Version:" }} {{ Muted .AppVersion }}
-  {{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
+{{ if .IsDryRun }}{{ Blue "   Note:" }} {{ Muted "dry run — re-run with" }} {{ LightGrey "--not-a-drill" }} {{ Muted "on the passive node to do for realsies." }}{{ else }}{{ Warning "Warning:" }} {{ Muted "This is a real failover — identities will be changed on both nodes." }}{{ end }}
   {{ HRule }}
 `)
 	if err != nil {
@@ -208,13 +208,14 @@ func RenderFailoverPlan(data PlanData) (string, error) {
 
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, map[string]any{
-		"IsDryRun":        data.IsDryRun,
-		"SkipTowerSync":   data.SkipTowerSync,
-		"PassiveNodeInfo": data.PassiveNodeInfo,
-		"ActiveNodeInfo":  data.ActiveNodeInfo,
-		"AppVersion":      data.AppVersion,
-		"Hooks":           data.Hooks,
-		"Rollback":        data.Rollback,
+		"VotingMonitoringEnabled": data.VotingMonitoringEnabled,
+		"IsDryRun":                data.IsDryRun,
+		"HandoffStrategy":         data.HandoffStrategy,
+		"PassiveNodeInfo":         data.PassiveNodeInfo,
+		"ActiveNodeInfo":          data.ActiveNodeInfo,
+		"AppVersion":              data.AppVersion,
+		"Hooks":                   data.Hooks,
+		"Rollback":                data.Rollback,
 	}); err != nil {
 		return "", fmt.Errorf("failed to execute template: %w", err)
 	}

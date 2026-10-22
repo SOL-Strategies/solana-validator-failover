@@ -3,9 +3,10 @@ package failover
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
-	"strings"
+	"os"
 	"time"
 
 	"github.com/charmbracelet/huh/spinner"
@@ -32,17 +33,21 @@ type ClientConfig struct {
 	LocalRPCClient                 *rpc.Client
 	SolanaRPCClient                solana.ClientInterface
 	RPCURL                         string
-	SkipTowerSync                  bool
 	Rollback                       hooks.RollbackConfig
+	AutoConfirm                    bool
 	// TLSConfig is an optional mTLS config. When non-nil, the client presents its
 	// certificate to the server and verifies the server's certificate against the CA.
 	// When nil, server certificate verification is skipped (InsecureSkipVerify).
-	TLSConfig *tls.Config
+	TLSConfig           *tls.Config
+	HandoffTimeout      time.Duration
+	HandoffPollInterval time.Duration
 }
 
 // Client is the failover client - an active node connects to a passive node server to handover as active
 type Client struct {
 	Conn                           *quic.Conn
+	transport                      *quic.Transport
+	packetConn                     net.PacketConn
 	ctx                            context.Context
 	cancel                         context.CancelFunc
 	logger                         *log.Logger
@@ -56,9 +61,12 @@ type Client struct {
 	rpcURL                         string
 	serverName                     string
 	serverAddress                  string
-	skipTowerSync                  bool
 	rollback                       hooks.RollbackConfig
 	tlsConfig                      *tls.Config // non-nil when mTLS is enabled
+	handoffTimeout                 time.Duration
+	handoffPollInterval            time.Duration
+	autoConfirm                    bool
+	failure                        error
 }
 
 // NewClientFromConfig creates a new QUIC client from a configuration
@@ -69,6 +77,13 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	if config.TLSConfig != nil {
 		cloned := config.TLSConfig.Clone()
 		cloned.NextProtos = []string{ProtocolName}
+		if cloned.ServerName == "" {
+			cloned.ServerName, err = tlsServerNameFromAddress(config.ServerAddress)
+			if err != nil {
+				cancel()
+				return nil, fmt.Errorf("derive TLS server name from peer address %q: %w", config.ServerAddress, err)
+			}
+		}
 		clientTLSConfig = cloned
 	}
 
@@ -85,9 +100,11 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 		rpcURL:                         config.RPCURL,
 		serverName:                     config.ServerName,
 		serverAddress:                  config.ServerAddress,
-		skipTowerSync:                  config.SkipTowerSync,
 		rollback:                       config.Rollback,
 		tlsConfig:                      clientTLSConfig,
+		handoffTimeout:                 config.HandoffTimeout,
+		handoffPollInterval:            config.HandoffPollInterval,
+		autoConfirm:                    config.AutoConfirm,
 	}
 
 	err = client.connectToServer()
@@ -101,15 +118,164 @@ func NewClientFromConfig(config ClientConfig) (client *Client, err error) {
 	return client, nil
 }
 
-// Start starts the QUIC client
-func (c *Client) Start() {
+func tlsServerNameFromAddress(address string) (string, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", err
+	}
+	if host == "" {
+		return "", fmt.Errorf("peer address has an empty host")
+	}
+	return host, nil
+}
+
+func handoffTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 2 * time.Minute
+	}
+	return timeout
+}
+
+// waitForLocalIdentity polls through the handoff deadline because identity
+// changes can take a short time to become visible through local RPC.
+func waitForLocalIdentity(ctx context.Context, rpcClient solana.ClientInterface, expected string, poll time.Duration) error {
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	var lastErr error
+	for {
+		identity, err := rpcClient.GetLocalIdentity(ctx)
+		if err == nil && identity == expected {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("reported identity %s, expected %s", identity, expected)
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return lastErr
+		case <-timer.C:
+		}
+	}
+}
+
+func (c *Client) setFailure(message string, failure error) {
+	if failure == nil {
+		c.failure = fmt.Errorf("%s", message)
+		return
+	}
+	c.failure = fmt.Errorf("%s: %w", message, failure)
+}
+
+// Failure returns the terminal failover error, if Start encountered one.
+func (c *Client) Failure() error { return c.failure }
+
+// Start starts the QUIC client and returns a terminal handoff error when the
+// protocol does not complete successfully.
+func (c *Client) Start() (startErr error) {
 	c.logger.Debug("starting QUIC client")
+	defer func() {
+		c.cancel()
+		if c.transport != nil {
+			_ = c.transport.Close()
+		}
+		if c.packetConn != nil {
+			_ = c.packetConn.Close()
+		}
+	}()
 	var wentPassive bool
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		// Start now returns terminal failures to its caller instead of exiting
+		// the process. Tear down the protocol session on every such path so the
+		// server is not left blocked on the old stream and an in-process retry
+		// cannot overlap it.
+		if c.failoverStream != nil && c.failoverStream.Stream != nil {
+			if err := c.failoverStream.Stream.Close(); err != nil {
+				c.logger.Debug("failed to close failover stream after client failure", "err", err)
+			}
+		}
+		if c.Conn != nil {
+			if err := c.Conn.CloseWithError(quic.ApplicationErrorCode(1), "failover client stopped"); err != nil {
+				c.logger.Debug("failed to close QUIC connection after client failure", "err", err)
+			}
+		}
+		c.cancel()
+		if c.failure == nil {
+			message := "failover client stopped before completion"
+			if c.failoverStream != nil && c.failoverStream.GetErrorMessage() != "" {
+				message = c.failoverStream.GetErrorMessage()
+			}
+			c.setFailure(message, nil)
+		}
+		startErr = c.failure
+	}()
+	state, err := DetectConsensus(c.rpcURL)
+	if err != nil {
+		c.setFailure("cannot verify source consensus", err)
+		return
+	}
+	if state.Mode != ConsensusAlpenglow {
+		c.setFailure("source local RPC does not report Alpenglow", nil)
+		return
+	}
+	c.activeNodeInfo.Consensus = state.Mode
+	c.activeNodeInfo.ConsensusGenesisSlot = state.GenesisSlot
+	if c.activeNodeInfo.IsNativeFiredancer {
+		version, err := c.solanaRPCClient.GetLocalNodeVersion()
+		if err != nil {
+			c.setFailure("cannot verify source Firedancer version", err)
+			return
+		}
+		c.activeNodeInfo.ClientVersionRPC = version
+		if err := ValidateNativeVersion(c.activeNodeInfo); err != nil {
+			c.setFailure("unsupported native Firedancer version", err)
+			return
+		}
+	}
+	abortDestinationHandoff := func(message string, failure error) {
+		reason := message
+		if failure != nil {
+			reason = fmt.Sprintf("%s: %v", message, failure)
+		}
+		c.failoverStream.SetHandoffAborted(true)
+		c.failoverStream.SetErrorMessage(reason)
+		if err := c.failoverStream.Encode(); err != nil {
+			c.setFailure(reason, fmt.Errorf("failed to send handoff abort: %w", err))
+			return
+		}
+		if err := c.failoverStream.Decode(); err != nil {
+			c.setFailure(reason, fmt.Errorf("failed to receive abort acknowledgement: %w", err))
+			return
+		}
+		if !c.failoverStream.message.TerminalResult {
+			c.setFailure(reason, fmt.Errorf("receiver did not send a terminal abort acknowledgement"))
+			return
+		}
+		if err := c.acknowledgeTerminalResult(); err != nil {
+			c.setFailure(reason, err)
+			return
+		}
+		c.setFailure(message, failure)
+		if c.failoverStream.GetRollbackRequired() && c.rollback.Enabled {
+			if err := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{isPostFailover: true}), c.failoverStream.GetIsDryRunFailover(), c.logger); err != nil {
+				c.logger.Error("source rollback failed", "err", err)
+			}
+		}
+	}
 
 	// open a bidirectional stream to the server
 	stream, err := c.Conn.OpenStreamSync(c.ctx)
 	if err != nil {
 		c.logger.Error("failed to open stream", "err", err)
+		c.setFailure("failed to open failover stream", err)
 		return
 	}
 
@@ -121,6 +287,7 @@ func (c *Client) Start() {
 	// Send message type first
 	if _, err := c.failoverStream.Stream.Write([]byte{MessageTypeFailoverInitiateRequest}); err != nil {
 		c.logger.Error("failed to send message type", "err", err)
+		c.setFailure("failed to send failover request", err)
 		return
 	}
 
@@ -128,6 +295,7 @@ func (c *Client) Start() {
 	// verify compatibility before attempting to decode the gob payload.
 	if err := writeWireVersion(stream); err != nil {
 		c.logger.Error("failed to send wire protocol version", "err", err)
+		c.setFailure("failed to send wire protocol version", err)
 		return
 	}
 
@@ -136,6 +304,7 @@ func (c *Client) Start() {
 	c.failoverStream.SetActiveRollbackEnabled(c.rollback.Enabled)
 	err = c.failoverStream.Encode()
 	if err != nil {
+		c.setFailure("failed to send active node information", err)
 		return
 	}
 
@@ -153,7 +322,8 @@ func (c *Client) Start() {
 	})
 	err = sp.Run()
 	if err != nil {
-		c.logger.Fatal("failed to wait for failover signal", "err", err)
+		c.logger.Error("failed to wait for failover signal", "err", err)
+		c.setFailure("failed to wait for failover signal", err)
 		return
 	}
 
@@ -161,31 +331,84 @@ func (c *Client) Start() {
 	serverVersion := c.failoverStream.GetPassiveNodeInfo().SolanaValidatorFailoverVersion
 	clientVersion := pkgconstants.AppVersion
 	if serverVersion != clientVersion {
-		c.logger.Fatalf("server is running a different version of this program: %s (them) != %s (us)", serverVersion, clientVersion)
+		versionErr := fmt.Errorf("server is running a different version of this program: %s (them) != %s (us)", serverVersion, clientVersion)
+		c.logger.Error(versionErr.Error())
+		c.setFailure("failover version mismatch", versionErr)
 		return
 	}
 
 	// see if the server says can proceed, else show error message and exit
 	if !c.failoverStream.GetCanProceed() {
-		c.logger.Fatal(c.failoverStream.GetErrorMessage())
+		rejection := c.failoverStream.GetErrorMessage()
+		if rejection == "" {
+			rejection = "server rejected failover"
+		}
+		c.logger.Error(rejection)
+		c.setFailure("server rejected failover", fmt.Errorf("%s", rejection))
 		return
 	}
 	if c.failoverStream.GetPassiveNodeInfo().Consensus != c.activeNodeInfo.Consensus {
-		c.logger.Fatal("passive node consensus mode does not match active node")
+		c.setFailure("passive node consensus mode does not match active node", nil)
 		return
 	}
 	if c.activeNodeInfo.Consensus == ConsensusAlpenglow && c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot != c.activeNodeInfo.ConsensusGenesisSlot {
-		c.logger.Fatalf("Alpenglow genesis mismatch: active slot %d, passive slot %d", c.activeNodeInfo.ConsensusGenesisSlot, c.failoverStream.GetPassiveNodeInfo().ConsensusGenesisSlot)
+		c.setFailure("Alpenglow genesis mismatch", nil)
+		return
+	}
+	if command := c.failoverStream.GetActiveRollbackCommand(); command != "" {
+		c.rollback.ToActive.ResolvedCmd = command
+	}
+
+	// Preflight the live source history before changing identity.
+	file, err := os.Open(c.activeNodeInfo.VoteHistoryFile)
+	if err != nil {
+		c.setFailure("cannot read outgoing vote history before demotion", err)
+		return
+	}
+	info, err := file.Stat()
+	_ = file.Close()
+	if err != nil {
+		c.setFailure("cannot stat outgoing vote history", err)
+		return
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > HistoryMaxSize {
+		c.setFailure("outgoing vote history must be a nonempty regular file within Alpenglow size limits", nil)
 		return
 	}
 
-	// Get skipTowerSync from the server's message (server is the authority on this)
-	skipTowerSync := c.failoverStream.GetSkipTowerSync()
+	// Validate the current export while the source is still active, then capture
+	// again after demotion so the transferred state includes its final votes.
+	preflight, err := captureStateFile(c.activeNodeInfo.VoteHistoryFile)
+	if err != nil {
+		c.setFailure("cannot snapshot source history before demotion", err)
+		return
+	}
+	_, historyErr := readHistoryWatermark(preflight, c.activeNodeInfo.Identities.Active.PubKey())
+	_ = preflight.Close()
+	_ = os.Remove(preflight.Name())
+	if historyErr != nil {
+		c.setFailure("invalid source history before demotion", historyErr)
+		return
+	}
 
+	if c.failoverStream.message.VotingMonitoringEnabled && !c.failoverStream.GetIsDryRunFailover() {
+		ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+		account, err := c.solanaRPCClient.ResolveVoteAccount(ctx, c.activeNodeInfo.Identities.Active.PubKey(), c.activeNodeInfo.VoteAccount)
+		cancel()
+		if err != nil || account == nil {
+			c.setFailure("cannot resolve source vote account", err)
+			return
+		}
+		if account.VotePubkey.String() != c.failoverStream.GetPassiveNodeInfo().VoteAccount {
+			c.setFailure("source and destination vote accounts differ", nil)
+			return
+		}
+	}
 	// wait until the next leader slot is at least the minimum time to leader slot
 	err = c.waitMinTimeToLeaderSlot()
 	if err != nil {
-		c.logger.Fatal("failed to wait for next leader slot", "err", err)
+		c.logger.Error("failed to wait for next leader slot", "err", err)
+		c.setFailure("failed to wait for next leader slot", err)
 		return
 	}
 
@@ -195,7 +418,8 @@ func (c *Client) Start() {
 		isPreFailover:    true,
 	}))
 	if err != nil {
-		c.logger.Fatal("failed to run pre hooks when active", "err", err)
+		c.logger.Error("failed to run pre hooks when active", "err", err)
+		c.setFailure("failed to run pre hooks when active", err)
 		return
 	}
 
@@ -205,15 +429,15 @@ func (c *Client) Start() {
 	// this ensures we're early in the slot when we start the switch
 	slot, err := c.waitUntilStartOfNextSlot()
 	if err != nil {
-		c.logger.Fatal("failed to wait for next slot to start", "err", err)
+		c.logger.Error("failed to wait for next slot to start", "err", err)
+		c.setFailure("failed to wait for next slot to start", err)
 		return
 	}
 
 	// set the failover start slot to the current slot (we're now early in this slot)
 	c.failoverStream.SetFailoverStartSlot(slot)
 
-	// The local and peer consensus states were verified during the handshake.
-	// Do not add another RPC check here; use that accepted handshake state.
+	// set identity to passive
 	dryRunPrefix := ""
 	if c.failoverStream.GetIsDryRunFailover() {
 		dryRunPrefix = style.RenderLightGreyString("(dry run)") + " "
@@ -226,79 +450,66 @@ func (c *Client) Start() {
 	c.failoverStream.SetActiveNodeSetIdentityStartTime()
 	demotedAt := time.Now()
 
-	err = utils.RunCommand(utils.RunCommandParams{
-		CommandSlice: strings.Split(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, " "),
-		DryRun:       c.failoverStream.GetIsDryRunFailover(),
-		LogDebug:     c.logger.GetLevel() <= log.DebugLevel,
-	})
+	err = utils.RunIdentityCommand(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, c.failoverStream.GetIsDryRunFailover(), c.logger.GetLevel() <= log.DebugLevel)
 	if err != nil {
 		c.logger.Error("failed to set identity to passive", "err", err)
+		c.setFailure("failed to set identity to passive", err)
 		return
 	}
 	c.failoverStream.SetActiveNodeSetIdentityEndTime()
 	wentPassive = true // this node is now passive; used below for rollback/warning decisions
+	if !c.failoverStream.GetIsDryRunFailover() {
+		ctx, cancel := context.WithTimeout(c.ctx, handoffTimeout(c.handoffTimeout))
+		identityErr := waitForLocalIdentity(ctx, c.solanaRPCClient, c.activeNodeInfo.Identities.Passive.PubKey(), c.handoffPollInterval)
+		cancel()
+		if identityErr != nil {
+			abortDestinationHandoff("source passive identity could not be verified", identityErr)
+			return
+		}
+	}
+	var snapshot *os.File
+	c.failoverStream.SetActiveNodeSyncVoteHistoryStartTime()
+	snapshot, err = c.activeNodeInfo.captureOutgoingHistory(c.failoverStream.GetIsDryRunFailover(), demotedAt)
+	if err != nil {
+		abortDestinationHandoff("failed to capture outgoing vote history snapshot", err)
+		return
+	}
+	if _, err := readHistoryWatermark(snapshot, c.activeNodeInfo.Identities.Active.PubKey()); err != nil {
+		snapshot.Close()
+		os.Remove(snapshot.Name())
+		abortDestinationHandoff("invalid outgoing Alpenglow history", err)
+		return
+	}
+	defer snapshot.Close()
+	defer os.Remove(snapshot.Name())
+	info, err = snapshot.Stat()
+	if err != nil {
+		abortDestinationHandoff("failed to stat outgoing history snapshot", err)
+		return
+	}
+	c.failoverStream.GetActiveNodeInfo().VoteHistoryFileSizeBytes = info.Size()
 
-	if c.activeNodeInfo.Consensus == "alpenglow" {
-		c.logger.Infof("sending vote history to %s", c.failoverStream.GetPassiveNodeInfo().Hostname)
-		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-		voteHistoryFile := c.activeNodeInfo.TowerFile
-		if !c.failoverStream.GetIsDryRunFailover() {
-			voteHistoryFile, err = voteHistoryAfterDemotion(c.activeNodeInfo.TowerFile, demotedAt)
-			if err != nil {
-				c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
-				return
-			}
-		}
-		if voteHistoryFile != c.activeNodeInfo.TowerFile {
-			c.logger.Infof("sending the vote history the demotion saved: %s", voteHistoryFile)
-		}
-		if err := c.failoverStream.sendStateFile(voteHistoryFile); err != nil {
-			c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
+	if err := c.failoverStream.Encode(); err != nil {
+		c.setFailure("failed to acknowledge source demotion", err)
+		return
+	}
+	if snapshot != nil {
+		if err := c.failoverStream.sendOpenStateFile(snapshot); err != nil {
+			c.setFailure("vote history transfer failed after demotion", err)
 			return
 		}
-		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
-		// Streamed state transfer uses separate gob frames. Send the updated
-		// message so the passive node receives the start time and start slot
-		// used to calculate the final summary.
-		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error("failed to send Alpenglow failover timing metadata", "err", err)
-			return
-		}
-	} else if skipTowerSync {
-		c.logger.Info("skipping tower file sync")
-		// Don't send anything - server won't wait for tower file when skipTowerSync is true
-	} else {
-		c.logger.Infof("sending tower file to %s", style.RenderPassiveString(c.failoverStream.GetPassiveNodeInfo().Hostname, false))
-
-		// Read the tower file into TowerFileBytes
-		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-		err = c.failoverStream.GetActiveNodeInfo().SetTowerFileBytes()
-		if err != nil {
-			c.logger.Error(fmt.Sprintf("failed to set tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
-			return
-		}
-		c.failoverStream.SetActiveNodeSyncTowerFileEndTime()
-
-		// Send the updated node info with tower file bytes
-		if err := c.failoverStream.Encode(); err != nil {
-			c.logger.Error(fmt.Sprintf("failed to send tower file bytes for %s", c.failoverStream.GetActiveNodeInfo().TowerFile), "err", err)
-			if wentPassive {
-				c.logger.Error(
-					"CRITICAL: tower sync failed after this node switched to passive — " +
-						"the passive node has not changed identity; check gossip and intervene manually if needed",
-				)
-				if c.rollback.ToActive.ResolvedCmd != "" {
-					c.logger.Errorf("if this node needs to revert to active: %s", c.rollback.ToActive.ResolvedCmd)
-				}
-			}
-			return
-		}
+	}
+	c.failoverStream.SetActiveNodeSyncVoteHistoryEndTime()
+	if err := c.failoverStream.Encode(); err != nil {
+		c.setFailure("failed to send transfer metadata", err)
+		return
 	}
 
 	// wait for confirmation from server that failover is complete
 	err = c.failoverStream.Decode()
 	if err != nil {
 		c.logger.Error("failed to decode failover stream", "err", err)
+		c.setFailure("failed to decode failover completion", err)
 		if wentPassive {
 			// The connection dropped after this node switched to passive.
 			// We cannot know whether the server successfully set its identity — do NOT
@@ -314,9 +525,17 @@ func (c *Client) Start() {
 		return
 	}
 
+	if c.failoverStream.message.TerminalResult {
+		if err := c.acknowledgeTerminalResult(); err != nil {
+			c.setFailure("failed to confirm terminal result", err)
+			return
+		}
+	}
+
 	// Check for explicit rollback signal from server
 	if c.failoverStream.GetRollbackRequired() {
 		c.logger.Error("server signalled rollback required — failover failed on the passive node")
+		c.setFailure("server signalled rollback required", fmt.Errorf("failover failed on the destination node"))
 		if c.rollback.Enabled && wentPassive {
 			c.logger.Warn("rollback enabled: reverting this node to active")
 			if rbErr := RunRollbackToActive(c.rollback, c.getHookEnvMap(hookEnvMapParams{
@@ -339,16 +558,20 @@ func (c *Client) Start() {
 
 	if !c.failoverStream.GetIsSuccessfullyCompleted() {
 		c.logger.Errorf("server failed to complete failover: %s", c.failoverStream.GetErrorMessage())
+		c.setFailure("server failed to complete failover", fmt.Errorf("%s", c.failoverStream.GetErrorMessage()))
 		return
 	}
 
 	c.logger.Info("failover complete")
+	completed = true
 
 	// run post hooks now this is passive and active node says all is peachy
 	c.hooks.RunPostWhenPassive(c.getHookEnvMap(hookEnvMapParams{
 		isDryRunFailover: c.failoverStream.GetIsDryRunFailover(),
 		isPostFailover:   true,
 	}))
+
+	return nil
 }
 
 // waitUntilStartOfNextSlot waits until the start of the next slot
@@ -510,6 +733,7 @@ func (c *Client) getHookEnvMap(params hookEnvMapParams) (envMap map[string]strin
 	envMap["PEER_NODE_PASSIVE_IDENTITY_PUBKEY"] = c.failoverStream.GetPassiveNodeInfo().Identities.Passive.PubKey()
 	envMap["PEER_NODE_CLIENT_VERSION"] = c.failoverStream.GetPassiveNodeInfo().ClientVersion
 	envMap["PEER_NODE_CLIENT_VERSION_LOCAL_RPC"] = c.failoverStream.GetPassiveNodeInfo().ClientVersionRPC
+	AddHandoffTemplateEnv(envMap, *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), *c.activeNodeInfo, *c.failoverStream.GetPassiveNodeInfo(), c.failoverStream.GetHandoffStrategy(), c.failoverStream.GetVoteHistoryWillBeTransferred())
 
 	return envMap
 }
@@ -536,6 +760,8 @@ func (c *Client) connectToServer() error {
 			// Small delay to let spinner render
 			if err := c.tryQUICConnection(); err == nil {
 				return nil
+			} else if isALPNMismatch(err) {
+				return fmt.Errorf("passive node rejected connection: incompatible wire protocol version — ensure both nodes run the same version of solana-validator-failover: %w", err)
 			}
 		}
 
@@ -547,6 +773,8 @@ func (c *Client) connectToServer() error {
 				// Try the actual QUIC connection
 				if err := c.tryQUICConnection(); err == nil {
 					return nil
+				} else if isALPNMismatch(err) {
+					return fmt.Errorf("passive node rejected connection: incompatible wire protocol version — ensure both nodes run the same version of solana-validator-failover: %w", err)
 				}
 				// Server not ready yet, continue waiting
 			}
@@ -584,12 +812,9 @@ func (c *Client) tryQUICConnection() error {
 	conn, err := tr.Dial(c.ctx, udpAddr, quicTLSConfig, nil)
 	if err != nil {
 		tr.Close()
+		_ = wrapped.Close()
 		if isALPNMismatch(err) {
-			// Fatal logs and calls os.Exit(1) — the spinner will not retry.
-			c.logger.Fatal(
-				"passive node rejected connection: incompatible wire protocol version — " +
-					"ensure both nodes run the same version of solana-validator-failover",
-			)
+			return err
 		}
 		c.logger.Debug("QUIC server not ready, retrying...", "err", err, "address", c.serverAddress)
 		return err
@@ -609,5 +834,32 @@ func (c *Client) tryQUICConnection() error {
 	}
 
 	c.Conn = conn
+	c.transport = tr
+	c.packetConn = wrapped
+	return nil
+}
+
+// acknowledgeTerminalResult waits until the receiver has consumed our ACK.
+func (c *Client) acknowledgeTerminalResult() error {
+	c.failoverStream.message.TerminalAck = true
+	if err := c.failoverStream.Encode(); err != nil {
+		return fmt.Errorf("failed to acknowledge terminal result: %w", err)
+	}
+	// Do not let the CLI exit while its ACK is merely queued in QUIC. The
+	// receiver closes with code zero only after consuming that acknowledgement.
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-c.Conn.Context().Done():
+		var appErr *quic.ApplicationError
+		cause := context.Cause(c.Conn.Context())
+		if !errors.As(cause, &appErr) || appErr.ErrorCode != 0 {
+			return fmt.Errorf("receiver did not confirm terminal acknowledgement: %w", cause)
+		}
+	case <-timer.C:
+		return fmt.Errorf("timed out confirming terminal acknowledgement")
+	case <-c.ctx.Done():
+		return fmt.Errorf("terminal acknowledgement cancelled: %w", c.ctx.Err())
+	}
 	return nil
 }

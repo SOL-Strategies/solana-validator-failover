@@ -27,11 +27,15 @@ sequenceDiagram
     A->>A: Check for upcoming leader slots
     A->>A: Wait for start of next slot
     A->>A: Set identity to passive
-    A->>P: Transfer tower file
-    A->>A: Exit
-    P->>P: Write tower file to disk
+    A->>P: Transfer flushed Alpenglow vote history
+    P->>P: Verify and atomically install vote history
     P->>P: Set identity to active
 
     Note over P: Post-failover
-    P->>P: Monitor state
+    opt Voting verification enabled
+        P->>P: Confirm certified vote slots advance beyond handover
+    end
+    P->>A: Send terminal handover and verification result
+    A->>P: Acknowledge result
+    A->>A: Exit
     P->>P: Exit 

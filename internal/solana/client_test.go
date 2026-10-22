@@ -64,7 +64,7 @@ func createTestClient() (*Client, *MockRPCClient, *MockRPCClient) {
 		networkRPCClient:    networkMock,
 		loggerLocal:         log.With("rpc_client", "local"),
 		loggerNetwork:       log.With("rpc_client", "network"),
-		averageSlotDuration: 400 * time.Millisecond,
+		averageSlotDuration: 200 * time.Millisecond,
 	}
 
 	return client, localMock, networkMock
@@ -79,20 +79,20 @@ func TestNewRPCClient(t *testing.T) {
 
 	assert.NotNil(t, client)
 	assert.IsType(t, &Client{}, client)
-	// Default average slot time should be 400ms
-	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotDuration)
+	// Default average slot time should be 200ms
+	assert.Equal(t, 200*time.Millisecond, client.(*Client).averageSlotDuration)
 }
 
 func TestNewRPCClient_CustomAverageSlotDuration(t *testing.T) {
 	params := NewClientParams{
 		LocalRPCURL:         "http://localhost:8899",
 		ClusterRPCURL:       "https://api.mainnet-beta.solana.com",
-		AverageSlotDuration: 200 * time.Millisecond,
+		AverageSlotDuration: 400 * time.Millisecond,
 	}
 	client := NewRPCClient(params)
 
 	assert.NotNil(t, client)
-	assert.Equal(t, 200*time.Millisecond, client.(*Client).averageSlotDuration)
+	assert.Equal(t, 400*time.Millisecond, client.(*Client).averageSlotDuration)
 }
 
 func TestGossipClient_NodeFromIP_Success(t *testing.T) {
@@ -677,133 +677,6 @@ func TestNode_Refresh_NodeNotFound(t *testing.T) {
 	networkMock.AssertExpectations(t)
 }
 
-func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_Success(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	expectedVoteAccounts := &rpc.GetVoteAccountsResult{
-		Current: []rpc.VoteAccountsResult{
-			{
-				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]uint64{
-					{1, 1000, 500}, // epoch, current credits, total credits
-				},
-			},
-			{
-				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]uint64{
-					{1, 800, 400}, // lower credits, should be ranked lower
-				},
-			},
-		},
-	}
-
-	networkMock.On("GetVoteAccounts", mock.Anything, mock.Anything).Return(expectedVoteAccounts, nil)
-
-	// Test the function
-	voteAccount, rank, err := client.GetCreditRankedVoteAccountFromPubkey("11111111111111111111111111111111")
-
-	// Assertions
-	require.NoError(t, err)
-	require.NotNil(t, voteAccount)
-	assert.Equal(t, 1, rank) // Should be ranked first due to higher credits
-	assert.Equal(t, "11111111111111111111111111111111", voteAccount.NodePubkey.String())
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_NotFound(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	expectedVoteAccounts := &rpc.GetVoteAccountsResult{
-		Current: []rpc.VoteAccountsResult{
-			{
-				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]uint64{
-					{1, 1000, 500},
-				},
-			},
-		},
-	}
-
-	networkMock.On("GetVoteAccounts", mock.Anything, mock.Anything).Return(expectedVoteAccounts, nil)
-
-	// Test the function
-	voteAccount, rank, err := client.GetCreditRankedVoteAccountFromPubkey("9999999999999999999999999999999999999999999999999999999999999999")
-
-	// Assertions
-	assert.Error(t, err)
-	assert.Nil(t, voteAccount)
-	assert.Equal(t, 0, rank)
-	assert.Contains(t, err.Error(), "vote account not found for pubkey: 9999999999999999999999999999999999999999999999999999999999999999")
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_RPCError(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations
-	networkMock.On("GetVoteAccounts", mock.Anything, mock.Anything).Return((*rpc.GetVoteAccountsResult)(nil), errors.New("RPC connection failed"))
-
-	// Test the function
-	voteAccount, rank, err := client.GetCreditRankedVoteAccountFromPubkey("11111111111111111111111111111111")
-
-	// Assertions
-	assert.Error(t, err)
-	assert.Nil(t, voteAccount)
-	assert.Equal(t, 0, rank)
-	assert.Contains(t, err.Error(), "RPC connection failed")
-
-	networkMock.AssertExpectations(t)
-}
-
-func TestGossipClient_GetCreditRankedVoteAccountFromPubkey_Sorting(t *testing.T) {
-	// Create test client with mocks
-	client, _, networkMock := createTestClient()
-
-	// Setup mock expectations with multiple vote accounts to test sorting
-	expectedVoteAccounts := &rpc.GetVoteAccountsResult{
-		Current: []rpc.VoteAccountsResult{
-			{
-				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]uint64{
-					{1, 500, 1000}, // diff: 500 - 1000 = -500
-				},
-			},
-			{
-				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]uint64{
-					{1, 800, 400}, // diff: 800 - 400 = 400 (highest, should be rank 1)
-				},
-			},
-			{
-				NodePubkey: createTestPublicKey(3),
-				EpochCredits: [][]uint64{
-					{1, 600, 300}, // diff: 600 - 300 = 300 (should be rank 2)
-				},
-			},
-		},
-	}
-
-	networkMock.On("GetVoteAccounts", mock.Anything, mock.Anything).Return(expectedVoteAccounts, nil)
-
-	// Test ranking for the highest credit difference
-	voteAccount, rank, err := client.GetCreditRankedVoteAccountFromPubkey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
-
-	// Assertions
-	require.NoError(t, err)
-	require.NotNil(t, voteAccount)
-	assert.Equal(t, 1, rank) // Should be ranked first due to highest credit difference
-	assert.Equal(t, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", voteAccount.NodePubkey.String())
-
-	networkMock.AssertExpectations(t)
-}
-
 func TestGossipClient_GetCurrentSlot_Success(t *testing.T) {
 	// Create test client with mocks
 	client, _, networkMock := createTestClient()
@@ -838,6 +711,75 @@ func TestGossipClient_GetCurrentSlot_RPCError(t *testing.T) {
 	assert.Contains(t, err.Error(), "RPC connection failed")
 
 	networkMock.AssertExpectations(t)
+}
+
+func TestGossipClient_GetCurrentSlot_UsesOrderedClusterRPCFallback(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	thirdRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC, thirdRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("primary unavailable"))
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(123), nil)
+
+	slot, err := client.GetCurrentSlot()
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(123), slot)
+	firstRPC.AssertExpectations(t)
+	secondRPC.AssertExpectations(t)
+	thirdRPC.AssertNotCalled(t, "GetSlot", mock.Anything, mock.Anything)
+}
+
+func TestNetworkGetSlot_BoundsPrimaryAttemptAndUsesFallback(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentFinalized).
+		Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).
+		Return(uint64(0), context.DeadlineExceeded)
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentFinalized).Return(uint64(456), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	slot, err := client.networkGetSlot(ctx, rpc.CommitmentFinalized)
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(456), slot)
+	assert.Less(t, time.Since(started), 200*time.Millisecond)
+	firstRPC.AssertExpectations(t)
+	secondRPC.AssertExpectations(t)
+}
+
+func TestNetworkRPCAttemptContext_BoundsBackgroundContext(t *testing.T) {
+	ctx, cancel := networkRPCAttemptContext(context.Background(), 1)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	remaining := time.Until(deadline)
+	assert.Greater(t, remaining, time.Duration(0))
+	assert.LessOrEqual(t, remaining, networkRPCAttemptTimeout)
+}
+
+func TestGossipClient_GetCurrentSlot_ReportsExhaustedClusterRPCs(t *testing.T) {
+	client, _, firstRPC := createTestClient()
+	secondRPC := &MockRPCClient{}
+	client.networkRPCClients = []RPCClientInterface{firstRPC, secondRPC}
+
+	firstRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("primary unavailable"))
+	secondRPC.On("GetSlot", mock.Anything, rpc.CommitmentConfirmed).Return(uint64(0), errors.New("secondary unavailable"))
+
+	_, err := client.GetCurrentSlot()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "all cluster RPC endpoints failed")
+	assert.Contains(t, err.Error(), "primary unavailable")
+	assert.Contains(t, err.Error(), "secondary unavailable")
 }
 
 func TestGossipClient_GetLocalNodeHealth_Success(t *testing.T) {
@@ -1024,33 +966,6 @@ func BenchmarkGossipClient_NodeFromPubkey(b *testing.B) {
 	}
 }
 
-func BenchmarkGossipClient_GetCreditRankedVoteAccountFromPubkey(b *testing.B) {
-	client, _, networkMock := createTestClient()
-	expectedVoteAccounts := &rpc.GetVoteAccountsResult{
-		Current: []rpc.VoteAccountsResult{
-			{
-				NodePubkey: createTestPublicKey(1),
-				EpochCredits: [][]uint64{
-					{1, 1000, 500},
-				},
-			},
-			{
-				NodePubkey: createTestPublicKey(2),
-				EpochCredits: [][]uint64{
-					{1, 800, 400},
-				},
-			},
-		},
-	}
-
-	networkMock.On("GetVoteAccounts", mock.Anything, mock.Anything).Return(expectedVoteAccounts, nil)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _, _ = client.GetCreditRankedVoteAccountFromPubkey("11111111111111111111111111111111")
-	}
-}
-
 func BenchmarkGossipClient_GetCurrentSlot(b *testing.B) {
 	client, _, networkMock := createTestClient()
 	expectedSlot := uint64(123456789)
@@ -1093,8 +1008,8 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, isOnSchedule)
 	assert.Greater(t, timeToNext, time.Duration(0))
-	// Should be approximately 50 slots * 400ms = 20 seconds
-	expectedTime := time.Duration(50) * 400 * time.Millisecond
+	// Should be approximately 50 slots * 200ms = 10 seconds
+	expectedTime := time.Duration(50) * 200 * time.Millisecond
 	assert.Equal(t, expectedTime, timeToNext)
 
 	networkMock.AssertExpectations(t)
@@ -1109,7 +1024,7 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_CustomSlotTime(t *testing
 		networkRPCClient:    networkMock,
 		loggerLocal:         log.With("rpc_client", "local"),
 		loggerNetwork:       log.With("rpc_client", "network"),
-		averageSlotDuration: 200 * time.Millisecond,
+		averageSlotDuration: 400 * time.Millisecond,
 	}
 
 	// Setup mock expectations
@@ -1137,8 +1052,8 @@ func TestGossipClient_GetTimeToNextLeaderSlotForPubkey_CustomSlotTime(t *testing
 	require.NoError(t, err)
 	assert.True(t, isOnSchedule)
 	assert.Greater(t, timeToNext, time.Duration(0))
-	// Should be 50 slots * 200ms = 10 seconds (custom slot time)
-	expectedTime := time.Duration(50) * 200 * time.Millisecond
+	// Should be 50 slots * 400ms = 20 seconds (custom slot time)
+	expectedTime := time.Duration(50) * 400 * time.Millisecond
 	assert.Equal(t, expectedTime, timeToNext)
 
 	networkMock.AssertExpectations(t)
