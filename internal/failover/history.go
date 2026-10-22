@@ -13,7 +13,7 @@ import (
 
 // HistoryMaxSize includes Agave's 18 GiB signed-history limit and its envelope.
 // Read it with bounded memory;
-// do not inherit the 32688-byte Tower buffer limit from older Firedancer builds.
+// Older Firedancer builds imposed an incompatible 32688-byte history limit.
 const HistoryMaxSize int64 = (18 << 30) + 76
 
 // ReadHistoryWatermark follows SavedVoteHistoryVersions::Current and the

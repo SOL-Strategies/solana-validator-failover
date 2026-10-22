@@ -3,7 +3,7 @@ package failover
 import "fmt"
 
 // AddHandoffTemplateEnv adds directional metadata to hook environments.
-// Vote-history keys replace the former Tower-specific metadata.
+// Vote-history keys describe the Alpenglow state transferred during handover.
 func AddHandoffTemplateEnv(env map[string]string, source, destination NodeInfo, local, peer NodeInfo, strategy string, voteHistoryWillBeTransferred bool) {
 	env["THIS_NODE_CLIENT_FAMILY"] = local.ClientFamily
 	env["PEER_NODE_CLIENT_FAMILY"] = peer.ClientFamily

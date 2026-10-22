@@ -116,6 +116,16 @@ func runHandoff(t *testing.T, sourceFamily, destinationFamily, mode string) {
 		if r.URL.Query().Get("node") == "destination" {
 			i = 1
 		}
+		if i == 0 && sourceFamily == "firedancer" && mode != "stale-history" {
+			// Model the final write with an explicit wall-clock timestamp. A
+			// plain touch can use a cached kernel time preceding demotion.
+			history := filepath.Join(dir, "0", "vote_history-"+active+".bin.bak")
+			now := time.Now()
+			if err := os.Chtimes(history, now, now); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		activationCalls.Add(1)
 		_ = os.WriteFile(roleFiles[i], []byte(r.URL.Query().Get("identity")), 0600)
 		w.WriteHeader(200)
