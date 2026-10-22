@@ -14,7 +14,7 @@ import (
 	"github.com/solana-foundation/solana-go/v2/rpc"
 )
 
-// ConsensusTower and ConsensusAlpenglow are the supported validator consensus modes.
+// ConsensusTower is recognized for rejection; only ConsensusAlpenglow is supported.
 const (
 	ConsensusTower     = "tower"
 	ConsensusAlpenglow = "alpenglow"
@@ -94,6 +94,9 @@ func DetectConsensus(rpcURL string) (ConsensusState, error) {
 
 // ValidateConsensus confirms that the declared mode matches the detected local phase.
 func ValidateConsensus(rpcURL, declaredMode string) error {
+	if declaredMode != ConsensusAlpenglow {
+		return fmt.Errorf("unsupported consensus %q: release 0.2.0 requires alpenglow", declaredMode)
+	}
 	state, err := DetectConsensus(rpcURL)
 	if err != nil {
 		return err

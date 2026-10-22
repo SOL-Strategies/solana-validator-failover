@@ -1,5 +1,7 @@
 validator:
   bin: ./scripts/agave-validator-mock.sh
+  client:
+    family: agave
   cluster: integration
   cluster_rpc_url: http://localhost:8899
   name: chicago
@@ -9,17 +11,25 @@ validator:
     passive: ./integration/test-keys/validator-1-passive.json
   rpc_address: http://localhost:8899?validator=chicago
   ledger_dir: ./integration/test-ledgers/chicago
-  tower:
-    dir: ./integration/test-towers/chicago
-  average_slot_duration: 400ms
+  vote_history:
+    # Defaults to ledger_dir; Firedancer must configure the same export directory.
+  average_slot_duration: 200ms
   failover:
+    consensus:
+      mode: alpenglow
+    tls:
+      enabled: true
+      ca_cert: ./integration/test-tls/ca.crt
+      cert: ./integration/test-tls/node.crt
+      key: ./integration/test-tls/node.key
     peers:
       london:
         address: localhost:9898
     monitor:
-      credit_samples:
-        count: 2
-        interval: 1s
+      voting:
+        enabled: true
+        timeout: 2m
+        poll_interval: 1s
     rollback:
       enabled: true
       to_active:

@@ -1,4 +1,4 @@
-FROM golang:1.26.5-trixie
+FROM golang:1.27.3-trixie
 ARG APP_VERSION
 ARG APP_NAME
 ARG BUILD_OS_ARCH_LIST
@@ -9,9 +9,11 @@ ENV BUILD_OS_ARCH_LIST=$BUILD_OS_ARCH_LIST
 ENV CI=$CI
 RUN apt-get update \
     && apt-get install -y \
+        ca-certificates \
         jq \
         zip \
         unzip \
+    && update-ca-certificates \
     && go install github.com/air-verse/air@latest \
     && go install golang.org/x/lint/golint@latest \
     && go install github.com/git-chglog/git-chglog/cmd/git-chglog@latest \

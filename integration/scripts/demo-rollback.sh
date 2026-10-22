@@ -1,18 +1,9 @@
 #!/bin/bash
 # demo-rollback.sh
-# Demonstrates the rollback feature: london (passive) fails to set its identity to active,
-# signals chicago to revert to active, and re-asserts its own passive identity.
-#
-# Requires: make demo (mock-solana running on localhost:8899) and make build.
-#
-# What to observe:
-#   - chicago switches to passive (set-identity succeeds)
-#   - tower file syncs to london
-#   - london attempts set-identity-to-active → SIMULATED FAILURE
-#   - london signals chicago: rollback required
-#   - london runs rollback.to_passive hooks + command
-#   - chicago receives rollback signal, runs rollback.to_active hooks + command
-#   - both nodes revert to original roles
+# Demonstrates conservative recovery after a mocked activation failure.
+# London reasserts passive identity, while Chicago remains passive because an
+# activation attempt could have signed votes. Source recovery is manual.
+# Requires: make demo and make build. This demo transfers signed Alpenglow history fixtures.
 
 set -euo pipefail
 
@@ -25,6 +16,8 @@ BINARY="./bin/solana-validator-failover-dev-linux-amd64"
 # MOCK_SOLANA_URL must be set so the mock validator scripts can call /fail-check.
 export MOCK_SOLANA_URL="$MOCK_URL"
 
+go run ./integration/prepare-history
+
 # Reset: chicago starts as active.
 curl -sf -X POST -H "Content-Type: application/json" \
     -d '{"action":"reset","target":"chicago"}' \
@@ -35,7 +28,7 @@ echo "mock reset: chicago is active"
 curl -sf -X POST -H "Content-Type: application/json" \
     -d '{"action":"fail_next_set_active","target":"london"}' \
     "$MOCK_URL/action" >/dev/null
-echo "mock armed: london's next set-identity-to-active will fail → rollback will trigger"
+echo "mock armed: london's next set-identity-to-active will fail → destination demotion and manual source recovery"
 
 # Start chicago (active) in the background with VALIDATOR_NAME=chicago so the mock
 # validator script can identify itself to /fail-check and /action.

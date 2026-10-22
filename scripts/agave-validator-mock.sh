@@ -18,12 +18,15 @@ while [[ $# -gt 0 ]]; do
             echo "agave-validator 1.0.0 (src:7ac65892; feat:798020478, client:Mock)"
             exit 0
             ;;
+        --ledger)
+            shift 2
+            ;;
         set-identity)
             shift
             # Notify mock-solana of the identity change if MOCK_SOLANA_URL and VALIDATOR_NAME are set.
-            # --require-tower means setting to active; absence means passive.
+            # The demo active keypair filename identifies activation.
             if [ -n "${MOCK_SOLANA_URL:-}" ] && [ -n "${VALIDATOR_NAME:-}" ]; then
-                if echo "$@" | grep -q -- "--require-tower"; then
+                if printf '%s\n' "$@" | grep -q -- "active-identity"; then
                     # Check if this set-identity-to-active call should be simulated as failing.
                     FAIL_CHECK=$(curl -sf "${MOCK_SOLANA_URL}/fail-check?validator=${VALIDATOR_NAME}&action=set_active" 2>/dev/null || echo '{"fail":false}')
                     if echo "$FAIL_CHECK" | grep -q '"fail":true'; then

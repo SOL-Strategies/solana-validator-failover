@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestVoteHistoryTransfer(t *testing.T) {
@@ -58,54 +57,57 @@ func TestVoteHistoryTransferPreservesExistingOnTruncation(t *testing.T) {
 	}
 }
 
-func TestVoteHistoryAfterDemotion(t *testing.T) {
-	demotedAt := time.Now()
-	write := func(t *testing.T, path string, mtime time.Time) {
-		t.Helper()
-		if err := os.WriteFile(path, []byte("vote history"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, mtime, mtime); err != nil {
-			t.Fatal(err)
-		}
+func TestDryRunHistoryDestinationUsesTemporarySibling(t *testing.T) {
+	dir := t.TempDir()
+	destination := filepath.Join(dir, "vote_history-active.bin")
+	if err := os.WriteFile(destination, []byte("existing history"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	tests := []struct {
-		name    string
-		bin     *time.Time
-		bak     *time.Time
-		want    string
-		wantErr bool
-	}{
-		{name: "agave keeps the bin", bin: ptr(demotedAt.Add(time.Second)), want: ".bin"},
-		{name: "bin wins over a bak", bin: ptr(demotedAt.Add(time.Second)), bak: ptr(demotedAt.Add(-time.Hour)), want: ".bin"},
-		{name: "firedancer saves a fresh bak", bak: ptr(demotedAt.Add(time.Millisecond)), want: ".bin.bak"},
-		{name: "stale bak from an earlier switch", bak: ptr(demotedAt.Add(-time.Second)), wantErr: true},
-		{name: "no vote history at all", wantErr: true},
+	source := filepath.Join(dir, "source.bin")
+	content := []byte("current dry-run snapshot")
+	if err := os.WriteFile(source, content, 0600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "vote_history-test.bin")
-			if tt.bin != nil {
-				write(t, path, *tt.bin)
-			}
-			if tt.bak != nil {
-				write(t, path+".bak", *tt.bak)
-			}
-			got, err := voteHistoryAfterDemotion(path, demotedAt)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected an error, got %s", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != filepath.Join(filepath.Dir(path), "vote_history-test"+tt.want) {
-				t.Fatalf("got %s, want suffix %s", got, tt.want)
-			}
-		})
+
+	dryRunPath, err := createDryRunHistoryDestination(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(dryRunPath) }()
+
+	if filepath.Dir(dryRunPath) != dir {
+		t.Fatalf("dry-run path directory = %q, want %q", filepath.Dir(dryRunPath), dir)
+	}
+	if dryRunPath == destination {
+		t.Fatal("dry-run path must not replace the configured destination")
+	}
+	var wire bytes.Buffer
+	sender := &Stream{encoder: gob.NewEncoder(&wire)}
+	if err := sender.sendStateFile(source); err != nil {
+		t.Fatal(err)
+	}
+	receiver := &Stream{decoder: gob.NewDecoder(&wire)}
+	if err := receiver.receiveStateFile(dryRunPath); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dryRunPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatal("dry-run transfer did not install the source snapshot")
+	}
+	if err := os.Remove(dryRunPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dryRunPath); !os.IsNotExist(err) {
+		t.Fatalf("dry-run destination still exists after cleanup: %v", err)
+	}
+	got, err = os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "existing history" {
+		t.Fatalf("configured destination changed: %q", got)
 	}
 }
-
-func ptr(t time.Time) *time.Time { return &t }

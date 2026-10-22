@@ -2,12 +2,17 @@ package config
 
 import (
 	"fmt"
+	"go.yaml.in/yaml/v3"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/sol-strategies/solana-validator-failover/internal/utils"
 	"github.com/sol-strategies/solana-validator-failover/internal/validator"
 	"github.com/sol-strategies/solana-validator-failover/pkg/constants"
+	"github.com/solana-foundation/solana-go/v2/sysvar"
 	"github.com/spf13/viper"
 )
 
@@ -17,9 +22,6 @@ const (
 
 	// DefaultCluster is the default cluster for the validator
 	DefaultCluster = "testnet"
-
-	// DefaultAverageSlotDuration is the default average slot duration
-	DefaultAverageSlotDuration = "400ms"
 
 	// DefaultFailoverServerPort is the default port for the failover server
 	DefaultFailoverServerPort = 9898
@@ -33,23 +35,16 @@ const (
 	// DefaultFailoverMinimumTimeToLeaderSlot is the default minimum time to leader slot for the failover server
 	DefaultFailoverMinimumTimeToLeaderSlot = "5m"
 
-	// DefaultFailoverMonitorCreditSamplesCount is the default credit samples count for the failover server
-	DefaultFailoverMonitorCreditSamplesCount = 5
-
-	// DefaultFailoverMonitorCreditSamplesInterval is the default credit samples interval for the failover server
-	DefaultFailoverMonitorCreditSamplesInterval = "5s"
-
-	// DefaultTowerFileNameTemplate is the default tower file name template for the validator
-	DefaultTowerFileNameTemplate = "tower-1_9-{{ .Identities.Active.PubKey }}.bin"
-
 	// DefaultSetIdentityPassiveCmdTemplate is the default set identity passive command template for the validator
-	DefaultSetIdentityPassiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Passive.KeyFile }}"
+	DefaultSetIdentityPassiveCmdTemplate = `{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ printf "%q" .ClientConfigPath }}{{ end }} {{ printf "%q" .Identities.Passive.KeyFile }}{{ else }}{{ .Bin }} --ledger {{ printf "%q" .LedgerDir }} set-identity {{ printf "%q" .Identities.Passive.KeyFile }}{{ end }}`
 
-	// DefaultSetIdentityActiveCmdTemplate is the default set identity active command template for the validator
-	DefaultSetIdentityActiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }} --require-tower"
+	DefaultSetIdentityActiveCmdTemplate = `{{ if .ThisNodeIsNativeFiredancer }}{{ .Bin }} set-identity{{ if .ClientConfigPath }} --config {{ printf "%q" .ClientConfigPath }}{{ end }} {{ printf "%q" .Identities.Active.KeyFile }} --vote-history-file {{ printf "%q" .VoteHistoryImportFile }}{{ else }}{{ .Bin }} --ledger {{ printf "%q" .LedgerDir }} set-identity {{ printf "%q" .Identities.Active.KeyFile }}{{ end }}`
 )
 
 var (
+	// DefaultAverageSlotDuration is the default average slot duration.
+	DefaultAverageSlotDuration = (time.Duration(sysvar.MsPerSlot200) * time.Millisecond).String()
+
 	// DefaultConfigPath is the default path to the config file
 	DefaultConfigPath = filepath.Join("~", constants.AppName, constants.AppName+".yaml")
 )
@@ -100,17 +95,21 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 	v.SetDefault("log.level", DefaultLogLevel)
 	v.SetDefault("log.format", DefaultLogFormat)
 	v.SetDefault("validator.bin", DefaultBin)
+	v.SetDefault("validator.client.family", "auto")
+	v.SetDefault("validator.client.consensus", "auto")
+	v.SetDefault("validator.failover.handoff.timeout", "2m")
+	v.SetDefault("validator.failover.handoff.poll_interval", "500ms")
 	v.SetDefault("validator.average_slot_duration", DefaultAverageSlotDuration)
 	v.SetDefault("validator.cluster", DefaultCluster)
 	v.SetDefault("validator.failover.min_time_to_leader_slot", DefaultFailoverMinimumTimeToLeaderSlot)
-	v.SetDefault("validator.failover.consensus.mode", "tower")
-	v.SetDefault("validator.failover.monitor.credit_samples.count", DefaultFailoverMonitorCreditSamplesCount)
-	v.SetDefault("validator.failover.monitor.credit_samples.interval", DefaultFailoverMonitorCreditSamplesInterval)
+	v.SetDefault("validator.failover.consensus.mode", "alpenglow")
+	v.SetDefault("validator.failover.monitor.voting.enabled", true)
+	v.SetDefault("validator.failover.monitor.voting.timeout", "2m")
+	v.SetDefault("validator.failover.monitor.voting.poll_interval", "1s")
 	v.SetDefault("validator.failover.server.heartbeat_interval", DefaultFailoverServerHeartbeatInterval)
 	v.SetDefault("validator.failover.server.port", DefaultFailoverServerPort)
 	v.SetDefault("validator.failover.server.stream_timeout", DefaultFailoverServerStreamTimeout)
 	v.SetDefault("validator.failover.set_identity_passive_cmd_template", DefaultSetIdentityPassiveCmdTemplate)
-	v.SetDefault("validator.tower.file_name_template", DefaultTowerFileNameTemplate)
 	v.SetDefault("update.check_on_startup", true)
 
 	// Read config file
@@ -120,16 +119,49 @@ func (s *SolanaValidatorFailover) LoadFromConfigFile(configPath string) (err err
 		return
 	}
 
+	// Viper drops null-valued keys. Preserve raw YAML/JSON key presence so even
+	// obsolete sections explicitly set to null are rejected.
+	var raw map[string]any
+	switch strings.ToLower(filepath.Ext(loadConfigPath)) {
+	case ".yaml", ".yml", ".json":
+		content, err := os.ReadFile(loadConfigPath)
+		if err != nil {
+			return err
+		}
+		if err := yaml.Unmarshal(content, &raw); err != nil {
+			return err
+		}
+	}
+	// Inspect the file itself so explicitly empty/false legacy settings are rejected.
+	for key, guidance := range map[string]string{
+		"validator.tower": "configure validator.vote_history instead",
+		"validator.failover.monitor.credit_samples": "configure validator.failover.monitor.voting instead",
+	} {
+		if v.InConfig(key) || configKeyPresent(raw, strings.Split(key, ".")) {
+			return fmt.Errorf("%s is no longer supported; %s", key, guidance)
+		}
+	}
 	// Unmarshal into the full config structure
 	if err := v.Unmarshal(s); err != nil {
 		return err
 	}
 	if s.Validator.Failover.SetIdentityActiveCmdTemplate == "" {
 		s.Validator.Failover.SetIdentityActiveCmdTemplate = DefaultSetIdentityActiveCmdTemplate
-		if s.Validator.Failover.Consensus.Mode == "alpenglow" {
-			s.Validator.Failover.SetIdentityActiveCmdTemplate = "{{ .Bin }} --ledger {{ .LedgerDir }} set-identity {{ .Identities.Active.KeyFile }}"
-		}
 	}
 
 	return s.Log.Validate()
+}
+
+func configKeyPresent(values map[string]any, path []string) bool {
+	for key, value := range values {
+		if !strings.EqualFold(key, path[0]) {
+			continue
+		}
+		if len(path) == 1 {
+			return true
+		}
+		nested, ok := value.(map[string]any)
+		return ok && configKeyPresent(nested, path[1:])
+	}
+	return false
 }

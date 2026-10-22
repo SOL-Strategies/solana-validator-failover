@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	"github.com/solana-foundation/solana-go/v2"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
 	"github.com/sol-strategies/solana-validator-failover/internal/identities"
 	solanapkg "github.com/sol-strategies/solana-validator-failover/internal/solana"
+	"github.com/solana-foundation/solana-go/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,11 +101,8 @@ func (tv *TestValidator) NewFromConfig(cfg *Config) error {
 		return err
 	}
 
-	// tower file configure
-	err = tv.configureTowerFile(cfg.Tower)
-	if err != nil {
-		return err
-	}
+	// Configure the history path for this dependency-isolated fixture.
+	tv.VoteHistoryFile = filepath.Join(tv.LedgerDir, "vote_history-"+tv.Identities.Active.PubKey()+".bin")
 
 	// set identity commands configure
 	err = tv.configureSetIdenttiyCommands(cfg.Failover)
@@ -218,7 +215,7 @@ func createTestValidator(t *testing.T) *TestValidator {
 func TestConfigureRPCClient_Success(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "testnet", "", "400ms")
+	err := validator.configureRPCClient("http://localhost:8899", "testnet", "", "200ms")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, validator.solanaRPCClient)
@@ -227,7 +224,7 @@ func TestConfigureRPCClient_Success(t *testing.T) {
 func TestConfigureRPCClient_EmptyCluster(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "", "", "400ms")
+	err := validator.configureRPCClient("http://localhost:8899", "", "", "200ms")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster is required")
@@ -236,7 +233,7 @@ func TestConfigureRPCClient_EmptyCluster(t *testing.T) {
 func TestConfigureRPCClient_InvalidRPCAddress(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("invalid-address", "testnet", "", "400ms")
+	err := validator.configureRPCClient("invalid-address", "testnet", "", "200ms")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid rpc address")
@@ -245,7 +242,7 @@ func TestConfigureRPCClient_InvalidRPCAddress(t *testing.T) {
 func TestConfigureRPCClient_CustomCluster_Success(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "https://mainnet.custom.io", "400ms")
+	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "https://mainnet.custom.io", "200ms")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, validator.solanaRPCClient)
@@ -254,7 +251,7 @@ func TestConfigureRPCClient_CustomCluster_Success(t *testing.T) {
 func TestConfigureRPCClient_CustomCluster_MissingClusterRPCURL(t *testing.T) {
 	validator := createTestValidator(t)
 
-	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "", "400ms")
+	err := validator.configureRPCClient("http://localhost:8899", "custom-mainnet", "", "200ms")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster_rpc_url is required")
@@ -279,6 +276,29 @@ func TestResolveClusterRPCURL_CustomCluster(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "https://custom-rpc.example.com", url)
+}
+
+func TestResolveClusterRPCURLs_PreservesConfiguredOrder(t *testing.T) {
+	urls, err := resolveClusterRPCURLs("mainnet-beta", "", []string{
+		"https://primary.example.com",
+		"https://secondary.example.com",
+		"https://primary.example.com",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://primary.example.com",
+		"https://secondary.example.com",
+	}, urls)
+}
+
+func TestResolveClusterRPCURLsTakesPrecedenceOverSingularURL(t *testing.T) {
+	urls, err := resolveClusterRPCURLs("mainnet-beta", "https://singular.example.com", []string{
+		"https://primary.example.com",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://primary.example.com"}, urls)
 }
 
 func TestRPCURLForLog_RedactsCredentialsAndPath(t *testing.T) {
@@ -572,16 +592,25 @@ func TestConfigureHooks_Success(t *testing.T) {
 // Legacy tests for backward compatibility
 // ============================================================================
 
+func TestConfigureClientRequiresExplicitFamilyForFdctl(t *testing.T) {
+	v := &Validator{Bin: "fdctl", logger: log.WithPrefix("validator")}
+
+	err := v.configureClient(ClientConfig{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "validator.client.family explicitly")
+}
+
 func TestNewFromConfig_Success(t *testing.T) {
 	// Create temporary directories and files
 	tempDir := t.TempDir()
 	ledgerDir := filepath.Join(tempDir, "ledger")
-	towerDir := filepath.Join(tempDir, "tower")
+	historyDir := filepath.Join(tempDir, "history")
 
 	// Create directories
 	err := os.MkdirAll(ledgerDir, 0o755)
 	require.NoError(t, err)
-	err = os.MkdirAll(towerDir, 0o755)
+	err = os.MkdirAll(historyDir, 0o755)
 	require.NoError(t, err)
 
 	// create test agave-validator binary
@@ -596,16 +625,11 @@ func TestNewFromConfig_Success(t *testing.T) {
 		Bin:                 agaveValidatorBin,
 		Cluster:             "testnet",
 		RPCAddress:          "http://localhost:8899",
-		AverageSlotDuration: "400ms",
+		AverageSlotDuration: "200ms",
 		LedgerDir:           ledgerDir,
 		Identities: identities.Config{
 			Active:  activeKeyFile,
 			Passive: passiveKeyFile,
-		},
-		Tower: TowerConfig{
-			Dir:                  towerDir,
-			FileNameTemplate:     "tower-{{ .Identities.Active.PubKey }}.bin",
-			AutoEmptyWhenPassive: true,
 		},
 		Failover: FailoverConfig{
 			MinimumTimeToLeaderSlot:       "5m",
@@ -639,7 +663,6 @@ func TestNewFromConfig_Success(t *testing.T) {
 	assert.Equal(t, ledgerDir, testValidator.LedgerDir)
 	assert.Equal(t, "192.168.1.100", testValidator.PublicIP)
 	assert.Equal(t, "test-validator", testValidator.Hostname)
-	assert.True(t, testValidator.TowerFileAutoDeleteWhenPassive)
 	assert.Len(t, testValidator.Peers, 2)
 	assert.Equal(t, "192.168.1.100:9898", testValidator.Peers["peer1"].Address)
 	assert.Equal(t, "192.168.1.101:9898", testValidator.Peers["peer2"].Address)
@@ -671,8 +694,9 @@ func TestValidator_IsActive(t *testing.T) {
 
 	// Create validator with mock gossip node that matches active pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: activeKey.PublicKey().String(),
 	}
 
 	// Test IsActive
@@ -701,13 +725,52 @@ func TestValidator_IsPassive(t *testing.T) {
 
 	// Create validator with mock gossip node that matches passive pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
 	}
 
 	// Test IsPassive
 	assert.True(t, validator.IsPassive())
 	assert.False(t, validator.IsActive())
+}
+
+func TestValidator_LocalIdentityOverridesStaleGossipRole(t *testing.T) {
+	activeKey := solana.NewWallet().PrivateKey
+	passiveKey := solana.NewWallet().PrivateKey
+	validator := &Validator{
+		Identities: &identities.Identities{
+			Active:  &identities.Identity{KeyFile: "/path/to/active.json", Key: activeKey},
+			Passive: &identities.Identity{KeyFile: "/path/to/passive.json", Key: passiveKey},
+		},
+		// Gossip still associates this IP with the old active identity, while
+		// local getIdentity has already switched to passive.
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
+	}
+
+	assert.False(t, validator.IsActive())
+	assert.True(t, validator.IsPassive())
+}
+
+func TestValidator_RefreshLocalIdentityRejectsUnknownIdentity(t *testing.T) {
+	activeKey := solana.NewWallet().PrivateKey
+	passiveKey := solana.NewWallet().PrivateKey
+	unknownKey := solana.NewWallet().PrivateKey
+	validator := &Validator{
+		logger: log.WithPrefix("validator"),
+		Identities: &identities.Identities{
+			Active:  &identities.Identity{KeyFile: "/path/to/active.json", Key: activeKey},
+			Passive: &identities.Identity{KeyFile: "/path/to/passive.json", Key: passiveKey},
+		},
+		solanaRPCClient: solanapkg.NewMockClient().WithGetLocalIdentity(func() (string, error) {
+			return unknownKey.PublicKey().String(), nil
+		}),
+	}
+
+	err := validator.refreshLocalIdentity()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "matches neither configured active identity")
 }
 
 func TestValidator_IsNeitherActiveNorPassive(t *testing.T) {
@@ -732,8 +795,9 @@ func TestValidator_IsNeitherActiveNorPassive(t *testing.T) {
 	// Create validator with mock gossip node that has different pubkey
 	otherKey := solana.NewWallet().PrivateKey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(otherKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(otherKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: otherKey.PublicKey().String(),
 	}
 
 	// Test neither active nor passive
@@ -752,8 +816,7 @@ func TestValidator_BasicProperties(t *testing.T) {
 			Client:  "agave-validator",
 			Version: "1.16.0",
 		},
-		MinimumTimeToLeaderSlot:        5 * time.Minute,
-		TowerFileAutoDeleteWhenPassive: true,
+		MinimumTimeToLeaderSlot: 5 * time.Minute,
 	}
 
 	assert.Equal(t, "/usr/local/bin/agave-validator", validator.Bin)
@@ -763,7 +826,6 @@ func TestValidator_BasicProperties(t *testing.T) {
 	assert.Equal(t, "agave-validator", validator.BinMetadata.Client)
 	assert.Equal(t, "1.16.0", validator.BinMetadata.Version)
 	assert.Equal(t, 5*time.Minute, validator.MinimumTimeToLeaderSlot)
-	assert.True(t, validator.TowerFileAutoDeleteWhenPassive)
 }
 
 func TestValidator_CommandTemplates(t *testing.T) {
@@ -885,8 +947,9 @@ func BenchmarkValidator_IsActive(b *testing.B) {
 
 	// Create validator with mock gossip node that matches active pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(activeKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: activeKey.PublicKey().String(),
 	}
 
 	b.ResetTimer()
@@ -916,8 +979,9 @@ func BenchmarkValidator_IsPassive(b *testing.B) {
 
 	// Create validator with mock gossip node that matches passive pubkey
 	validator := &Validator{
-		Identities: identities,
-		GossipNode: solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		Identities:          identities,
+		GossipNode:          solanapkg.NewMockNode(passiveKey.PublicKey(), "1.16.0"),
+		LocalIdentityPubkey: passiveKey.PublicKey().String(),
 	}
 
 	b.ResetTimer()
@@ -1053,4 +1117,38 @@ func TestConfigureTLS_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, v.serverTLSConfig)
 	assert.NotNil(t, v.clientTLSConfig)
+}
+
+func TestVotingMonitorConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     VotingConfig
+		wantErr bool
+	}{
+		{"enabled", VotingConfig{Enabled: true, Timeout: "2m", PollInterval: "1s"}, false},
+		{"disabled", VotingConfig{}, false},
+		{"zero timeout", VotingConfig{Enabled: true, Timeout: "0s", PollInterval: "1s"}, true},
+		{"negative poll", VotingConfig{Enabled: true, Timeout: "2m", PollInterval: "-1s"}, true},
+		{"invalid timeout", VotingConfig{Enabled: true, Timeout: "oops", PollInterval: "1s"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &Validator{}
+			err := v.configureServer(ServerConfig{}, MonitorConfig{Voting: tc.cfg})
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				if tc.cfg.Enabled {
+					require.Equal(t, 2*time.Minute, v.MonitorConfig.Voting.TimeoutDuration)
+				}
+			}
+		})
+	}
+}
+
+func TestRejectTowerIdentityOptions(t *testing.T) {
+	for _, cmd := range []string{"agave-validator set-identity --require-tower key.json", "agave-validator set-identity --require-tower=false key.json", `agave-validator set-identity "--require-tower" key.json`} {
+		require.ErrorContains(t, validateAlpenglowCommand(cmd), "remove it")
+	}
+	require.NoError(t, validateAlpenglowCommand("agave-validator set-identity key.json"))
 }

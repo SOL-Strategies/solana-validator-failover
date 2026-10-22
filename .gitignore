@@ -8,7 +8,10 @@ tmp*
 tmp*/
 local-test/**/*.bin
 local-test/**/*.json
+# Preserve ignored local fixtures from older checkouts.
 integration/test-towers/london/*.bin
+integration/test-ledgers/**/*.bin
+integration/test-ledgers/**/*.bin.bak
 pkg/constants/app.version
 scripts/air-cmd.sh
 release-notes.md

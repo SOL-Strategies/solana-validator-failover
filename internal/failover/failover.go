@@ -24,6 +24,8 @@ const (
 	// MessageTypeFileTransfer is the message type for file transfer
 	MessageTypeFileTransfer byte = 2
 
+	HandoffStrategyVoteHistory = "vote-history"
+
 	// WireProtocolVersion is the binary framing version for QUIC streams.
 	// Bump this whenever the stream framing or gob types change in a
 	// backward-incompatible way (e.g. adding GobEncode/GobDecode to a type).
@@ -34,7 +36,10 @@ const (
 	//   2 = version byte added after msg_type / before first gob frame (v0.1.18+)
 	//   3 = Alpenglow vote-history streaming and initial consensus negotiation
 	//   4 = consensus genesis-slot agreement in the handshake
-	WireProtocolVersion byte = 4
+	//   5 = native Firedancer handoffs and identity-transition capability negotiation
+	//   6 = Alpenglow-only handoffs using standard commands and optional history transfer
+	//   7 = mandatory history transfer, optional certified voting verification, terminal acknowledgement
+	WireProtocolVersion byte = 7
 )
 
 // hookEnvMapParams is the parameters for the hook environment map

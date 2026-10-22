@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/log"
 	appLogging "github.com/sol-strategies/solana-validator-failover/internal/logging"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,4 +71,12 @@ func TestPersistentPreRun_CLILevelOverridesConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, log.DebugLevel, log.GetLevel())
 	assert.Equal(t, "warn", loadedConfig.Log.Level)
+}
+
+func TestRemovedTransferAndTowerFlags(t *testing.T) {
+	for _, flag := range []string{"skip-tower-sync", "skip-history-transfer"} {
+		require.Nil(t, runCmd.Flags().Lookup(flag))
+		require.ErrorContains(t, runCmd.ParseFlags([]string{"--" + flag}), "unknown flag")
+	}
+	runCmd.Flags().VisitAll(func(flag *pflag.Flag) { require.NotContains(t, flag.Name, "tower") })
 }

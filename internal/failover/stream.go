@@ -1,19 +1,15 @@
 package failover
 
 import (
-	"context"
 	"encoding/gob"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/charmbracelet/log"
 	"github.com/quic-go/quic-go"
 	"github.com/sol-strategies/solana-validator-failover/internal/hooks"
-	"github.com/sol-strategies/solana-validator-failover/internal/solana"
 	"github.com/sol-strategies/solana-validator-failover/internal/style"
 	pkgconstants "github.com/sol-strategies/solana-validator-failover/pkg/constants"
 )
@@ -35,9 +31,6 @@ func NewFailoverStream(stream *quic.Stream) *Stream {
 		Stream:  stream,
 		decoder: decoder,
 		encoder: encoder,
-		message: Message{
-			CreditSamples: make(CreditSamples),
-		},
 	}
 }
 
@@ -122,15 +115,31 @@ func (s Stream) GetIsDryRunFailover() bool {
 	return s.message.IsDryRunFailover
 }
 
-// SetSkipTowerSync sets the skip tower sync flag
-func (s *Stream) SetSkipTowerSync(skipTowerSync bool) {
-	s.message.SkipTowerSync = skipTowerSync
+func (s *Stream) SetHandoffStrategy(strategy string) {
+	s.message.HandoffStrategy = strategy
+	s.refreshHistoryTransfer()
 }
 
-// GetSkipTowerSync returns the skip tower sync flag
-func (s Stream) GetSkipTowerSync() bool {
-	return s.message.SkipTowerSync
+func (s *Stream) refreshHistoryTransfer() {
+	s.message.VoteHistoryWillBeTransferred = s.message.HandoffStrategy == HandoffStrategyVoteHistory
 }
+
+func (s Stream) GetHandoffStrategy() string { return s.message.HandoffStrategy }
+
+func (s Stream) GetVoteHistoryWillBeTransferred() bool { return s.message.VoteHistoryWillBeTransferred }
+
+func (s *Stream) SetHandoffAborted(aborted bool) { s.message.HandoffAborted = aborted }
+
+func (s Stream) GetHandoffAborted() bool { return s.message.HandoffAborted }
+
+func (s *Stream) SetRollbackCommands(active, passive string) {
+	s.message.ActiveRollbackCommand = active
+	s.message.PassiveRollbackCommand = passive
+}
+
+func (s Stream) GetActiveRollbackCommand() string { return s.message.ActiveRollbackCommand }
+
+func (s Stream) GetPassiveRollbackCommand() string { return s.message.PassiveRollbackCommand }
 
 // SetIsSuccessfullyCompleted sets the is successfully completed
 func (s *Stream) SetIsSuccessfullyCompleted(isSuccessfullyCompleted bool) {
@@ -207,6 +216,8 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.ThisNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
 	data.ThisNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
+	data.ThisNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ThisNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
 
 	// Peer node (passive)
 	data.PeerNodeName = s.message.PassiveNodeInfo.Hostname
@@ -215,6 +226,18 @@ func (s *Stream) buildHookTemplateDataForActiveNode(isPreFailover bool, rpcURL s
 	data.PeerNodePassiveIdentityPubkey = s.message.PassiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
 	data.PeerNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
+	data.PeerNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.PeerNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ToNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.FromNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.HandoffStrategy = s.message.HandoffStrategy
+	data.VoteHistoryWillBeTransferred = s.message.VoteHistoryWillBeTransferred
+	data.VoteHistoryFile = s.message.ActiveNodeInfo.VoteHistoryFile
+	data.VoteHistoryImportFile = s.message.ActiveNodeInfo.VoteHistoryImportFile
 
 	return data
 }
@@ -243,6 +266,8 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.ThisNodeClientVersion = s.message.PassiveNodeInfo.ClientVersion
 	data.ThisNodeClientVersionLocalRPC = s.message.PassiveNodeInfo.ClientVersionRPC
 	data.ThisNodeRPCAddress = rpcURL
+	data.ThisNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.ThisNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
 
 	// Peer node (active)
 	data.PeerNodeName = s.message.ActiveNodeInfo.Hostname
@@ -251,6 +276,18 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 	data.PeerNodePassiveIdentityPubkey = s.message.ActiveNodeInfo.Identities.Passive.PubKey()
 	data.PeerNodeClientVersion = s.message.ActiveNodeInfo.ClientVersion
 	data.PeerNodeClientVersionLocalRPC = s.message.ActiveNodeInfo.ClientVersionRPC
+	data.PeerNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.PeerNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.FromNodeClientFamily = s.message.ActiveNodeInfo.ClientFamily
+	data.ToNodeClientFamily = s.message.PassiveNodeInfo.ClientFamily
+	data.FromNodeIsNativeFiredancer = s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsNativeFiredancer = s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.FromNodeIsAgaveDerived = !s.message.ActiveNodeInfo.IsNativeFiredancer
+	data.ToNodeIsAgaveDerived = !s.message.PassiveNodeInfo.IsNativeFiredancer
+	data.HandoffStrategy = s.message.HandoffStrategy
+	data.VoteHistoryWillBeTransferred = s.message.VoteHistoryWillBeTransferred
+	data.VoteHistoryFile = s.message.PassiveNodeInfo.VoteHistoryFile
+	data.VoteHistoryImportFile = s.message.PassiveNodeInfo.VoteHistoryImportFile
 
 	return data
 }
@@ -258,20 +295,21 @@ func (s *Stream) buildHookTemplateDataForPassiveNode(isPreFailover bool, rpcURL 
 // ConfirmFailover is called by the passive node to proceed with the failover
 // it shows confirmation message and waits for user to confirm. once confirmed
 // it allows the stream to proceed and the active node begins setting identity
-// and tower file sync
+// and vote-history transfer
 func (s *Stream) ConfirmFailover(failoverHooks hooks.FailoverHooks, rollback hooks.RollbackConfig, activeRPCURL, passiveRPCURL string, autoConfirm bool) (err error) {
 	data := PlanData{
-		IsDryRun:            s.message.IsDryRunFailover,
-		SkipTowerSync:       s.message.SkipTowerSync,
-		ActiveNodeInfo:      s.message.ActiveNodeInfo,
-		PassiveNodeInfo:     s.message.PassiveNodeInfo,
-		AppVersion:          pkgconstants.AppVersion,
-		Hooks:               failoverHooks,
-		Rollback:            rollback,
-		ActivePreHookData:   s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
-		ActivePostHookData:  s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
-		PassivePreHookData:  s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
-		PassivePostHookData: s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
+		IsDryRun:                s.message.IsDryRunFailover,
+		HandoffStrategy:         s.message.HandoffStrategy,
+		ActiveNodeInfo:          s.message.ActiveNodeInfo,
+		PassiveNodeInfo:         s.message.PassiveNodeInfo,
+		AppVersion:              pkgconstants.AppVersion,
+		VotingMonitoringEnabled: s.message.VotingMonitoringEnabled,
+		Hooks:                   failoverHooks,
+		Rollback:                rollback,
+		ActivePreHookData:       s.buildHookTemplateDataForActiveNode(true, activeRPCURL),
+		ActivePostHookData:      s.buildHookTemplateDataForActiveNode(false, activeRPCURL),
+		PassivePreHookData:      s.buildHookTemplateDataForPassiveNode(true, passiveRPCURL),
+		PassivePostHookData:     s.buildHookTemplateDataForPassiveNode(false, passiveRPCURL),
 	}
 
 	rendered, err := RenderFailoverPlan(data)
@@ -322,20 +360,18 @@ func (s *Stream) GetFailoverSlotsDuration() uint64 {
 // BuildSummaryData builds a SummaryData from the current stream message state.
 // Call this after the failover is complete and all timing fields are set.
 func (s *Stream) BuildSummaryData() SummaryData {
-	stateFileSize := int64(len(s.message.ActiveNodeInfo.TowerFileBytes))
-	if s.message.ActiveNodeInfo.Consensus == "alpenglow" {
-		stateFileSize = s.message.ActiveNodeInfo.TowerFileSizeBytes
-	}
+	stateFileSize := s.message.ActiveNodeInfo.VoteHistoryFileSizeBytes
 	return SummaryData{
-		IsDryRun:      s.message.IsDryRunFailover,
-		SkipTowerSync: s.message.SkipTowerSync,
+		IsDryRun:              s.message.IsDryRunFailover,
+		Voting:                s.message.Voting,
+		SuccessfullyCompleted: s.message.IsSuccessfullyCompleted,
 
 		OrigActiveNode:  s.message.ActiveNodeInfo,
 		OrigPassiveNode: s.message.PassiveNodeInfo,
 
 		OrigActiveSetIdentityDuration:  s.message.ActiveNodeSetIdentityEndTime.Sub(s.message.ActiveNodeSetIdentityStartTime),
-		TowerSyncDuration:              s.message.PassiveNodeSyncTowerFileEndTime.Sub(s.message.ActiveNodeSyncTowerFileStartTime),
-		TowerFileSizeBytes:             stateFileSize,
+		HistorySyncDuration:            s.message.PassiveNodeSyncVoteHistoryEndTime.Sub(s.message.ActiveNodeSyncVoteHistoryStartTime),
+		VoteHistoryFileSizeBytes:       stateFileSize,
 		OrigPassiveSetIdentityDuration: s.message.PassiveNodeSetIdentityEndTime.Sub(s.message.PassiveNodeSetIdentityStartTime),
 		TotalDuration:                  s.GetFailoverDuration(),
 
@@ -355,14 +391,14 @@ func (s *Stream) SetActiveNodeSetIdentityEndTime() {
 	s.message.ActiveNodeSetIdentityEndTime = time.Now()
 }
 
-// SetActiveNodeSyncTowerFileStartTime sets the active node sync tower file start time
-func (s *Stream) SetActiveNodeSyncTowerFileStartTime() {
-	s.message.ActiveNodeSyncTowerFileStartTime = time.Now()
+// SetActiveNodeSyncVoteHistoryStartTime sets the active node transfer vote history start time
+func (s *Stream) SetActiveNodeSyncVoteHistoryStartTime() {
+	s.message.ActiveNodeSyncVoteHistoryStartTime = time.Now()
 }
 
-// SetActiveNodeSyncTowerFileEndTime sets the active node sync tower file end time
-func (s *Stream) SetActiveNodeSyncTowerFileEndTime() {
-	s.message.ActiveNodeSyncTowerFileEndTime = time.Now()
+// SetActiveNodeSyncVoteHistoryEndTime sets the active node transfer vote history end time
+func (s *Stream) SetActiveNodeSyncVoteHistoryEndTime() {
+	s.message.ActiveNodeSyncVoteHistoryEndTime = time.Now()
 }
 
 // SetPassiveNodeSetIdentityStartTime sets the passive node set identity start time
@@ -375,111 +411,7 @@ func (s *Stream) SetPassiveNodeSetIdentityEndTime() {
 	s.message.PassiveNodeSetIdentityEndTime = time.Now()
 }
 
-// SetPassiveNodeSyncTowerFileEndTime sets the passive node sync tower file end time
-func (s *Stream) SetPassiveNodeSyncTowerFileEndTime() {
-	s.message.PassiveNodeSyncTowerFileEndTime = time.Now()
-}
-
-// PullActiveIdentityVoteCreditsSample pulls a sample of the vote credits for the active identity
-func (s *Stream) PullActiveIdentityVoteCreditsSample(solanaRPCClient solana.ClientInterface) (err error) {
-	identityPubkey := s.message.ActiveNodeInfo.Identities.Active.PubKey()
-
-	// fetch current state of vote account from its pubkey
-	voteAccount, creditRank, err := solanaRPCClient.GetCreditRankedVoteAccountFromPubkey(identityPubkey)
-	if err != nil {
-		return fmt.Errorf("failed to get vote accounts: %w", err)
-	}
-
-	// initialize the credit samples for the identity if it doesn't exist
-	if _, ok := s.message.CreditSamples[identityPubkey]; !ok {
-		s.message.CreditSamples[identityPubkey] = make([]CreditsSample, 0)
-	}
-
-	// take sample
-	sample := &CreditsSample{
-		Timestamp: time.Now(),
-		VoteRank:  creditRank,
-	}
-
-	// find compute credits
-	if len(voteAccount.EpochCredits) > 0 {
-		// Calculate credits as the difference between current and previous epoch credits.
-		// Alpenglow vote accounts can carry math.MaxUint64 sentinels; treat those (and
-		// any underflow) as 0 rather than overflowing the sample.
-		lastIndex := len(voteAccount.EpochCredits) - 1
-		currentCredits := voteAccount.EpochCredits[lastIndex][1]
-		previousCredits := uint64(0)
-		if lastIndex > 0 {
-			previousCredits = voteAccount.EpochCredits[lastIndex-1][1]
-		}
-		if currentCredits != math.MaxUint64 && previousCredits != math.MaxUint64 && currentCredits >= previousCredits {
-			sample.Credits = int(currentCredits - previousCredits)
-		}
-	}
-
-	// append sample to the identity's credit samples
-	s.message.CreditSamples[identityPubkey] = append(
-		s.message.CreditSamples[identityPubkey],
-		*sample,
-	)
-
-	return nil
-}
-
-// PullActiveIdentityVoteCreditsSamples pulls a sample of the vote credits for the active identity
-func (s *Stream) PullActiveIdentityVoteCreditsSamples(solanaRPCClient solana.ClientInterface, nSamples int, interval time.Duration) (err error) {
-	if nSamples == 0 {
-		return nil
-	}
-	if nSamples == 1 {
-		return s.PullActiveIdentityVoteCreditsSample(solanaRPCClient)
-	}
-
-	// multiple samples may take some time so show a spinner to keep you patient
-	var sp *spinner.Spinner
-	sp = spinner.New().Title(style.RenderPinkString(fmt.Sprintf("pulling %d vote credit samples %s apart...", nSamples, interval)))
-
-	sampleCount := 0
-	sp.ActionWithErr(func(ctx context.Context) error {
-		for range make([]struct{}, nSamples) {
-			sampleCount++
-			sp.Title(style.RenderPinkString(fmt.Sprintf("pulling vote credit sample %d of %d...", sampleCount, nSamples)))
-			err := s.PullActiveIdentityVoteCreditsSample(solanaRPCClient)
-			if err != nil {
-				sp.Title(style.RenderErrorStringf("failed to pull vote credits sample: %s", err))
-				continue
-			}
-			sample := s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()][len(s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()])-1]
-			if len(s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()]) > 2 {
-				// check and warn if credits are not increasing between the last two samples
-				previousSample := s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()][len(s.message.CreditSamples[s.message.ActiveNodeInfo.Identities.Active.PubKey()])-2]
-				if sample.Credits <= previousSample.Credits {
-					sp.Title(style.RenderWarningStringf(
-						"vote credits are not increasing between samples %d and %d - this is not good",
-						sampleCount-1,
-						sampleCount,
-					))
-				}
-			}
-			time.Sleep(interval)
-			sp.Title(style.RenderPinkString(fmt.Sprintf("pulled vote credit sample %d of %d - credits: %d, rank: %d...", sampleCount, nSamples, sample.Credits, sample.VoteRank)))
-		}
-		log.Debugf("Pulled %d vote credit samples", sampleCount)
-		return nil
-	})
-	return sp.Run()
-}
-
-// GetVoteCreditRankDifference returns the difference in vote credit rank between the first and last sample
-func (s *Stream) GetVoteCreditRankDifference() (difference, first, last int, err error) {
-	pubkey := s.message.ActiveNodeInfo.Identities.Active.PubKey()
-	samples := s.message.CreditSamples[pubkey]
-	if len(samples) < 2 {
-		return 0, 0, 0, fmt.Errorf("not enough vote credit samples to calculate difference")
-	}
-	first = samples[0].VoteRank
-	last = samples[len(samples)-1].VoteRank
-	difference = last - first
-	// invert the difference (lower number is better)
-	return -1 * difference, first, last, nil
+// SetPassiveNodeSyncVoteHistoryEndTime sets the passive node transfer vote history end time
+func (s *Stream) SetPassiveNodeSyncVoteHistoryEndTime() {
+	s.message.PassiveNodeSyncVoteHistoryEndTime = time.Now()
 }

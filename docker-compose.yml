@@ -10,25 +10,3 @@ services:
     command: hot-reload
     volumes:
       - ./:/usr/local/go/src/github.com/sol-strategies/${APP_NAME}
-  build:
-    image: ${APP_NAME}:local
-    build:
-      context: .
-      args:
-        APP_NAME: ${APP_NAME}
-        APP_VERSION: ${APP_VERSION}
-        BUILD_OS_ARCH_LIST: ${BUILD_OS_ARCH_LIST}
-        CI: ${CI}
-    command: build
-    volumes:
-      - ./bin:/usr/local/go/src/github.com/sol-strategies/${APP_NAME}/bin
-  test:
-    image: ${APP_NAME}:local
-    build:
-      context: .
-      args:
-        APP_NAME: ${APP_NAME}
-        APP_VERSION: ${APP_VERSION}
-        BUILD_OS_ARCH_LIST: ${BUILD_OS_ARCH_LIST}
-        CI: ${CI}
-    command: test
