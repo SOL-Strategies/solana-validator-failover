@@ -17,7 +17,7 @@ printf '%s' "$APP_VERSION" > pkg/constants/app.version
 
 for platform in $BUILD_OS_ARCH_LIST; do
     case "$platform" in
-        linux-amd64|linux-arm64|darwin-amd64|darwin-arm64) ;;
+        linux-amd64|linux-arm64) ;;
         *) printf 'Unsupported build platform: %s\n' "$platform" >&2; exit 1 ;;
     esac
     output="$BUILD_DIR/$APP_NAME-$APP_VERSION-$platform"

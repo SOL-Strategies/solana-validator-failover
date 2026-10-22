@@ -34,7 +34,7 @@ build:
 	BUILD_DIR="$(BUILD_DIR)" APP_NAME="$(APP_NAME)" APP_VERSION="$(APP_VERSION)" BUILD_OS_ARCH_LIST="$(BUILD_OS_ARCH_LIST)" PACKAGE=false ./scripts/build.sh
 
 build-all:
-	BUILD_DIR="$(BUILD_DIR)" APP_NAME="$(APP_NAME)" APP_VERSION="$(APP_VERSION)" BUILD_OS_ARCH_LIST="linux-amd64 linux-arm64 darwin-amd64 darwin-arm64" PACKAGE=true ./scripts/build.sh
+	BUILD_DIR="$(BUILD_DIR)" APP_NAME="$(APP_NAME)" APP_VERSION="$(APP_VERSION)" BUILD_OS_ARCH_LIST="linux-amd64 linux-arm64" PACKAGE=true ./scripts/build.sh
 
 smoke-test: prepare-version
 	@mkdir -p "$(BUILD_DIR)/.smoke"
