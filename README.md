@@ -495,7 +495,7 @@ When `rollback.enabled: true`, the pre-failover plan shows the rollback commands
 
 ## Troubleshooting local RPC capabilities
 
-If startup reports `local RPC method getAccountInfo is unavailable` with JSON-RPC code `-32601`, enable full RPC on the local validator: `--full-rpc-api` for Agave/Jito, or `full_api = true` under `[rpc]` for Frankendancer (`fdctl`). Restart the validator with the updated configuration before retrying failover. This check runs in Tower mode too; it reads local accounts to verify the configured consensus mode. A cluster RPC URL cannot replace this local check.
+If startup reports `local RPC method getAccountInfo is unavailable` with JSON-RPC code `-32601`, enable full RPC with `--full-rpc-api` for Agave/Jito. For native Firedancer or an RPC proxy, verify that the configured local endpoint supports the required method. Correct the local RPC configuration before retrying failover. Local account reads verify Alpenglow consensus; a cluster RPC URL cannot replace this local check.
 
 For native Firedancer, verify its `[tiles.rpc]` endpoint and method support for the installed version. If using a proxy, ensure it routes and permits the required methods. An unavailable method does not establish that a particular startup flag is missing. If `getAgGenesisCert` is unavailable, also verify that the validator version supports that Alpenglow RPC method.
 

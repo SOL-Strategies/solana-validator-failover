@@ -144,7 +144,7 @@ func TestValidateConsensusMissingAccountMethod(t *testing.T) {
 				err := ValidateConsensus(srv.URL, mode)
 				require.ErrorContains(t, err, "local RPC method getAccountInfo is unavailable")
 				require.ErrorContains(t, err, "--full-rpc-api")
-				require.ErrorContains(t, err, "[rpc] full_api = true")
+				require.ErrorContains(t, err, "native Firedancer or an RPC proxy")
 				var rpcErr *jsonrpc.RPCError
 				require.ErrorAs(t, err, &rpcErr)
 				require.Equal(t, -32601, rpcErr.Code)

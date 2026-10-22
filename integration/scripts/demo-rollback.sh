@@ -38,7 +38,7 @@ echo "mock armed: london's next set-identity-to-active will fail → destination
 disown $!
 
 # Run london (passive) — auto-confirm with --yes so we focus on the rollback output.
-# VALIDATOR_NAME=london is needed so fdctl-mock.sh identifies itself to /fail-check.
+# VALIDATOR_NAME=london is needed so firedancer-mock.sh identifies itself to /fail-check.
 VALIDATOR_NAME=london exec "$BINARY" run \
     --config integration/configs/demo-london.yaml \
     --not-a-drill --yes

@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
             # Match native Firedancer's CLI contract: set-identity does not
             # accept Agave's --force option.
             if printf '%s\n' "$@" | grep -qx -- "--force"; then
-                echo "fdctl-mock set-identity: unknown option --force" >&2
+                echo "firedancer-mock set-identity: unknown option --force" >&2
                 exit 1
             fi
             # Notify mock-solana of the identity change if MOCK_SOLANA_URL and VALIDATOR_NAME are set.
@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
                     # Check if this set-identity-to-active call should be simulated as failing.
                     FAIL_CHECK=$(curl -sf "${MOCK_SOLANA_URL}/fail-check?validator=${VALIDATOR_NAME}&action=set_active" 2>/dev/null || echo '{"fail":false}')
                     if echo "$FAIL_CHECK" | grep -q '"fail":true'; then
-                        echo "fdctl-mock set-identity: SIMULATED FAILURE for ${VALIDATOR_NAME} (fail_next_set_active was set)" >&2
+                        echo "firedancer-mock set-identity: SIMULATED FAILURE for ${VALIDATOR_NAME} (fail_next_set_active was set)" >&2
                         exit 1
                     fi
                     ACTION="set_active"
@@ -65,11 +65,11 @@ while [[ $# -gt 0 ]]; do
                     -d "{\"action\":\"${ACTION}\",\"target\":\"${VALIDATOR_NAME}\"}" \
                     "${MOCK_SOLANA_URL}/action" >/dev/null 2>&1 || true
             fi
-            echo "fdctl-mock set-identity: $@"
+            echo "firedancer-mock set-identity: $@"
             exit 0
             ;;
         *)
-            echo "fdctl-mock exec: $@"
+            echo "firedancer-mock exec: $@"
             exit 0
             ;;
     esac

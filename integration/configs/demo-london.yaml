@@ -1,5 +1,5 @@
 validator:
-  bin: ./scripts/fdctl-mock.sh
+  bin: ./scripts/firedancer-mock.sh
   client:
     family: firedancer
   cluster: integration

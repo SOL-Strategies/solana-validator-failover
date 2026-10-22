@@ -18,7 +18,7 @@ func WrapLocalRPCMethodError(method string, err error) error {
 		return err
 	}
 
-	hint := "for Agave/Jito, start the local validator with --full-rpc-api; for Frankendancer (fdctl), set [rpc] full_api = true; for native Firedancer or an RPC proxy, verify the configured local endpoint supports this method"
+	hint := "for Agave/Jito, start the local validator with --full-rpc-api; for native Firedancer or an RPC proxy, verify the configured local endpoint supports this method"
 	if method == "getAgGenesisCert" {
 		hint += "; ensure the validator version supports the Alpenglow getAgGenesisCert RPC method"
 	}

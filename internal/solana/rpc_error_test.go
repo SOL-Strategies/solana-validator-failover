@@ -19,7 +19,7 @@ func TestWrapLocalRPCMethodError(t *testing.T) {
 			err := WrapLocalRPCMethodError(method, fmt.Errorf("request failed: %w", original))
 			require.ErrorContains(t, err, "local RPC method "+method+" is unavailable")
 			require.ErrorContains(t, err, "--full-rpc-api")
-			require.ErrorContains(t, err, "[rpc] full_api = true")
+			require.NotContains(t, err.Error(), "Frankendancer")
 			require.ErrorContains(t, err, "native Firedancer or an RPC proxy")
 			require.ErrorIs(t, err, original)
 			var rpcErr *jsonrpc.RPCError
