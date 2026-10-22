@@ -208,6 +208,8 @@ func runHandoff(t *testing.T, sourceFamily, destinationFamily, mode string) {
 		if mode == "stale-history" {
 			require.Equal(t, passive[1], string(destinationRole))
 			require.ErrorContains(t, clientErr, "refusing stale vote history")
+			require.ErrorContains(t, serverErr, "refusing stale vote history")
+			require.True(t, server.failoverStream.message.TerminalAck)
 		} else if mode != "activation-failed" {
 			require.Equal(t, active, string(destinationRole))
 		}

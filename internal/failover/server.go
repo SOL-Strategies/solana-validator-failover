@@ -557,7 +557,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	s.failoverStream.SetHandoffStrategy(HandoffStrategyVoteHistory)
 	if s.failoverStream.GetHandoffAborted() {
 		s.failoverStream.SetRollbackRequired(true)
-		_ = s.failoverStream.Encode()
+		s.sendTerminalResult(stream)
 		return
 	}
 	if s.isDryRunFailover {
@@ -591,7 +591,7 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 
 	if s.failoverStream.GetHandoffAborted() {
 		s.failoverStream.SetRollbackRequired(true)
-		_ = s.failoverStream.Encode()
+		s.sendTerminalResult(stream)
 		return
 	}
 
@@ -700,6 +700,14 @@ func (s *Server) handleFailoverStream(stream *quic.Stream) {
 	} else {
 		fmt.Println(style.RenderMessageString(strings.TrimLeft(rendered, "\n")))
 	}
+	s.sendTerminalResult(stream)
+}
+
+// sendTerminalResult keeps the connection open until the peer consumes the final
+// outcome, including source aborts before destination activation.
+func (s *Server) sendTerminalResult(stream *quic.Stream) {
+	s.failoverStream.message.TerminalResult = true
+	s.failoverStream.message.TerminalAck = false
 	if err := s.failoverStream.Encode(); err != nil {
 		s.failoverStream.SetIsSuccessfullyCompleted(false)
 		s.failoverStream.SetErrorMessagef("cannot send terminal result: %v", err)

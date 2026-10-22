@@ -248,11 +248,19 @@ func (c *Client) Start() (startErr error) {
 		c.failoverStream.SetHandoffAborted(true)
 		c.failoverStream.SetErrorMessage(reason)
 		if err := c.failoverStream.Encode(); err != nil {
-			c.setFailure("failed to acknowledge handoff abort", err)
+			c.setFailure(reason, fmt.Errorf("failed to send handoff abort: %w", err))
 			return
 		}
 		if err := c.failoverStream.Decode(); err != nil {
-			c.setFailure("failed to receive abort acknowledgement", err)
+			c.setFailure(reason, fmt.Errorf("failed to receive abort acknowledgement: %w", err))
+			return
+		}
+		if !c.failoverStream.message.TerminalResult {
+			c.setFailure(reason, fmt.Errorf("receiver did not send a terminal abort acknowledgement"))
+			return
+		}
+		if err := c.acknowledgeTerminalResult(); err != nil {
+			c.setFailure(reason, err)
 			return
 		}
 		c.setFailure(message, failure)
@@ -518,28 +526,8 @@ func (c *Client) Start() (startErr error) {
 	}
 
 	if c.failoverStream.message.TerminalResult {
-		c.failoverStream.message.TerminalAck = true
-		if err := c.failoverStream.Encode(); err != nil {
-			c.setFailure("failed to acknowledge terminal result", err)
-			return
-		}
-		// Do not let the CLI exit while its ACK is merely queued in QUIC. The
-		// receiver closes with code zero only after consuming that acknowledgement.
-		timer := time.NewTimer(5 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-c.Conn.Context().Done():
-			var appErr *quic.ApplicationError
-			cause := context.Cause(c.Conn.Context())
-			if !errors.As(cause, &appErr) || appErr.ErrorCode != 0 {
-				c.setFailure("receiver did not confirm terminal acknowledgement", cause)
-				return
-			}
-		case <-timer.C:
-			c.setFailure("timed out confirming terminal acknowledgement", nil)
-			return
-		case <-c.ctx.Done():
-			c.setFailure("terminal acknowledgement cancelled", c.ctx.Err())
+		if err := c.acknowledgeTerminalResult(); err != nil {
+			c.setFailure("failed to confirm terminal result", err)
 			return
 		}
 	}
@@ -848,5 +836,30 @@ func (c *Client) tryQUICConnection() error {
 	c.Conn = conn
 	c.transport = tr
 	c.packetConn = wrapped
+	return nil
+}
+
+// acknowledgeTerminalResult waits until the receiver has consumed our ACK.
+func (c *Client) acknowledgeTerminalResult() error {
+	c.failoverStream.message.TerminalAck = true
+	if err := c.failoverStream.Encode(); err != nil {
+		return fmt.Errorf("failed to acknowledge terminal result: %w", err)
+	}
+	// Do not let the CLI exit while its ACK is merely queued in QUIC. The
+	// receiver closes with code zero only after consuming that acknowledgement.
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-c.Conn.Context().Done():
+		var appErr *quic.ApplicationError
+		cause := context.Cause(c.Conn.Context())
+		if !errors.As(cause, &appErr) || appErr.ErrorCode != 0 {
+			return fmt.Errorf("receiver did not confirm terminal acknowledgement: %w", cause)
+		}
+	case <-timer.C:
+		return fmt.Errorf("timed out confirming terminal acknowledgement")
+	case <-c.ctx.Done():
+		return fmt.Errorf("terminal acknowledgement cancelled: %w", c.ctx.Err())
+	}
 	return nil
 }
