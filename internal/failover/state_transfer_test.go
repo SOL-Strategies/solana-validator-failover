@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestVoteHistoryTransfer(t *testing.T) {
@@ -56,3 +57,55 @@ func TestVoteHistoryTransferPreservesExistingOnTruncation(t *testing.T) {
 		t.Fatal("existing history changed")
 	}
 }
+
+func TestVoteHistoryAfterDemotion(t *testing.T) {
+	demotedAt := time.Now()
+	write := func(t *testing.T, path string, mtime time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("vote history"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name    string
+		bin     *time.Time
+		bak     *time.Time
+		want    string
+		wantErr bool
+	}{
+		{name: "agave keeps the bin", bin: ptr(demotedAt.Add(time.Second)), want: ".bin"},
+		{name: "bin wins over a bak", bin: ptr(demotedAt.Add(time.Second)), bak: ptr(demotedAt.Add(-time.Hour)), want: ".bin"},
+		{name: "firedancer saves a fresh bak", bak: ptr(demotedAt.Add(time.Millisecond)), want: ".bin.bak"},
+		{name: "stale bak from an earlier switch", bak: ptr(demotedAt.Add(-time.Second)), wantErr: true},
+		{name: "no vote history at all", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "vote_history-test.bin")
+			if tt.bin != nil {
+				write(t, path, *tt.bin)
+			}
+			if tt.bak != nil {
+				write(t, path+".bak", *tt.bak)
+			}
+			got, err := voteHistoryAfterDemotion(path, demotedAt)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error, got %s", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != filepath.Join(filepath.Dir(path), "vote_history-test"+tt.want) {
+				t.Fatalf("got %s, want suffix %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func ptr(t time.Time) *time.Time { return &t }

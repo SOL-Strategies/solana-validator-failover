@@ -224,6 +224,7 @@ func (c *Client) Start() {
 		style.RenderPinkString(" identity"))
 
 	c.failoverStream.SetActiveNodeSetIdentityStartTime()
+	demotedAt := time.Now()
 
 	err = utils.RunCommand(utils.RunCommandParams{
 		CommandSlice: strings.Split(c.failoverStream.GetActiveNodeInfo().SetIdentityCommand, " "),
@@ -240,7 +241,18 @@ func (c *Client) Start() {
 	if c.activeNodeInfo.Consensus == "alpenglow" {
 		c.logger.Infof("sending vote history to %s", c.failoverStream.GetPassiveNodeInfo().Hostname)
 		c.failoverStream.SetActiveNodeSyncTowerFileStartTime()
-		if err := c.failoverStream.sendStateFile(c.activeNodeInfo.TowerFile); err != nil {
+		voteHistoryFile := c.activeNodeInfo.TowerFile
+		if !c.failoverStream.GetIsDryRunFailover() {
+			voteHistoryFile, err = voteHistoryAfterDemotion(c.activeNodeInfo.TowerFile, demotedAt)
+			if err != nil {
+				c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
+				return
+			}
+		}
+		if voteHistoryFile != c.activeNodeInfo.TowerFile {
+			c.logger.Infof("sending the vote history the demotion saved: %s", voteHistoryFile)
+		}
+		if err := c.failoverStream.sendStateFile(voteHistoryFile); err != nil {
 			c.logger.Error("vote-history transfer failed after demotion; check both validator identities before recovery", "err", err)
 			return
 		}

@@ -2,14 +2,43 @@ package failover
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 const stateChunkSize = 1024 * 1024
+
+// voteHistoryAfterDemotion returns the vote history file to send once the
+// active node has switched to its passive identity.
+//
+// Agave leaves vote_history-<id>.bin in place. Firedancer (>= v26.10.3) writes
+// the identity's file one last time when set-identity switches away from it and
+// then renames it to vote_history-<id>.bin.bak, so after the demotion the .bak
+// is the identity's latest vote history and the .bin is gone. A .bak older than
+// the demotion is left over from an earlier switch and is never sent.
+func voteHistoryAfterDemotion(path string, demotedAt time.Time) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	bak := path + ".bak"
+	info, err := os.Stat(bak)
+	if err != nil {
+		return "", fmt.Errorf("no vote history at %s or %s: %w", path, bak, err)
+	}
+	if info.ModTime().Before(demotedAt) {
+		return "", fmt.Errorf("%s was last written at %s, before the demotion at %s; refusing to send a stale vote history",
+			bak, info.ModTime().UTC().Format(time.RFC3339Nano), demotedAt.UTC().Format(time.RFC3339Nano))
+	}
+	return bak, nil
+}
 
 func stateLabel(consensus string) string {
 	if consensus == "alpenglow" {
