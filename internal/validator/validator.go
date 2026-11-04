@@ -446,7 +446,7 @@ func (v *Validator) configureRPCClientWithURLs(localRPCURL, solanaClusterName, c
 
 	// An explicit ordered cluster RPC URL list overrides the singular URL and
 	// built-in endpoint. This allows operators to provide redundant endpoints.
-	solanaClusterRPCURLs, err := resolveClusterRPCURLs(solanaClusterName, clusterRPCURL, clusterRPCURLs)
+	solanaClusterRPCURLs, labels, err := resolveClusterRPCEndpoints(solanaClusterName, clusterRPCURL, clusterRPCURLs)
 	if err != nil {
 		return err
 	}
@@ -459,7 +459,7 @@ func (v *Validator) configureRPCClientWithURLs(localRPCURL, solanaClusterName, c
 	v.logger.Debug("rpc client configured",
 		"cluster", solanaClusterName,
 		"local_rpc_url", rpcURLForLog(localRPCURL),
-		"cluster_rpc_urls", redactRPCURLs(solanaClusterRPCURLs),
+		"cluster_rpc_urls", clusterRPCURLsForLog(solanaClusterRPCURLs, labels),
 	)
 
 	v.RPCAddress = localRPCURL
@@ -467,6 +467,7 @@ func (v *Validator) configureRPCClientWithURLs(localRPCURL, solanaClusterName, c
 		LocalRPCURL:         localRPCURL,
 		ClusterRPCURL:       solanaClusterRPCURLs[0],
 		ClusterRPCURLs:      solanaClusterRPCURLs,
+		ClusterRPCURLLabels: labels,
 		AverageSlotDuration: avgSlotDuration,
 	})
 
@@ -490,6 +491,11 @@ func resolveClusterRPCURL(solanaClusterName, clusterRPCURL string) (string, erro
 }
 
 func resolveClusterRPCURLs(solanaClusterName, clusterRPCURL string, clusterRPCURLs []string) ([]string, error) {
+	endpoints, _, err := resolveClusterRPCEndpoints(solanaClusterName, clusterRPCURL, clusterRPCURLs)
+	return endpoints, err
+}
+
+func clusterRPCSources(solanaClusterName, clusterRPCURL string, clusterRPCURLs []string) ([]string, error) {
 	if len(clusterRPCURLs) > 0 {
 		resolved := make([]string, 0, len(clusterRPCURLs))
 		seen := make(map[string]struct{}, len(clusterRPCURLs))
@@ -520,14 +526,6 @@ func resolveClusterRPCURLs(solanaClusterName, clusterRPCURL string, clusterRPCUR
 		solanaClusterName,
 		strings.Join(constants.SolanaClusterNames, ", "),
 	)
-}
-
-func redactRPCURLs(urls []string) []string {
-	redacted := make([]string, len(urls))
-	for i, rawURL := range urls {
-		redacted[i] = rpcURLForLog(rawURL)
-	}
-	return redacted
 }
 
 // configureBin ensures the validator binary exists and sets it
