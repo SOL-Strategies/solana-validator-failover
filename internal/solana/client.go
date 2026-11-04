@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -69,13 +70,17 @@ type Client struct {
 	averageSlotDuration time.Duration
 	localRPCURL         string
 	networkRPCURL       string
+	clusterRPCURLs      []string
+	clusterRPCURLLabels map[string]string
 }
 
 // NewClientParams is the parameters for creating a new client
 type NewClientParams struct {
-	LocalRPCURL         string
-	ClusterRPCURL       string
-	ClusterRPCURLs      []string
+	LocalRPCURL    string
+	ClusterRPCURL  string
+	ClusterRPCURLs []string
+	// ClusterRPCURLLabels supplies safe source labels for file-backed endpoints.
+	ClusterRPCURLLabels map[string]string
 	AverageSlotDuration time.Duration // average slot duration, defaults to 200ms
 }
 
@@ -106,6 +111,8 @@ func NewRPCClient(params NewClientParams) ClientInterface {
 		averageSlotDuration: avgSlotDuration,
 		localRPCURL:         params.LocalRPCURL,
 		networkRPCURL:       firstString(clusterRPCURLs),
+		clusterRPCURLs:      append([]string(nil), clusterRPCURLs...),
+		clusterRPCURLLabels: maps.Clone(params.ClusterRPCURLLabels),
 	}
 }
 
@@ -164,7 +171,7 @@ func (c *Client) networkGetSlot(ctx context.Context, commitment rpc.CommitmentTy
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
+		errs = append(errs, c.networkEndpointError(i, err))
 	}
 	return 0, networkExhaustedError("getSlot", errs)
 }
@@ -179,7 +186,7 @@ func (c *Client) networkGetVoteAccounts(ctx context.Context, opts *rpc.GetVoteAc
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
+		errs = append(errs, c.networkEndpointError(i, err))
 	}
 	return nil, networkExhaustedError("getVoteAccounts", errs)
 }
@@ -194,7 +201,7 @@ func (c *Client) networkGetClusterNodes(ctx context.Context) ([]*rpc.GetClusterN
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
+		errs = append(errs, c.networkEndpointError(i, err))
 	}
 	return nil, networkExhaustedError("getClusterNodes", errs)
 }
@@ -209,7 +216,7 @@ func (c *Client) networkGetEpochInfo(ctx context.Context, commitment rpc.Commitm
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
+		errs = append(errs, c.networkEndpointError(i, err))
 	}
 	return nil, networkExhaustedError("getEpochInfo", errs)
 }
@@ -224,7 +231,7 @@ func (c *Client) networkGetLeaderSchedule(ctx context.Context) (rpc.GetLeaderSch
 		if err == nil {
 			return result, nil
 		}
-		errs = append(errs, fmt.Errorf("endpoint %d: %w", i+1, err))
+		errs = append(errs, c.networkEndpointError(i, err))
 	}
 	return nil, networkExhaustedError("getLeaderSchedule", errs)
 }

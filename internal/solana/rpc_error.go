@@ -1,6 +1,7 @@
 package solana
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -23,4 +24,29 @@ func WrapLocalRPCMethodError(method string, err error) error {
 		hint += "; ensure the validator version supports the Alpenglow getAgGenesisCert RPC method"
 	}
 	return fmt.Errorf("local RPC method %s is unavailable: %w; %s", method, err, hint)
+}
+
+// networkEndpointError strips untrusted transport and server messages for secret URLs.
+// Raw errors must not be wrapped: their messages and unwrap chains may expose secrets.
+func (c *Client) networkEndpointError(index int, err error) error {
+	label := ""
+	if index < len(c.clusterRPCURLs) {
+		label = c.clusterRPCURLLabels[c.clusterRPCURLs[index]]
+	}
+	if label == "" {
+		return fmt.Errorf("endpoint %d: %w", index+1, err)
+	}
+	var safe error
+	var rpcErr *jsonrpc.RPCError
+	switch {
+	case errors.Is(err, context.Canceled):
+		safe = context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		safe = context.DeadlineExceeded
+	case errors.As(err, &rpcErr):
+		safe = fmt.Errorf("JSON-RPC failure (code %d)", rpcErr.Code)
+	default:
+		safe = errors.New("RPC failure")
+	}
+	return fmt.Errorf("endpoint %d (%s): %w", index+1, label, safe)
 }

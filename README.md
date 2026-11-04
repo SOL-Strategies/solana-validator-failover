@@ -224,10 +224,17 @@ validator:
   # cluster_rpc_urls is an optional ordered failover list. Each request tries
   # these URLs in order and fails only after all endpoints are exhausted. When
   # set, it takes precedence over cluster_rpc_url.
-  # cluster_rpc_url: <solana_compatible_rpc_endpoint>
+  # Both settings accept HTTP/HTTPS URLs or absolute local file:// URIs.
+  # Files supply the first non-blank, non-comment (#) line as one HTTP/HTTPS URL.
+  # Files are read at startup; invalid/unreadable files fail startup. Restart svf
+  # after changing a file. Diagnostics use the file URI to protect URL secrets.
+  # cluster_rpc_url: file:///run/secrets/primary_rpc
   # cluster_rpc_urls:
-  #   - <primary_solana_compatible_rpc_endpoint>
+  #   - file:///run/secrets/primary_rpc
   #   - <secondary_solana_compatible_rpc_endpoint>
+  # Example /run/secrets/primary_rpc contents:
+  #   # Private endpoint
+  #   https://provider.example.com/?api-key=secret
 
   # optional display name used in failover plans, logs, and hook templates
   # defaults to OS hostname if not set
